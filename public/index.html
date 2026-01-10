@@ -113,8 +113,8 @@
                     <span>Monte Carlo</span>
                 </a>
                 <a href="#inputs" class="nav-item" data-view="inputs">
-                    <i data-lucide="sliders-horizontal"></i>
-                    <span>Inputs & Logic</span>
+                    <i data-lucide="database"></i>
+                    <span>Reference Data</span>
                 </a>
                 <a href="#models" class="nav-item" data-view="models">
                     <i data-lucide="database"></i>
@@ -130,8 +130,8 @@
                 <div class="view-header">
                     <h2>Valuation Dashboard</h2>
                     <button class="btn btn-primary" id="calculateBtn">
-                        <i data-lucide="calculator"></i>
-                        Calculate Valuation
+                        <i data-lucide="dice-6"></i>
+                        Run Monte Carlo Simulation
                     </button>
                 </div>
 
@@ -254,87 +254,237 @@
                 </div>
             </div>
 
-            <!-- Inputs View -->
+            <!-- Inputs View (Reference Data) -->
             <div id="inputs" class="view">
                 <div class="view-header">
-                    <h2>Valuation Inputs & Logic</h2>
+                    <h2>Reference Data</h2>
                 </div>
 
-                <div class="inputs-grid">
-                    <!-- Earth Inputs -->
-                    <div class="input-section">
-                        <h3><i data-lucide="globe"></i> Earth Operations</h3>
-                        <div class="form-group">
-                            <label>Starlink Penetration Rate</label>
-                            <input type="number" id="starlinkPenetration" value="0.15" step="0.01" min="0" max="1">
-                            <span class="input-hint">Annual growth rate for Starlink capacity</span>
-                        </div>
-                        <div class="form-group">
-                            <label>Bandwidth Price Decline</label>
-                            <input type="number" id="bandwidthPriceDecline" value="0.10" step="0.01" min="0" max="1">
-                            <span class="input-hint">Annual price decline rate</span>
-                        </div>
-                        <div class="form-group">
-                            <label>Launch Volume (Base)</label>
-                            <input type="number" id="launchVolume" value="100" step="1" min="0">
-                            <span class="input-hint">Annual launches</span>
-                        </div>
-                        <div class="form-group">
-                            <label>Launch Price Decline</label>
-                            <input type="number" id="launchPriceDecline" value="0.05" step="0.01" min="0" max="1">
-                            <span class="input-hint">Annual price decline rate</span>
-                        </div>
-                    </div>
+                <!-- Reference Data Tabs -->
+                <div class="insights-tabs" style="display: flex; gap: 8px; padding: 0 var(--spacing-lg); margin-bottom: var(--spacing-md); border-bottom: 1px solid var(--border-color);">
+                    <button class="insights-tab active" data-tab="basic-inputs">
+                        <i data-lucide="sliders-horizontal"></i>
+                        <span>Basic Parameters</span>
+                    </button>
+                    <button class="insights-tab" data-tab="advanced-earth">
+                        <i data-lucide="rocket"></i>
+                        <span>Advanced Earth Operations</span>
+                    </button>
+                    <button class="insights-tab" data-tab="advanced-mars">
+                        <i data-lucide="planet"></i>
+                        <span>Advanced Mars Operations</span>
+                    </button>
+                    <button class="insights-tab" data-tab="tam-data">
+                        <i data-lucide="table"></i>
+                        <span>Earth Bandwidth TAM</span>
+                    </button>
+                    <button class="insights-tab" data-tab="tam-methodology">
+                        <i data-lucide="book-open"></i>
+                        <span>TAM Methodology</span>
+                    </button>
+                </div>
 
-                    <!-- Mars Inputs -->
-                    <div class="input-section">
-                        <h3><i data-lucide="globe"></i> Mars Operations</h3>
-                        <div class="form-group">
-                            <label>First Colony Year</label>
-                            <input type="number" id="firstColonyYear" value="2030" step="1" min="2025" max="2050">
-                            <span class="input-hint">Year of first permanent settlement</span>
-                        </div>
-                        <div class="form-group">
-                            <label>Transport Cost Decline</label>
-                            <input type="number" id="transportCostDecline" value="0.20" step="0.01" min="0" max="1">
-                            <span class="input-hint">Annual cost reduction rate</span>
-                        </div>
-                        <div class="form-group">
-                            <label>Population Growth Rate</label>
-                            <input type="number" id="populationGrowth" value="0.50" step="0.01" min="0" max="2">
-                            <span class="input-hint">Annual population growth</span>
-                        </div>
-                        <div class="form-group">
-                            <label>
-                                <input type="checkbox" id="industrialBootstrap" checked>
-                                Industrial Bootstrapping
-                            </label>
-                            <span class="input-hint">Self-sustaining industrial base</span>
-                        </div>
-                    </div>
+                <!-- Basic Parameters Tab Content -->
+                <div id="referenceTab-basic-inputs" class="insights-tab-content active">
+                        <div class="inputs-grid">
+                            <!-- Earth Inputs -->
+                            <div class="input-section">
+                                <h3><i data-lucide="globe"></i> Earth Operations</h3>
+                                <div class="form-group">
+                                    <label>Starlink Penetration Rate</label>
+                                    <input type="number" id="starlinkPenetration" value="0.15" step="0.01" min="0" max="1">
+                                    <span class="input-hint">Annual growth rate for Starlink capacity</span>
+                                </div>
+                                <div class="form-group">
+                                    <label>Bandwidth Price Decline</label>
+                                    <input type="number" id="bandwidthPriceDecline" value="0.10" step="0.01" min="0" max="1">
+                                    <span class="input-hint">Annual price decline rate</span>
+                                </div>
+                                <div class="form-group">
+                                    <label>Launch Volume (Base)</label>
+                                    <input type="number" id="launchVolume" value="100" step="1" min="0">
+                                    <span class="input-hint">Annual launches</span>
+                                </div>
+                                <div class="form-group">
+                                    <label>Launch Price Decline</label>
+                                    <input type="number" id="launchPriceDecline" value="0.05" step="0.01" min="0" max="1">
+                                    <span class="input-hint">Annual price decline rate</span>
+                                </div>
+                            </div>
 
-                    <!-- Financial Inputs -->
-                    <div class="input-section">
-                        <h3><i data-lucide="dollar-sign"></i> Financial Parameters</h3>
-                        <div class="form-group">
-                            <label>Discount Rate</label>
-                            <input type="number" id="discountRate" value="0.12" step="0.01" min="0" max="1">
-                            <span class="input-hint">WACC / required return</span>
+                            <!-- Mars Inputs -->
+                            <div class="input-section">
+                                <h3><i data-lucide="globe"></i> Mars Operations</h3>
+                                <div class="form-group">
+                                    <label>First Colony Year</label>
+                                    <input type="number" id="firstColonyYear" value="2030" step="1" min="2025" max="2050">
+                                    <span class="input-hint">Year of first permanent settlement</span>
+                                </div>
+                                <div class="form-group">
+                                    <label>Transport Cost Decline</label>
+                                    <input type="number" id="transportCostDecline" value="0.20" step="0.01" min="0" max="1">
+                                    <span class="input-hint">Annual cost reduction rate</span>
+                                </div>
+                                <div class="form-group">
+                                    <label>Population Growth Rate</label>
+                                    <input type="number" id="populationGrowth" value="0.50" step="0.01" min="0" max="2">
+                                    <span class="input-hint">Annual population growth</span>
+                                </div>
+                                <div class="form-group">
+                                    <label>
+                                        <input type="checkbox" id="industrialBootstrap" checked>
+                                        Industrial Bootstrapping
+                                    </label>
+                                    <span class="input-hint">Self-sustaining industrial base</span>
+                                </div>
+                            </div>
+
+                            <!-- Financial Inputs -->
+                            <div class="input-section">
+                                <h3><i data-lucide="dollar-sign"></i> Financial Parameters</h3>
+                                <div class="form-group">
+                                    <label>Discount Rate</label>
+                                    <input type="number" id="discountRate" value="0.12" step="0.01" min="0" max="1">
+                                    <span class="input-hint">WACC / required return</span>
+                                </div>
+                                <div class="form-group">
+                                    <label>Dilution Factor</label>
+                                    <input type="number" id="dilutionFactor" value="0.15" step="0.01" min="0" max="1">
+                                    <span class="input-hint">Expected future dilution</span>
+                                </div>
+                                <div class="form-group">
+                                    <label>Terminal Growth Rate</label>
+                                    <input type="number" id="terminalGrowth" value="0.03" step="0.01" min="0" max="0.1">
+                                    <span class="input-hint">Perpetual growth rate</span>
+                                </div>
+                            </div>
                         </div>
-                        <div class="form-group">
-                            <label>Dilution Factor</label>
-                            <input type="number" id="dilutionFactor" value="0.15" step="0.01" min="0" max="1">
-                            <span class="input-hint">Expected future dilution</span>
-                        </div>
-                        <div class="form-group">
-                            <label>Terminal Growth Rate</label>
-                            <input type="number" id="terminalGrowth" value="0.03" step="0.01" min="0" max="0.1">
-                            <span class="input-hint">Perpetual growth rate</span>
+                </div>
+
+                <!-- Advanced Earth Operations Tab Content -->
+                <div id="referenceTab-advanced-earth" class="insights-tab-content" style="display: none;">
+                        <div class="inputs-grid">
+                            <!-- Starship Configuration -->
+                            <div class="input-section">
+                                <h3><i data-lucide="rocket"></i> Starship Configuration</h3>
+                                <div class="form-group">
+                                    <label>Starship Reusability Year</label>
+                                    <input type="number" id="starshipReusabilityYear" value="2026" step="1" min="2020" max="2035">
+                                    <span class="input-hint">Year Starship becomes reusable</span>
+                                </div>
+                                <div class="form-group">
+                                    <label>Starship Commercial Viability Year</label>
+                                    <input type="number" id="starshipCommercialViabilityYear" value="2025" step="1" min="2020" max="2035">
+                                    <span class="input-hint">Year Starship becomes commercially viable</span>
+                                </div>
+                                <div class="form-group">
+                                    <label>Starship Payload Capacity (2030) - kg</label>
+                                    <input type="number" id="starshipPayloadCapacity" value="75000" step="1000" min="50000" max="250000">
+                                    <span class="input-hint">Payload capacity in kilograms by 2030</span>
+                                </div>
+                                <div class="form-group">
+                                    <label>Maximum Annual Rocket Production Increase</label>
+                                    <input type="number" id="maxRocketProductionIncrease" value="0.25" step="0.05" min="0" max="2">
+                                    <span class="input-hint">Maximum annual increase in rockets manufactured (as multiplier)</span>
+                                </div>
+                            </div>
+
+                            <!-- Wright's Law Parameters -->
+                            <div class="input-section">
+                                <h3><i data-lucide="trending-down"></i> Wright's Law Parameters</h3>
+                                <div class="form-group">
+                                    <label>Wright's Law - Turnaround Time %</label>
+                                    <input type="number" id="wrightsLawTurnaroundTime" value="0.05" step="0.01" min="0" max="0.5">
+                                    <span class="input-hint">% applied to turnaround time per cumulative doubling in upmass</span>
+                                </div>
+                                <div class="form-group">
+                                    <label>Wright's Law - Launch Cost/kg %</label>
+                                    <input type="number" id="wrightsLawLaunchCost" value="0.05" step="0.01" min="0" max="0.5">
+                                    <span class="input-hint">% applied to launch cost/kg per cumulative doubling in upmass</span>
+                                </div>
+                                <div class="form-group">
+                                    <label>Wright's Law - Satellite GBPS/kg %</label>
+                                    <input type="number" id="wrightsLawSatelliteGBPS" value="0.07" step="0.01" min="0" max="0.3">
+                                    <span class="input-hint">% applied to satellite GBPS/kg per cumulative doubling in bandwidth</span>
+                                </div>
+                            </div>
+
+                            <!-- Market & Operations -->
+                            <div class="input-section">
+                                <h3><i data-lucide="bar-chart"></i> Market & Operations</h3>
+                                <div class="form-group">
+                                    <label>Realized Bandwidth TAM Multiplier</label>
+                                    <input type="number" id="realizedBandwidthTAMMultiplier" value="0.5" step="0.05" min="0" max="2">
+                                    <span class="input-hint">Realized TAM relative to modeled Bandwidth TAM</span>
+                                </div>
+                                <div class="form-group">
+                                    <label>% Starship Launches for Starlink (2030)</label>
+                                    <input type="number" id="starshipLaunchesForStarlink" value="0.9" step="0.01" min="0" max="1">
+                                    <span class="input-hint">Percentage of Starship launches dedicated to Starlink vs customers</span>
+                                </div>
+                                <div class="form-group">
+                                    <label>Non-Starlink Launch Market Growth Rate</label>
+                                    <input type="number" id="nonStarlinkLaunchMarketGrowth" value="0.01" step="0.01" min="0" max="0.2">
+                                    <span class="input-hint">Annual growth rate of non-Starlink launch market</span>
+                                </div>
+                                <div class="form-group">
+                                    <label>IRR Threshold for Earth→Mars Switch</label>
+                                    <input type="number" id="irrThresholdEarthToMars" value="0" step="0.01" min="0" max="0.2">
+                                    <span class="input-hint">IRR % threshold to switch focus from Earth to Mars operations</span>
+                                </div>
+                                <div class="form-group">
+                                    <label>Cash Buffer %</label>
+                                    <input type="number" id="cashBufferPercent" value="0.1" step="0.05" min="0" max="0.5">
+                                    <span class="input-hint">Percentage of start-of-year cash that is buffered</span>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
 
-                <div class="actions-bar">
+                <!-- Advanced Mars Operations Tab Content -->
+                <div id="referenceTab-advanced-mars" class="insights-tab-content" style="display: none;">
+                        <div class="inputs-grid">
+                            <!-- Optimus Robot Configuration -->
+                            <div class="input-section">
+                                <h3><i data-lucide="bot"></i> Optimus Robot Configuration</h3>
+                                <div class="form-group">
+                                    <label>Optimus Cost (2026) - $</label>
+                                    <input type="number" id="optimusCost2026" value="50000" step="1000" min="10000" max="500000">
+                                    <span class="input-hint">Cost of a Mars-capable Optimus robot in 2026</span>
+                                </div>
+                                <div class="form-group">
+                                    <label>Optimus Annual Cost Decline</label>
+                                    <input type="number" id="optimusAnnualCostDecline" value="0.05" step="0.01" min="0" max="0.3">
+                                    <span class="input-hint">Annual cost reduction rate for Optimus</span>
+                                </div>
+                                <div class="form-group">
+                                    <label>Optimus Productivity Multiplier</label>
+                                    <input type="number" id="optimusProductivityMultiplier" value="0.25" step="0.05" min="0.1" max="3">
+                                    <span class="input-hint">Productivity per labor hour relative to US construction worker</span>
+                                </div>
+                                <div class="form-group">
+                                    <label>Optimus Learning Rate Productivity Improvement</label>
+                                    <input type="number" id="optimusLearningRate" value="0.05" step="0.01" min="0" max="1">
+                                    <span class="input-hint">Learning rate for productivity improvement over time</span>
+                                </div>
+                            </div>
+
+                            <!-- Mars Payload Configuration -->
+                            <div class="input-section">
+                                <h3><i data-lucide="package"></i> Mars Payload Configuration</h3>
+                                <div class="form-group">
+                                    <label>% Mars Payload: Optimus vs Tooling</label>
+                                    <input type="number" id="marsPayloadOptimusVsTooling" value="0.01" step="0.05" min="0" max="1">
+                                    <span class="input-hint">Percentage of Mars-bound payload weight that is Optimus robots vs tooling for Optimus to use</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Actions Bar (shown only on input tabs) -->
+                <div id="referenceDataActionsBar" class="actions-bar" style="margin-top: var(--spacing-lg); padding-top: var(--spacing-lg); border-top: 1px solid var(--border-color); display: none;">
                     <button class="btn btn-primary" id="saveInputsBtn">
                         <i data-lucide="save"></i>
                         Save Inputs
@@ -343,6 +493,124 @@
                         <i data-lucide="rotate-ccw"></i>
                         Reset to Defaults
                     </button>
+                </div>
+
+                <!-- Earth Bandwidth TAM Tab Content -->
+                <div id="referenceTab-tam-data" class="insights-tab-content" style="display: none;">
+                    <div class="section">
+                        <h3><i data-lucide="signal"></i> Earth Bandwidth TAM Lookup Table</h3>
+                        <p style="color: var(--text-secondary); font-size: 14px; margin-bottom: var(--spacing-md);">
+                            Total Addressable Market data for bandwidth pricing. <strong>Values are generated</strong> using the Satellite Broadband Revenue Demand model methodology. Used in bandwidth price calculations via lookup and interpolation.
+                        </p>
+                        
+                        <div class="table-container" style="max-height: 600px; overflow-y: auto;">
+                            <table class="data-table" id="tamDataTable">
+                                <thead>
+                                    <tr>
+                                        <th style="position: sticky; top: 0; background: var(--bg-secondary); z-index: 10;">Key (Capacity)</th>
+                                        <th style="position: sticky; top: 0; background: var(--bg-secondary); z-index: 10;">TAM Value</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="tamDataTableBody">
+                                    <tr>
+                                        <td colspan="2" class="empty-state">Loading TAM data...</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                        
+                        <div style="margin-top: var(--spacing-md); padding: var(--spacing-md); background: rgba(0, 102, 204, 0.1); border-left: 3px solid #0066cc; border-radius: var(--radius);">
+                            <p id="tamDataNote" style="margin: 0; font-size: 14px; color: var(--text-secondary);">
+                                <strong>Note:</strong> Loading TAM data...
+                            </p>
+                        </div>
+                        
+                        <div class="actions-bar" style="margin-top: var(--spacing-lg);">
+                            <button class="btn btn-primary" id="regenerateTAMBtn">
+                                <i data-lucide="refresh-cw"></i>
+                                Regenerate TAM Data
+                            </button>
+                            <span id="tamRegenerateStatus" style="margin-left: var(--spacing-md); font-size: 14px; color: var(--text-secondary);"></span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- TAM Methodology Tab Content -->
+                <div id="referenceTab-tam-methodology" class="insights-tab-content" style="display: none;">
+                    <div class="section">
+                        <h3><i data-lucide="book-open"></i> Satellite Broadband Revenue Demand Model</h3>
+                        <p style="color: var(--text-secondary); font-size: 14px; margin-bottom: var(--spacing-md);">
+                            The Earth Bandwidth TAM lookup table is generated using the Satellite Broadband Revenue Demand model methodology. This model calculates potential revenue based on satellite capacity, geographic distribution, and market economics.
+                        </p>
+
+                        <div style="margin-bottom: var(--spacing-lg);">
+                            <h4 style="margin: 0 0 var(--spacing-md) 0; font-size: 16px; color: var(--text-primary);">
+                                <i data-lucide="settings"></i> Model Inputs
+                            </h4>
+                            <div style="background: var(--bg-secondary); padding: var(--spacing-md); border-radius: var(--radius); margin-bottom: var(--spacing-md);">
+                                <ul style="margin: 0; padding-left: 20px; color: var(--text-secondary); font-size: 14px; line-height: 1.8;">
+                                    <li><strong>Number of Satellites</strong> - Total satellites in constellation</li>
+                                    <li><strong>Downlink Bandwidth per Satellite</strong> - Bandwidth capacity per satellite</li>
+                                    <li><strong>Oversubscription Ratio</strong> - Ratio of potential users to available bandwidth (typically 10:1)</li>
+                                    <li><strong>Minimum Acceptable Bandwidth</strong> - Minimum bandwidth per user (~5 Mbps)</li>
+                                    <li><strong>Acceptable Price of Broadband as % of GNI per Capita</strong> - Maximum affordable price (typically 2%)</li>
+                                </ul>
+                            </div>
+                        </div>
+
+                        <div style="margin-bottom: var(--spacing-lg);">
+                            <h4 style="margin: 0 0 var(--spacing-md) 0; font-size: 16px; color: var(--text-primary);">
+                                <i data-lucide="git-branch"></i> Model Logic
+                            </h4>
+                            <div style="background: var(--bg-secondary); padding: var(--spacing-md); border-radius: var(--radius);">
+                                <ol style="margin: 0; padding-left: 20px; color: var(--text-secondary); font-size: 14px; line-height: 1.8;">
+                                    <li><strong>Total Bandwidth Calculation:</strong><br>
+                                        <code style="background: rgba(0,0,0,0.2); padding: 2px 6px; border-radius: 3px;">Bandwidth = Satellites × Downlink Bandwidth per Satellite</code>
+                                    </li>
+                                    <li><strong>Geographic Distribution:</strong><br>
+                                        Assumes satellites evenly distributed over globe.<br>
+                                        <code style="background: rgba(0,0,0,0.2); padding: 2px 6px; border-radius: 3px;">Bandwidth Available Over Each Country = Land Area as % of Earth × Total Bandwidth</code>
+                                    </li>
+                                    <li><strong>Potential Users Calculation:</strong><br>
+                                        <code style="background: rgba(0,0,0,0.2); padding: 2px 6px; border-radius: 3px;">Potential Rural Users = (Available Bandwidth / Minimum Bandwidth) × Oversubscription Ratio</code><br>
+                                        Constrained by actual rural population.
+                                    </li>
+                                    <li><strong>Household Conversion:</strong><br>
+                                        <code style="background: rgba(0,0,0,0.2); padding: 2px 6px; border-radius: 3px;">Number of Households = Potential Users / Average Household Size</code>
+                                    </li>
+                                    <li><strong>Acceptable Broadband Cost:</strong><br>
+                                        <code style="background: rgba(0,0,0,0.2); padding: 2px 6px; border-radius: 3px;">Acceptable Cost = GNI per Capita × Household Size × Acceptable Price %</code>
+                                    </li>
+                                    <li><strong>Revenue Calculation:</strong><br>
+                                        <code style="background: rgba(0,0,0,0.2); padding: 2px 6px; border-radius: 3px;">Potential Revenue = MIN(Acceptable Cost, Current Broadband Price) × Number of Households</code>
+                                    </li>
+                                    <li><strong>Urban Areas:</strong><br>
+                                        Same calculation repeated for urban areas and urban population.
+                                    </li>
+                                </ol>
+                            </div>
+                        </div>
+
+                        <div style="margin-bottom: var(--spacing-lg);">
+                            <h4 style="margin: 0 0 var(--spacing-md) 0; font-size: 16px; color: var(--text-primary);">
+                                <i data-lucide="info"></i> Data Generation
+                            </h4>
+                            <div style="padding: var(--spacing-md); background: rgba(0, 102, 204, 0.1); border-left: 3px solid #0066cc; border-radius: var(--radius);">
+                                <p style="margin: 0 0 var(--spacing-sm) 0; font-size: 14px; color: var(--text-secondary);">
+                                    <strong>Note:</strong> The TAM lookup table values are <strong>generated</strong> using this model methodology, not static input data. The model calculates potential revenue for capacity values ranging from 100,000 to 1,000,000,000 Gbps, creating a lookup table used in bandwidth price calculations.
+                                </p>
+                                <p style="margin: var(--spacing-sm) 0 0 0; font-size: 14px; color: var(--text-secondary);">
+                                    <strong>Source:</strong> Based on the Satellite Broadband Revenue Demand model methodology from GitHub. The model accounts for global satellite distribution, country-level demographics, GNI per capita, and broadband affordability constraints.
+                                </p>
+                            </div>
+                        </div>
+
+                        <div style="padding-top: var(--spacing-lg); border-top: 1px solid var(--border-color);">
+                            <p style="margin: 0; font-size: 14px; color: var(--text-secondary);">
+                                You can regenerate the TAM lookup table using the model methodology. Use the "Regenerate TAM Data" button in the "Earth Bandwidth TAM" tab.
+                            </p>
+                        </div>
+                    </div>
                 </div>
             </div>
 

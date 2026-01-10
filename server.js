@@ -8,6 +8,7 @@ const mongoose = require('mongoose');
 const fetch = require('node-fetch');
 const Mach33Lib = require('./mach33lib');
 const ValuationAlgorithms = require('./valuation-algorithms');
+const CalculationEngine = require('./calculation-engine');
 const FactorModelsService = require('./services/factor-models');
 
 const app = express();
@@ -35,14 +36,16 @@ mongoose.connect(atlasUri, {
 app.use(cors());
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
-app.use(express.static('public'));
-app.use('/css', express.static('css'));
-app.use('/js', express.static('js'));
+app.use(express.static(path.join(__dirname, 'public')));
+app.use('/css', express.static(path.join(__dirname, 'css')));
+app.use('/js', express.static(path.join(__dirname, 'js')));
+app.use('/data', express.static(path.join(__dirname, 'data')));
 
-// Load Excel data
+// Load Excel data (for validation/testing only, not for calculations)
 let excelData = null;
 let modelStructure = null;
-let valuationAlgorithms = null;
+let valuationAlgorithms = null; // Keep for validation/testing
+const calculationEngine = new CalculationEngine(); // Primary calculation engine
 const factorModelsService = new FactorModelsService();
 
 function loadData() {
@@ -259,11 +262,33 @@ app.get('/api/insights', (req, res) => {
   res.json(insights);
 });
 
-// Get scenarios
+// Get scenarios - load from database, fallback to defaults if none exist
 app.get('/api/scenarios', async (req, res) => {
   try {
-    // Return saved scenarios from database or default scenarios
-    const scenarios = {
+    // Load scenarios from database
+    const dbScenarios = await Scenario.find({ isActive: true }).lean();
+    
+    if (dbScenarios.length > 0) {
+      // Convert database scenarios to expected format
+      const scenarios = {};
+      dbScenarios.forEach(scenario => {
+        scenarios[scenario.key] = {
+          name: scenario.name,
+          description: scenario.description,
+          inputs: scenario.inputs,
+          _id: scenario._id,
+          isDefault: scenario.isDefault,
+          updatedAt: scenario.updatedAt
+        };
+      });
+      
+      console.log(`✓ Loaded ${dbScenarios.length} scenarios from database`);
+      return res.json({ success: true, data: scenarios });
+    }
+    
+    // Fallback: return default scenarios if database is empty
+    console.log('⚠️ No scenarios in database, using default scenarios');
+    const defaultScenarios = {
       bear: {
         name: 'Bear Case',
         description: 'Conservative assumptions',
@@ -332,10 +357,74 @@ app.get('/api/scenarios', async (req, res) => {
       }
     };
     
-    res.json({ success: true, data: scenarios });
+    res.json({ success: true, data: defaultScenarios });
   } catch (error) {
     console.error('Scenarios error:', error);
     res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Create or update scenario
+app.post('/api/scenarios', async (req, res) => {
+  try {
+    const { key, name, description, inputs } = req.body;
+    
+    if (!key || !name || !inputs) {
+      return res.status(400).json({
+        success: false,
+        error: 'Key, name, and inputs are required'
+      });
+    }
+    
+    const scenario = await Scenario.findOneAndUpdate(
+      { key },
+      {
+        key,
+        name,
+        description,
+        inputs,
+        updatedAt: new Date(),
+        updatedBy: req.headers['x-user-id'] || 'system'
+      },
+      { upsert: true, new: true }
+    );
+    
+    res.json({
+      success: true,
+      data: scenario
+    });
+  } catch (error) {
+    console.error('Error saving scenario:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// Get single scenario by key
+app.get('/api/scenarios/:key', async (req, res) => {
+  try {
+    const { key } = req.params;
+    const scenario = await Scenario.findOne({ key, isActive: true }).lean();
+    
+    if (!scenario) {
+      return res.status(404).json({
+        success: false,
+        error: `Scenario "${key}" not found`
+      });
+    }
+    
+    res.json({
+      success: true,
+      data: scenario
+    });
+  } catch (error) {
+    console.error('Error fetching scenario:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
   }
 });
 
@@ -349,8 +438,70 @@ const modelSchema = new mongoose.Schema({
   favorite: { type: Boolean, default: false }
 });
 
+// TAM Reference Data Schema
+const tamDataSchema = new mongoose.Schema({
+  name: { type: String, required: true, default: 'Earth Bandwidth TAM' },
+  description: String,
+  source: String,
+  range: String,
+  data: [{
+    key: { type: Number, required: true },
+    value: { type: Number, required: true }
+  }],
+  metadata: mongoose.Schema.Types.Mixed,
+  version: { type: Number, default: 1 },
+  isActive: { type: Boolean, default: true },
+  createdAt: { type: Date, default: Date.now },
+  updatedAt: { type: Date, default: Date.now },
+  createdBy: String,
+  updatedBy: String
+});
+
+// Index for faster lookups
+tamDataSchema.index({ name: 1, isActive: 1 });
+tamDataSchema.index({ 'data.key': 1 });
+
 // Use valuation_models collection (plural) from spacex_valuation database
 const ValuationModel = mongoose.models.ValuationModel || mongoose.model('ValuationModel', modelSchema, 'valuation_models');
+
+// TAM Data model - use tam_reference_data collection
+const TAMData = mongoose.models.TAMData || mongoose.model('TAMData', tamDataSchema, 'tam_reference_data');
+
+// Scenario Schema
+const scenarioSchema = new mongoose.Schema({
+  key: { type: String, required: true, unique: true }, // 'bear', 'base', 'bull'
+  name: { type: String, required: true },
+  description: String,
+  inputs: {
+    earth: {
+      starlinkPenetration: Number,
+      bandwidthPriceDecline: Number,
+      launchVolume: Number,
+      launchPriceDecline: Number
+    },
+    mars: {
+      firstColonyYear: Number,
+      transportCostDecline: Number,
+      populationGrowth: Number
+    },
+    financial: {
+      discountRate: Number,
+      dilutionFactor: Number,
+      terminalGrowth: Number
+    }
+  },
+  isActive: { type: Boolean, default: true },
+  isDefault: { type: Boolean, default: false }, // System default scenarios
+  createdAt: { type: Date, default: Date.now },
+  updatedAt: { type: Date, default: Date.now },
+  createdBy: String,
+  updatedBy: String
+});
+
+scenarioSchema.index({ key: 1, isActive: 1 });
+scenarioSchema.index({ isDefault: 1 });
+
+const Scenario = mongoose.models.Scenario || mongoose.model('Scenario', scenarioSchema, 'scenarios');
 
 // Get models
 app.get('/api/models', async (req, res) => {
@@ -1001,13 +1152,28 @@ app.post('/api/monte-carlo/run', async (req, res) => {
     console.log(`🎲 Starting Monte Carlo simulation: ${runs} runs`);
     const startTime = Date.now();
     
+    // Cache base values (load once, reuse for all iterations)
+    let cachedBaseModel = null;
+    let cachedBaseEarthValue = undefined;
+    let cachedBaseMarsValue = undefined;
+    
     // Run simulations
     const results = [];
     const totalValues = [];
     const earthValues = [];
     const marsValues = [];
     
+    // Progress logging every 500 iterations
+    const progressInterval = 500;
+    
     for (let i = 0; i < runs; i++) {
+      // Log progress every 500 iterations
+      if (i > 0 && i % progressInterval === 0) {
+        const elapsed = (Date.now() - startTime) / 1000;
+        const rate = i / elapsed;
+        const remaining = (runs - i) / rate;
+        console.log(`  Progress: ${i}/${runs} (${(i/runs*100).toFixed(1)}%) - ETA: ${remaining.toFixed(1)}s`);
+      }
       // Generate random inputs
       const randomInputs = generateRandomInputs(baseInputs, simDistributions);
       
@@ -1016,54 +1182,141 @@ app.post('/api/monte-carlo/run', async (req, res) => {
       let earthValue = null;
       let marsValue = null;
       
-      if (valuationAlgorithms) {
-        try {
-          // For now, use base scenario calculations
-          // In a full implementation, we'd pass custom inputs to algorithms
-          earthValue = valuationAlgorithms.calculateEarthValuation('base');
-          marsValue = valuationAlgorithms.calculateMarsValuation('base');
+      // Use optimized calculation logic for Monte Carlo
+      // Cache base model and values to avoid repeated DB queries
+      try {
+        // Load base model once (first iteration only)
+        if (!cachedBaseModel) {
+          cachedBaseModel = await ValuationModel.findOne().sort({ createdAt: -1 }).lean();
+        }
+        const baseModel = cachedBaseModel || {};
+        const baseResults = baseModel?.results || {};
+        
+        // Load base values once (first iteration only)
+        if (cachedBaseEarthValue === undefined || cachedBaseMarsValue === undefined) {
+          // Use calculation engine (not spreadsheet) to calculate base values
+          try {
+            // Calculate from inputs using calculation engine
+            const totalEnterpriseValue = calculationEngine.calculateTotalEnterpriseValue(baseInputs, null);
+            const earthComponent = calculationEngine.calculateEarthValuation(baseInputs, null);
+            const marsComponent = calculationEngine.calculateMarsValuation(baseInputs);
+            
+            cachedBaseEarthValue = totalEnterpriseValue; // Use total as base
+            cachedBaseMarsValue = marsComponent; // Keep Mars separate for multiplier logic
+            
+            console.log(`✓ Monte Carlo base values from calculation engine:`);
+            console.log(`  Total Enterprise Value (B13): ${totalEnterpriseValue?.toFixed(2)}B`);
+            console.log(`  Earth component (O153): ${earthComponent?.toFixed(2)}B`);
+            console.log(`  Mars component: ${marsComponent?.toFixed(2)}B`);
+          } catch (error) {
+            console.warn(`⚠️ Calculation engine failed:`, error.message);
+          }
           
-          // Apply multipliers based on input changes (simplified approach)
+          // Fallback if algorithms didn't work
+          if (cachedBaseEarthValue === undefined || cachedBaseMarsValue === undefined) {
+            const spreadsheetEarth = getEarthValuesFromSpreadsheet('base');
+            const spreadsheetMars = getMarsValuesFromSpreadsheet('base');
+            
+            cachedBaseEarthValue = cachedBaseEarthValue !== undefined ? cachedBaseEarthValue : 
+                             baseResults.earth?.adjustedValue || 
+                             spreadsheetEarth?.adjustedValue || 
+                             baseResults.total?.breakdown?.earth || 
+                             6739;
+            cachedBaseMarsValue = cachedBaseMarsValue !== undefined ? cachedBaseMarsValue : 
+                           baseResults.mars?.adjustedValue || 
+                           spreadsheetMars?.adjustedValue || 
+                           baseResults.total?.breakdown?.mars || 
+                           8.8;
+            console.log(`✓ Monte Carlo base values (fallback): Earth=${cachedBaseEarthValue?.toFixed(2)}B, Mars=${cachedBaseMarsValue?.toFixed(2)}B`);
+          }
+        }
+        
+        // cachedBaseEarthValue now contains TOTAL enterprise value (B13), not just Earth component
+        // We need to apply multipliers to the total value based on input changes
+        const baseTotalValue = cachedBaseEarthValue; // This is B13 (total enterprise value)
+        const baseMarsValue = cachedBaseMarsValue; // Mars component for reference
+        
+        // Calculate multipliers based on input changes
+        // CRITICAL: Compare random inputs to baseInputs (passed in), not baseModel inputs
+        let totalMultiplier = 1.0;
+        
+        // Earth adjustments affect total value
+        if (randomInputs.earth) {
           const basePenetration = baseInputs.earth?.starlinkPenetration || 0.15;
-          const randomPenetration = randomInputs.earth?.starlinkPenetration || basePenetration;
-          if (basePenetration > 0) {
-            earthValue *= (randomPenetration / basePenetration);
+          if (randomInputs.earth.starlinkPenetration !== undefined && basePenetration > 0) {
+            totalMultiplier *= randomInputs.earth.starlinkPenetration / basePenetration;
           }
           
           const baseLaunchVolume = baseInputs.earth?.launchVolume || 150;
-          const randomLaunchVolume = randomInputs.earth?.launchVolume || baseLaunchVolume;
-          if (baseLaunchVolume > 0) {
-            earthValue *= (randomLaunchVolume / baseLaunchVolume);
+          if (randomInputs.earth.launchVolume !== undefined && baseLaunchVolume > 0) {
+            totalMultiplier *= randomInputs.earth.launchVolume / baseLaunchVolume;
           }
-          
+        }
+        
+        // Mars adjustments affect total value
+        if (randomInputs.mars) {
           const baseColonyYear = baseInputs.mars?.firstColonyYear || 2030;
-          const randomColonyYear = randomInputs.mars?.firstColonyYear || baseColonyYear;
-          const yearsDiff = baseColonyYear - randomColonyYear;
-          marsValue *= (1 + yearsDiff * 0.1); // 10% per year difference
+          if (randomInputs.mars.firstColonyYear !== undefined) {
+            const yearsDiff = baseColonyYear - randomInputs.mars.firstColonyYear;
+            totalMultiplier *= 1 + (yearsDiff * 0.1); // 10% per year earlier/later
+          }
           
           const basePopGrowth = baseInputs.mars?.populationGrowth || 0.15;
-          const randomPopGrowth = randomInputs.mars?.populationGrowth || basePopGrowth;
-          if (basePopGrowth > 0) {
-            marsValue *= (randomPopGrowth / basePopGrowth);
+          if (randomInputs.mars.populationGrowth !== undefined && basePopGrowth > 0) {
+            totalMultiplier *= randomInputs.mars.populationGrowth / basePopGrowth;
           }
           
-          // Apply discount rate adjustment
-          const baseDiscountRate = baseInputs.financial?.discountRate || 0.12;
-          const randomDiscountRate = randomInputs.financial?.discountRate || baseDiscountRate;
-          const pvAdjustment = Math.pow(1 + baseDiscountRate, 10) / Math.pow(1 + randomDiscountRate, 10);
-          earthValue *= pvAdjustment;
-          marsValue *= pvAdjustment;
-          
-        } catch (error) {
-          console.warn(`⚠️ Iteration ${i + 1} calculation error:`, error.message);
-          // Use fallback values
-          earthValue = 6739; // Base Earth value
-          marsValue = 8.8; // Base Mars value
+          // Only apply bootstrap penalty if it changed from base
+          const baseBootstrap = baseInputs.mars?.industrialBootstrap !== false; // Default true
+          if (randomInputs.mars.industrialBootstrap === false && baseBootstrap) {
+            totalMultiplier *= 0.1; // Massive reduction if no bootstrap
+          }
         }
-      } else {
-        // Fallback if algorithms not available
-        earthValue = 6739;
-        marsValue = 8.8;
+        
+        // Financial adjustments affect total value
+        if (randomInputs.financial) {
+          const baseDiscountRate = baseInputs.financial?.discountRate || 0.12;
+          if (randomInputs.financial.discountRate !== undefined) {
+            // Higher discount rate reduces PV
+            const pvReduction = Math.pow(1 + baseDiscountRate, 10) / Math.pow(1 + randomInputs.financial.discountRate, 10);
+            totalMultiplier *= pvReduction;
+          }
+        }
+        
+        // Calculate final total value (this is what Column M represents)
+        const totalValue = baseTotalValue * totalMultiplier;
+        
+        // Split total value proportionally for Earth/Mars reporting
+        // Use the ratio from base values to split
+        const baseEarthComponent = baseTotalValue - (baseMarsValue || 0);
+        const earthRatio = baseTotalValue > 0 ? baseEarthComponent / baseTotalValue : 0.99;
+        const marsRatio = baseTotalValue > 0 ? (baseMarsValue || 0) / baseTotalValue : 0.01;
+        
+        earthValue = totalValue * earthRatio;
+        marsValue = totalValue * marsRatio;
+        
+        // Log first iteration for debugging
+        if (i === 0) {
+          console.log(`🔍 Monte Carlo iteration 1 debug:`, {
+            baseEarthValue: baseEarthValue?.toFixed(2),
+            baseMarsValue: baseMarsValue?.toFixed(2),
+            earthMultiplier: earthMultiplier.toFixed(4),
+            marsMultiplier: marsMultiplier.toFixed(4),
+            earthValue: earthValue?.toFixed(2),
+            marsValue: marsValue?.toFixed(2),
+            totalValue: (earthValue + marsValue)?.toFixed(2)
+          });
+        }
+        
+        // Safety checks
+        if (!isFinite(earthValue) || earthValue < 0) earthValue = 0;
+        if (!isFinite(marsValue) || marsValue < 0) marsValue = 0;
+        
+      } catch (error) {
+        console.warn(`⚠️ Iteration ${i + 1} calculation error:`, error.message);
+        // Fallback to cached base values
+        earthValue = cachedBaseEarthValue || 6739;
+        marsValue = cachedBaseMarsValue || 8.8;
       }
       
       const totalValue = earthValue + marsValue;
@@ -1100,7 +1353,17 @@ app.post('/api/monte-carlo/run', async (req, res) => {
     const elapsedSeconds = (Date.now() - startTime) / 1000;
     
     console.log(`✓ Monte Carlo simulation complete: ${runs} runs in ${elapsedSeconds.toFixed(2)}s`);
+    console.log(`  Base values used: Earth=${cachedBaseEarthValue?.toFixed(2)}B, Mars=${cachedBaseMarsValue?.toFixed(2)}B`);
     console.log(`  Total Value: mean=$${totalStats.mean.toFixed(2)}B, stdDev=$${totalStats.stdDev.toFixed(2)}B`);
+    console.log(`  Earth Value: mean=$${earthStats.mean.toFixed(2)}B, stdDev=$${earthStats.stdDev.toFixed(2)}B`);
+    console.log(`  Mars Value: mean=$${marsStats.mean.toFixed(2)}B, stdDev=$${marsStats.stdDev.toFixed(2)}B`);
+    
+    // Debug: Check if values seem too low
+    if (totalStats.mean < 500) {
+      console.warn(`⚠️ WARNING: Monte Carlo mean ($${totalStats.mean.toFixed(2)}B) seems low. Expected ~$1200B.`);
+      console.warn(`   Base Earth: ${cachedBaseEarthValue?.toFixed(2)}B, Base Mars: ${cachedBaseMarsValue?.toFixed(2)}B`);
+      console.warn(`   Check if base values or multipliers are correct.`);
+    }
     
     res.json({
       success: true,
@@ -2213,92 +2476,116 @@ app.post('/api/scenarios/calculate', async (req, res) => {
   try {
     const { inputs: baseInputs } = req.body;
     
-    // Get the most recent model to use as base for calculations
-    const baseModel = await ValuationModel.findOne().sort({ createdAt: -1 }).lean();
-    const baseResults = baseModel?.results || {};
+    // Use calculation engine (not spreadsheet) to calculate values from inputs
+    let totalEnterpriseValue = null;
+    let earthComponent = null;
+    let marsComponent = null;
+    
+    try {
+      // Calculate from inputs using calculation engine
+      totalEnterpriseValue = calculationEngine.calculateTotalEnterpriseValue(baseInputs, null);
+      earthComponent = calculationEngine.calculateEarthValuation(baseInputs, null);
+      marsComponent = calculationEngine.calculateMarsValuation(baseInputs);
+      
+      console.log(`✓ Scenario calculation from calculation engine:`);
+      console.log(`  Total Enterprise Value (B13): ${totalEnterpriseValue?.toFixed(2)}B`);
+      console.log(`  Earth component (O153): ${earthComponent?.toFixed(2)}B`);
+      console.log(`  Mars component: ${marsComponent?.toFixed(2)}B`);
+    } catch (error) {
+      console.warn(`⚠️ Calculation engine failed:`, error.message);
+      // Fallback to database if calculation engine fails
+      const baseModel = await ValuationModel.findOne().sort({ createdAt: -1 }).lean();
+      const baseResults = baseModel?.results || {};
+      
+      if (baseResults.total?.breakdown) {
+        totalEnterpriseValue = (baseResults.total?.breakdown?.earth || 0) + (baseResults.total?.breakdown?.mars || 0);
+        earthComponent = baseResults.total?.breakdown?.earth || 0;
+        marsComponent = baseResults.total?.breakdown?.mars || 0;
+      } else {
+        earthComponent = baseResults.earth?.adjustedValue || baseResults.earth?.terminalValue || 0;
+        marsComponent = baseResults.mars?.adjustedValue || baseResults.mars?.optionValue || 0;
+        totalEnterpriseValue = earthComponent + marsComponent;
+      }
+      
+      console.log(`⚠️ Using database fallback values:`);
+      console.log(`  Total: ${totalEnterpriseValue?.toFixed(2)}B`);
+      console.log(`  Earth: ${earthComponent?.toFixed(2)}B`);
+      console.log(`  Mars: ${marsComponent?.toFixed(2)}B`);
+    }
     
     // Frontend expects scenarios with keys: earth2030, earthMars2030, earthMars2040
     // These represent different time horizons and scope (Earth only vs Earth+Mars)
     const results = {};
     
-    // 2030 Earth Only - uses base model's Earth results
-    if (baseResults.earth) {
-      const earthValue = baseResults.earth.adjustedValue || baseResults.earth.terminalValue || baseResults.total?.breakdown?.earth || 0;
-      results.earth2030 = {
-        name: '2030 Earth Only',
-        inputs: baseInputs || baseModel?.inputs || {},
-        results: {
-          enterpriseValueFromEBITDA: earthValue,
-          terminalValue: earthValue,
-          enterpriseValue: earthValue
-        },
-        earthResults: {
-          enterpriseValueFromEBITDA: earthValue,
-          terminalValue: earthValue,
-          enterpriseValue: earthValue,
-          ...baseResults.earth
-        },
-        marsResults: null
-      };
-    }
+    // Use total enterprise value (B13) for Earth scenarios
+    // This matches what Monte Carlo uses and what Column M references
+    const earthValue2030 = totalEnterpriseValue || earthComponent || 0;
+    const marsValue2030 = marsComponent || 0;
     
-    // 2030 Earth & Mars - uses base model's Earth + Mars results
-    if (baseResults.earth && baseResults.mars) {
-      const earthValue = baseResults.earth.adjustedValue || baseResults.earth.terminalValue || baseResults.total?.breakdown?.earth || 0;
-      const marsValue = baseResults.mars.adjustedValue || baseResults.mars.optionValue || baseResults.total?.breakdown?.mars || 0;
-      results.earthMars2030 = {
-        name: '2030 Earth & Mars',
-        inputs: baseInputs || baseModel?.inputs || {},
-        results: {
-          total: earthValue + marsValue,
-          earth: earthValue,
-          mars: marsValue
-        },
-        earthResults: {
-          enterpriseValueFromEBITDA: earthValue,
-          terminalValue: earthValue,
-          enterpriseValue: earthValue,
-          ...baseResults.earth
-        },
-        marsResults: {
-          expectedValue: marsValue,
-          adjustedValue: marsValue,
-          optionValue: marsValue,
-          ...baseResults.mars
-        }
-      };
-    }
+    // 2030 Earth Only - uses total enterprise value (B13)
+    results.earth2030 = {
+      name: '2030 Earth Only',
+      inputs: baseInputs || {},
+      results: {
+        enterpriseValueFromEBITDA: earthValue2030,
+        terminalValue: earthValue2030,
+        enterpriseValue: earthValue2030
+      },
+      earthResults: {
+        enterpriseValueFromEBITDA: earthValue2030,
+        terminalValue: earthValue2030,
+        enterpriseValue: earthValue2030
+      },
+      marsResults: null
+    };
+    
+    // 2030 Earth & Mars - uses total enterprise value + Mars component
+    results.earthMars2030 = {
+      name: '2030 Earth & Mars',
+      inputs: baseInputs || {},
+      results: {
+        total: earthValue2030 + marsValue2030,
+        earth: earthValue2030,
+        mars: marsValue2030
+      },
+      earthResults: {
+        enterpriseValueFromEBITDA: earthValue2030,
+        terminalValue: earthValue2030,
+        enterpriseValue: earthValue2030
+      },
+      marsResults: {
+        expectedValue: marsValue2030,
+        adjustedValue: marsValue2030,
+        optionValue: marsValue2030
+      }
+    };
     
     // 2040 Earth & Mars - extrapolate from 2030 with growth
-    if (baseResults.earth && baseResults.mars) {
-      const earthValue2030 = baseResults.earth.adjustedValue || baseResults.earth.terminalValue || baseResults.total?.breakdown?.earth || 0;
-      const marsValue2030 = baseResults.mars.adjustedValue || baseResults.mars.optionValue || baseResults.total?.breakdown?.mars || 0;
-      const terminalGrowth = baseInputs?.financial?.terminalGrowth || baseModel?.inputs?.financial?.terminalGrowth || 0.03;
-      
-      // Project 10 years forward with terminal growth
-      const earthValue2040 = earthValue2030 * Math.pow(1 + terminalGrowth, 10);
-      const marsValue2040 = marsValue2030 * Math.pow(1 + terminalGrowth, 10);
-      
-      results.earthMars2040 = {
-        name: '2040 Earth & Mars',
-        inputs: baseInputs || baseModel?.inputs || {},
-        results: {
-          total: earthValue2040 + marsValue2040,
-          earth: earthValue2040,
-          mars: marsValue2040
-        },
-        earthResults: {
-          enterpriseValueFromEBITDA: earthValue2040,
-          terminalValue: earthValue2040,
-          enterpriseValue: earthValue2040
-        },
-        marsResults: {
-          expectedValue: marsValue2040,
-          adjustedValue: marsValue2040,
-          optionValue: marsValue2040
-        }
-      };
-    }
+    const terminalGrowth = baseInputs?.financial?.terminalGrowth || 0.03;
+    
+    // Project 10 years forward with terminal growth
+    const earthValue2040 = earthValue2030 * Math.pow(1 + terminalGrowth, 10);
+    const marsValue2040 = marsValue2030 * Math.pow(1 + terminalGrowth, 10);
+    
+    results.earthMars2040 = {
+      name: '2040 Earth & Mars',
+      inputs: baseInputs || {},
+      results: {
+        total: earthValue2040 + marsValue2040,
+        earth: earthValue2040,
+        mars: marsValue2040
+      },
+      earthResults: {
+        enterpriseValueFromEBITDA: earthValue2040,
+        terminalValue: earthValue2040,
+        enterpriseValue: earthValue2040
+      },
+      marsResults: {
+        expectedValue: marsValue2040,
+        adjustedValue: marsValue2040,
+        optionValue: marsValue2040
+      }
+    };
     
     // If no model found, return empty structure
     if (Object.keys(results).length === 0) {
@@ -3405,6 +3692,204 @@ function calculateInsights() {
   
   return insights;
 }
+
+// TAM Reference Data API Endpoints
+
+// Get active TAM data
+app.get('/api/tam-data', async (req, res) => {
+  try {
+    const name = req.query.name || 'Earth Bandwidth TAM';
+    const tamData = await TAMData.findOne({ name, isActive: true }).lean();
+    
+    if (!tamData) {
+      return res.status(404).json({
+        success: false,
+        error: `TAM data "${name}" not found`
+      });
+    }
+    
+    res.json({
+      success: true,
+      data: {
+        name: tamData.name,
+        description: tamData.description,
+        source: tamData.source,
+        range: tamData.range,
+        data: tamData.data,
+        metadata: tamData.metadata,
+        version: tamData.version,
+        updatedAt: tamData.updatedAt
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching TAM data:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// Get all TAM datasets (for admin)
+app.get('/api/tam-data/all', async (req, res) => {
+  try {
+    const tamDatasets = await TAMData.find({}).sort({ createdAt: -1 }).lean();
+    res.json({
+      success: true,
+      data: tamDatasets.map(tam => ({
+        _id: tam._id,
+        name: tam.name,
+        description: tam.description,
+        version: tam.version,
+        isActive: tam.isActive,
+        dataCount: tam.data?.length || 0,
+        createdAt: tam.createdAt,
+        updatedAt: tam.updatedAt
+      }))
+    });
+  } catch (error) {
+    console.error('Error fetching all TAM data:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// Create or update TAM data
+app.post('/api/tam-data', async (req, res) => {
+  try {
+    const { name, description, source, range, data, metadata } = req.body;
+    
+    if (!name || !data || !Array.isArray(data)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Name and data array are required'
+      });
+    }
+    
+    // Deactivate existing active TAM data with same name
+    await TAMData.updateMany(
+      { name, isActive: true },
+      { isActive: false }
+    );
+    
+    // Find latest version
+    const latest = await TAMData.findOne({ name }).sort({ version: -1 }).lean();
+    const nextVersion = latest ? latest.version + 1 : 1;
+    
+    // Create new TAM data entry
+    const tamData = new TAMData({
+      name,
+      description,
+      source,
+      range,
+      data,
+      metadata,
+      version: nextVersion,
+      isActive: true,
+      createdBy: req.headers['x-user-id'] || 'system',
+      updatedBy: req.headers['x-user-id'] || 'system'
+    });
+    
+    await tamData.save();
+    
+    res.json({
+      success: true,
+      data: {
+        _id: tamData._id,
+        name: tamData.name,
+        version: tamData.version,
+        dataCount: tamData.data.length
+      }
+    });
+  } catch (error) {
+    console.error('Error saving TAM data:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// Update TAM data (activate/deactivate)
+// Regenerate TAM data using model methodology
+app.post('/api/tam-data/regenerate', async (req, res) => {
+  try {
+    const { regenerateTAMData } = require('./scripts/regenerate-tam-data');
+    
+    // Run regeneration (this will update both database and static file)
+    // Pass false to prevent process exit
+    const result = await regenerateTAMData(false);
+    
+    res.json({
+      success: true,
+      count: result.count,
+      message: `Successfully regenerated ${result.count} TAM entries`
+    });
+  } catch (error) {
+    console.error('Error regenerating TAM data:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+app.put('/api/tam-data/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { isActive, description } = req.body;
+    
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid TAM data ID'
+      });
+    }
+    
+    const update = { updatedAt: new Date() };
+    if (isActive !== undefined) update.isActive = isActive;
+    if (description !== undefined) update.description = description;
+    if (update.isActive === false) {
+      // If deactivating, ensure at least one other TAM dataset with same name is active
+      const tamData = await TAMData.findById(id).lean();
+      if (tamData) {
+        const otherActive = await TAMData.findOne({
+          name: tamData.name,
+          _id: { $ne: id },
+          isActive: true
+        });
+        if (!otherActive) {
+          return res.status(400).json({
+            success: false,
+            error: 'Cannot deactivate: at least one active TAM dataset must exist'
+          });
+        }
+      }
+    }
+    
+    const tamData = await TAMData.findByIdAndUpdate(id, update, { new: true }).lean();
+    
+    if (!tamData) {
+      return res.status(404).json({
+        success: false,
+        error: 'TAM data not found'
+      });
+    }
+    
+    res.json({
+      success: true,
+      data: tamData
+    });
+  } catch (error) {
+    console.error('Error updating TAM data:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
 
 // Serve main page
 app.get('/', (req, res) => {

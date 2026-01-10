@@ -1,0 +1,99 @@
+🧪 Testing Calculation Engine Against Spreadsheet
+
+================================================================================
+
+1. Base Scenario - Earth Valuation (O153)
+--------------------------------------------------------------------------------
+   Spreadsheet: 124.48B
+   Calculated:  124.48B
+   Difference:  0.00B
+   % Difference: 0.00%
+   ✅ PASS (within 5% tolerance)
+
+2. Base Scenario - Mars Valuation (K54)
+--------------------------------------------------------------------------------
+   Spreadsheet: 0.75B
+   Calculated:  0.74B
+   Difference:  0.00B
+   % Difference: 0.01%
+   ✅ PASS (within 5% tolerance)
+
+3. Base Scenario - Total Enterprise Value (B13)
+--------------------------------------------------------------------------------
+   Spreadsheet: 2240.70B
+   Calculated:  2241.38B
+   Difference:  0.69B
+   % Difference: 0.03%
+   ✅ PASS (within 5% tolerance)
+
+4. Optimistic Scenario - Earth Valuation (Y153)
+--------------------------------------------------------------------------------
+   Spreadsheet: 452.45B
+   Calculated:  535.81B
+   Difference:  83.36B
+   % Difference: 18.42%
+   Note: Y153 is optimistic Earth value - inputs may not match spreadsheet optimistic scenario exactly
+   ❌ FAIL (exceeds 5% tolerance)
+
+5. Optimistic Scenario - Total Enterprise Value (D13)
+--------------------------------------------------------------------------------
+   Spreadsheet: 9536.38B
+   Calculated:  9645.81B
+   Difference:  109.43B
+   % Difference: 1.15%
+   Note: D13 is optimistic total - inputs may not match spreadsheet optimistic scenario exactly
+   ✅ PASS (within 5% tolerance)
+
+6. Mars Option Value (K54+K8-K27)
+--------------------------------------------------------------------------------
+   Spreadsheet: 0.75B
+   Calculated:  0.74B
+   Difference:  0.00B
+   % Difference: 0.01%
+   ✅ PASS (within 5% tolerance)
+
+7. Bear Scenario - Earth Valuation
+--------------------------------------------------------------------------------
+   Bear scenario: 32.91B (should be < base 124.48B) - ✅ Lower
+
+8. Bear Scenario - Mars Valuation
+--------------------------------------------------------------------------------
+   Bear scenario: 0.03B (should be < base 0.745B) - ✅ Lower
+
+9. Input Sensitivity - Penetration Change
+--------------------------------------------------------------------------------
+   Penetration 0.15→0.20: Value increases 88.3% (124.48B → 234.40B)
+
+10. Input Sensitivity - Launch Volume Change
+--------------------------------------------------------------------------------
+   Launch volume 150→200: Value increases 33.3% (124.48B → 165.97B)
+
+11. Input Sensitivity - Colony Year Change
+--------------------------------------------------------------------------------
+   Colony year 2030→2028: Value increases 21.0% (0.74B → 0.90B)
+
+12. Input Sensitivity - No Industrial Bootstrap
+--------------------------------------------------------------------------------
+   No bootstrap: Value decreases 90.0% (0.74B → 0.07B) - ✅ Massive reduction
+
+13. Consistency Check - B13 = (O153 * B8 + Mars) / B12
+--------------------------------------------------------------------------------
+   B13 formula check: 2241.38B vs calculated 2241.38B - ✅ Consistent
+
+14. Edge Case - Zero Penetration
+--------------------------------------------------------------------------------
+   Zero penetration: 0.00B - ✅ Valid (zero)
+
+15. Edge Case - Very High Penetration
+--------------------------------------------------------------------------------
+   High penetration (0.50): 1759.68B - ✅ Valid
+
+================================================================================
+
+📊 Test Summary:
+   ✅ Passed: 11
+   ❌ Failed: 1
+   ⚠️  Warnings: 3
+   Total: 15
+
+⚠️  Some tests failed or have warnings. Review the results above.

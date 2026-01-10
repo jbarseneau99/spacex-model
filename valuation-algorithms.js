@@ -120,6 +120,43 @@ class ValuationAlgorithms {
   }
 
   /**
+   * CORE ALGORITHM: Calculate Total Enterprise Value (B13 for base, C13 for optimistic)
+   * 
+   * This is what Column M in Valuation Outputs references - the TOTAL enterprise value
+   * 
+   * Formula breakdown:
+   * B13 = B11 / B12
+   *   B11 = B9 + B10
+   *     B9 = B7 * B8
+   *       B7 = O153 (Earth component)
+   *       B8 = Dilution/adjustment factor
+   *     B10 = Mars value (K54+K8-K27)
+   *   B12 = Divisor (shares outstanding or similar)
+   * 
+   * For Monte Carlo, we need B13 (total enterprise value), not just O153
+   */
+  calculateTotalEnterpriseValue(scenario = 'base') {
+    const col = scenario === 'optimistic' ? 'C' : 'B';
+    
+    // Try to get B13 directly first (most reliable)
+    const b13 = this.getCellValue('Earth', `${col}13`);
+    if (b13 !== null && typeof b13 === 'number' && b13 > 0) {
+      return b13 / 1e9; // Convert to billions
+    }
+    
+    // Calculate from components if direct value not available
+    const b7 = this.getCellValue('Earth', `${col}7`); // O153 or Y153
+    const b8 = this.getCellValue('Earth', `${col}8`) || 1; // Dilution factor
+    const b9 = this.multiply(b7 || 0, b8);
+    const b10 = this.getCellValue('Earth', `${col}10`); // Mars value
+    const b11 = this.add(b9, b10 || 0);
+    const b12 = this.getCellValue('Earth', `${col}12`) || 1;
+    const b13Calculated = this.divide(b11, b12);
+    
+    return b13Calculated / 1e9; // Convert to billions
+  }
+
+  /**
    * CORE ALGORITHM: Calculate Earth Valuation (O153)
    * 
    * Formula breakdown:
@@ -127,6 +164,9 @@ class ValuationAlgorithms {
    *   O119 = SUM(O116:O118)  [Total Revenue Components]
    *   O144 = SUM(O142:O143)  [Total Cost Components]
    *   O152 = (O146 + O150) * O119  [Tax/Expense Rate × Revenue]
+   * 
+   * NOTE: This is just the Earth component. For total enterprise value,
+   * use calculateTotalEnterpriseValue() which includes Mars.
    */
   calculateEarthValuation(scenario = 'base') {
     const col = scenario === 'optimistic' ? 'Y' : 'O';
@@ -344,6 +384,7 @@ class ValuationAlgorithms {
 }
 
 module.exports = ValuationAlgorithms;
+
 
 
 

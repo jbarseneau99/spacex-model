@@ -28,6 +28,7 @@ class ValuationApp {
         this.attributionDebounceTimer = null; // Debounce timer for Attribution input changes
         this.currentComparablesData = null; // Store current comparables data for charts
         this.aiModel = localStorage.getItem('aiModel') || 'claude-opus-4-1-20250805'; // Default AI model
+        this.tamData = null; // Earth Bandwidth TAM lookup table
         this.charts = {
             valuation: null,
             cashFlowTimeline: null,
@@ -77,6 +78,9 @@ class ValuationApp {
         this.initSettingsModal();
         this.loadScenarios();
         
+        // Load TAM data
+        await this.loadTAMData();
+        
         // Initialize Monte Carlo empty state
         this.initMonteCarloView();
         
@@ -84,9 +88,209 @@ class ValuationApp {
         await this.autoLoadFirstModel();
         this.loadSavedInputs();
         
+        // Initialize actions bar visibility for Reference Data view
+        this.updateReferenceDataActionsBar();
+        
         // Run Monte Carlo simulation, VaR, and Attribution calculations on initialization (after model loads)
         // The model load will trigger auto-run, so we don't need to call it here
         this.isInitializing = false;
+    }
+    
+    updateReferenceDataActionsBar() {
+        // Check if we're in the Reference Data view
+        const referenceDataView = document.getElementById('inputs');
+        if (!referenceDataView || !referenceDataView.classList.contains('active')) {
+            return;
+        }
+        
+        // Find the active tab
+        const activeTab = referenceDataView.querySelector('.insights-tab.active');
+        if (!activeTab) return;
+        
+        const tabName = activeTab.dataset.tab;
+        const actionsBar = document.getElementById('referenceDataActionsBar');
+        if (actionsBar) {
+            // Show actions bar only on input tabs (not TAM data or methodology)
+            const isInputTab = ['basic-inputs', 'advanced-earth', 'advanced-mars'].includes(tabName);
+            actionsBar.style.display = isInputTab ? 'flex' : 'none';
+        }
+    }
+    
+    async loadTAMData() {
+        try {
+            // Load from database API
+            const response = await fetch('/api/tam-data?name=Earth Bandwidth TAM');
+            if (response.ok) {
+                const result = await response.json();
+                if (result.success && result.data && result.data.data) {
+                    this.tamData = result.data.data;
+                    console.log(`✓ Loaded ${this.tamData.length} TAM lookup entries from database`);
+                    console.log(`  Version: ${result.data.version}, Updated: ${new Date(result.data.updatedAt).toLocaleDateString()}`);
+                    
+                    // Populate TAM table if view is already loaded
+                    this.updateTAMDataTable();
+                } else {
+                    throw new Error('Invalid TAM data structure from API');
+                }
+            } else {
+                // Fallback to static file if API fails
+                console.warn('API TAM data not available, trying static file fallback...');
+                const fallbackResponse = await fetch('/data/earth-bandwidth-tam.json');
+                if (fallbackResponse.ok) {
+                    const tamData = await fallbackResponse.json();
+                    this.tamData = tamData.data || tamData;
+                    console.log(`✓ Loaded ${this.tamData.length} TAM lookup entries from static file (fallback)`);
+                    this.updateTAMDataTable();
+                } else {
+                    throw new Error('TAM data not available from API or static file');
+                }
+            }
+        } catch (error) {
+            console.warn('Error loading TAM data:', error);
+            console.warn('Using fallback calculation (simple exponential decline)');
+            this.tamData = null;
+        }
+    }
+    
+    updateTAMDataTable() {
+        const tbody = document.getElementById('tamDataTableBody');
+        if (!tbody) return;
+        
+        if (!this.tamData || this.tamData.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="2" class="empty-state">TAM data not loaded</td></tr>';
+            return;
+        }
+        
+        // Clear existing rows
+        tbody.innerHTML = '';
+        
+        // Populate table with TAM data
+        this.tamData.forEach((entry, index) => {
+            const row = document.createElement('tr');
+            row.innerHTML = `
+                <td>${entry.key.toLocaleString()}</td>
+                <td>${entry.value.toLocaleString(undefined, { maximumFractionDigits: 2 })}</td>
+            `;
+            tbody.appendChild(row);
+        });
+        
+        // Update note with count
+        const noteEl = document.getElementById('tamDataNote');
+        if (noteEl) {
+            noteEl.innerHTML = `<strong>Note:</strong> This table contains ${this.tamData.length.toLocaleString()} entries. The lookup function uses binary search with linear interpolation for values between entries.`;
+        }
+        
+        console.log(`✓ Populated TAM data table with ${this.tamData.length} entries`);
+    }
+
+    async regenerateTAMData() {
+        // Try to find regenerate button (could be in TAM data tab or methodology tab)
+        const btn = document.getElementById('regenerateTAMBtn');
+        const status = document.getElementById('tamRegenerateStatus');
+        
+        if (!btn || !status) {
+            console.warn('Regenerate TAM button or status element not found');
+            return;
+        }
+
+        // Disable button and show loading
+        btn.disabled = true;
+        btn.innerHTML = '<i data-lucide="loader-2"></i> Regenerating...';
+        if (window.lucide) window.lucide.createIcons();
+        status.innerHTML = '<span style="color: var(--text-secondary);">Regenerating TAM data using model methodology...</span>';
+
+        try {
+            const response = await fetch('/api/tam-data/regenerate', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            });
+
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+
+            const result = await response.json();
+            
+            // Reload TAM data
+            await this.loadTAMData();
+            
+            // Update table if on TAM data tab
+            const tamDataTab = document.querySelector('[data-tab="tam-data"]');
+            if (tamDataTab && tamDataTab.classList.contains('active')) {
+                this.updateTAMDataTable();
+            }
+
+            status.innerHTML = `<span style="color: var(--success-color);">✓ Successfully regenerated ${result.count.toLocaleString()} TAM entries</span>`;
+            
+            // Show success notification
+            this.showNotification('TAM data regenerated successfully', 'success');
+        } catch (error) {
+            console.error('Error regenerating TAM data:', error);
+            status.innerHTML = `<span style="color: var(--error-color);">✗ Error: ${error.message}</span>`;
+            this.showNotification('Failed to regenerate TAM data', 'error');
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = '<i data-lucide="refresh-cw"></i> Regenerate TAM Data';
+            if (window.lucide) window.lucide.createIcons();
+        }
+    }
+    
+    /**
+     * Lookup TAM multiplier from Earth Bandwidth TAM table
+     * Matches Excel formula logic: INDEX/MATCH with linear interpolation
+     * @param {number} lookupValue - The value to lookup (I91*(1-I92) equivalent)
+     * @returns {number} TAM multiplier value
+     */
+    lookupTAMMultiplier(lookupValue) {
+        if (!this.tamData || this.tamData.length === 0) {
+            // Fallback: return 1.0 if TAM data not loaded
+            return 1.0;
+        }
+        
+        const minKey = this.tamData[0].key;
+        const maxKey = this.tamData[this.tamData.length - 1].key;
+        
+        // If lookup value is below minimum, return first value (Excel handles this case)
+        if (lookupValue < minKey) {
+            return this.tamData[0].value;
+        }
+        
+        // If lookup value exceeds max, return last value (Excel: MAX with MATCH(9.999999999999E+307))
+        if (lookupValue > maxKey) {
+            return this.tamData[this.tamData.length - 1].value;
+        }
+        
+        // Binary search for matching row (MATCH with approximate match, sorted ascending)
+        let low = 0;
+        let high = this.tamData.length - 1;
+        let matchIndex = 0;
+        
+        while (low <= high) {
+            const mid = Math.floor((low + high) / 2);
+            if (this.tamData[mid].key <= lookupValue) {
+                matchIndex = mid;
+                low = mid + 1;
+            } else {
+                high = mid - 1;
+            }
+        }
+        
+        // Check if exact match or need interpolation
+        const matchKey = this.tamData[matchIndex].key;
+        const matchValue = this.tamData[matchIndex].value;
+        
+        if (matchKey === lookupValue || matchIndex === this.tamData.length - 1) {
+            return matchValue;
+        }
+        
+        // Linear interpolation between matchIndex and matchIndex+1
+        const nextKey = this.tamData[matchIndex + 1].key;
+        const nextValue = this.tamData[matchIndex + 1].value;
+        
+        const ratio = (lookupValue - matchKey) / (nextKey - matchKey);
+        return matchValue + (nextValue - matchValue) * ratio;
     }
     
     initMonteCarloView() {
@@ -158,6 +362,11 @@ class ValuationApp {
         });
         document.getElementById('refreshInsightsBtn').addEventListener('click', () => {
             this.generateAIInsights();
+        });
+
+        // TAM regeneration
+        document.getElementById('regenerateTAMBtn')?.addEventListener('click', () => {
+            this.regenerateTAMData();
         });
 
         // Sensitivity analysis
@@ -413,14 +622,21 @@ class ValuationApp {
             });
         });
 
-        // Insights tab switching (works for both Insights, Charts, and Monte Carlo views)
+        // Insights tab switching (works for both Insights, Charts, Monte Carlo, and Reference Data views)
         document.querySelectorAll('.insights-tab').forEach(tab => {
             tab.addEventListener('click', () => {
                 const tabName = tab.dataset.tab;
+                const subtabName = tab.dataset.subtab; // Check for sub-tabs
                 const viewContainer = tab.closest('.view');
                 
+                // Main tab switching logic
                 // Remove active class from all tabs in this view only
-                viewContainer.querySelectorAll('.insights-tab').forEach(t => t.classList.remove('active'));
+                viewContainer.querySelectorAll('.insights-tab').forEach(t => {
+                    // Only remove active from main tabs, not sub-tabs
+                    if (!t.dataset.subtab) {
+                        t.classList.remove('active');
+                    }
+                });
                 viewContainer.querySelectorAll('.insights-tab-content').forEach(c => {
                     c.classList.remove('active');
                     c.style.display = 'none';
@@ -428,7 +644,16 @@ class ValuationApp {
                 
                 // Add active class to clicked tab and corresponding content
                 tab.classList.add('active');
-                const contentEl = document.getElementById(`insightsTab-${tabName}`);
+                
+                // Try different tab content ID patterns based on view
+                let contentEl = document.getElementById(`insightsTab-${tabName}`);
+                if (!contentEl) {
+                    contentEl = document.getElementById(`referenceTab-${tabName}`);
+                }
+                if (!contentEl) {
+                    contentEl = document.getElementById(`ratiosTab-${tabName}`);
+                }
+                
                 if (contentEl) {
                     contentEl.classList.add('active');
                     contentEl.style.display = 'block';
@@ -437,9 +662,22 @@ class ValuationApp {
                 // Refresh icons
                 if (window.lucide) window.lucide.createIcons();
                 
+                // Show/hide actions bar for Reference Data view based on active tab
+                this.updateReferenceDataActionsBar();
+                
                 // If switching to simulations tab, update table
                 if (tabName === 'simulations') {
                     this.updateSimulationsTable();
+                }
+                
+                // If switching to TAM data tab, populate table
+                if (tabName === 'tam-data') {
+                    this.updateTAMDataTable();
+                }
+                
+                // If switching to TAM methodology tab, refresh icons
+                if (tabName === 'tam-methodology') {
+                    // Icons will be refreshed above
                 }
                 
                 // Update chart if switching to a chart tab
@@ -555,6 +793,17 @@ class ValuationApp {
 
         this.currentView = viewName;
 
+        // Update actions bar visibility for Reference Data view
+        if (viewName === 'inputs') {
+            this.updateReferenceDataActionsBar();
+        } else {
+            // Hide actions bar when leaving Reference Data view
+            const actionsBar = document.getElementById('referenceDataActionsBar');
+            if (actionsBar) {
+                actionsBar.style.display = 'none';
+            }
+        }
+
         // Load models if switching to models view
         if (viewName === 'models') {
             this.loadModels();
@@ -616,79 +865,67 @@ class ValuationApp {
     }
 
     getInputs() {
+        // Helper function to safely get input value with default
+        const getValue = (id, defaultValue, parseFunc = parseFloat) => {
+            const el = document.getElementById(id);
+            if (!el) return defaultValue;
+            if (el.type === 'checkbox') return el.checked;
+            const value = parseFunc(el.value);
+            return isNaN(value) ? defaultValue : value;
+        };
+
         return {
             earth: {
-                starlinkPenetration: parseFloat(document.getElementById('starlinkPenetration').value),
-                bandwidthPriceDecline: parseFloat(document.getElementById('bandwidthPriceDecline').value),
-                launchVolume: parseFloat(document.getElementById('launchVolume').value),
-                launchPriceDecline: parseFloat(document.getElementById('launchPriceDecline').value)
+                // Basic parameters
+                starlinkPenetration: getValue('starlinkPenetration', 0.15),
+                bandwidthPriceDecline: getValue('bandwidthPriceDecline', 0.10),
+                launchVolume: getValue('launchVolume', 100),
+                launchPriceDecline: getValue('launchPriceDecline', 0.05),
+                
+                // Advanced Earth Operations
+                starshipReusabilityYear: getValue('starshipReusabilityYear', 2026, parseInt),
+                starshipCommercialViabilityYear: getValue('starshipCommercialViabilityYear', 2025, parseInt),
+                starshipPayloadCapacity: getValue('starshipPayloadCapacity', 75000),
+                maxRocketProductionIncrease: getValue('maxRocketProductionIncrease', 0.25),
+                wrightsLawTurnaroundTime: getValue('wrightsLawTurnaroundTime', 0.05),
+                wrightsLawLaunchCost: getValue('wrightsLawLaunchCost', 0.05),
+                wrightsLawSatelliteGBPS: getValue('wrightsLawSatelliteGBPS', 0.07),
+                realizedBandwidthTAMMultiplier: getValue('realizedBandwidthTAMMultiplier', 0.5),
+                starshipLaunchesForStarlink: getValue('starshipLaunchesForStarlink', 0.9),
+                nonStarlinkLaunchMarketGrowth: getValue('nonStarlinkLaunchMarketGrowth', 0.01),
+                irrThresholdEarthToMars: getValue('irrThresholdEarthToMars', 0),
+                cashBufferPercent: getValue('cashBufferPercent', 0.1)
             },
             mars: {
-                firstColonyYear: parseInt(document.getElementById('firstColonyYear').value),
-                transportCostDecline: parseFloat(document.getElementById('transportCostDecline').value),
-                populationGrowth: parseFloat(document.getElementById('populationGrowth').value),
-                industrialBootstrap: document.getElementById('industrialBootstrap').checked
+                // Basic parameters
+                firstColonyYear: getValue('firstColonyYear', 2030, parseInt),
+                transportCostDecline: getValue('transportCostDecline', 0.20),
+                populationGrowth: getValue('populationGrowth', 0.50),
+                industrialBootstrap: getValue('industrialBootstrap', true),
+                
+                // Advanced Mars Operations
+                optimusCost2026: getValue('optimusCost2026', 50000),
+                optimusAnnualCostDecline: getValue('optimusAnnualCostDecline', 0.05),
+                optimusProductivityMultiplier: getValue('optimusProductivityMultiplier', 0.25),
+                optimusLearningRate: getValue('optimusLearningRate', 0.05),
+                marsPayloadOptimusVsTooling: getValue('marsPayloadOptimusVsTooling', 0.01)
             },
             financial: {
-                discountRate: parseFloat(document.getElementById('discountRate').value),
-                dilutionFactor: parseFloat(document.getElementById('dilutionFactor').value),
-                terminalGrowth: parseFloat(document.getElementById('terminalGrowth').value)
+                discountRate: getValue('discountRate', 0.12),
+                dilutionFactor: getValue('dilutionFactor', 0.15),
+                terminalGrowth: getValue('terminalGrowth', 0.03)
             }
         };
     }
 
     async calculateValuation(horizonYear = 2030, modelId = null) {
-        const inputs = this.getInputs();
+        // DETERMINISTIC CALCULATIONS ARE DISABLED
+        // Only Monte Carlo simulations are used for valuation
+        // This function now triggers Monte Carlo instead
+        console.log('🔄 Deterministic calculation disabled - triggering Monte Carlo simulation instead');
         
-        // Show loading indicator (only if button exists)
-        const calculateBtn = document.getElementById('calculateBtn');
-        let originalText = null;
-        if (calculateBtn) {
-            originalText = calculateBtn.innerHTML;
-            calculateBtn.setAttribute('data-original-text', originalText);
-            calculateBtn.disabled = true;
-            calculateBtn.innerHTML = '<i data-lucide="loader-2"></i> Calculating...';
-            if (window.lucide) window.lucide.createIcons();
-        }
-        
-        try {
-            const response = await fetch('/api/calculate', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    inputs: inputs,
-                    horizonYear: horizonYear,
-                    modelId: modelId || this.currentModelId
-                })
-            });
-
-            const result = await response.json();
-            
-            if (result.success) {
-                this.currentData = result.data;
-                
-                // Update dashboard title
-                this.updateDashboardTitle(this.currentModelName || null);
-                
-                this.updateDashboard(result.data);
-                this.updateCashFlowTable(result.data.earth);
-            } else {
-                alert('Error: ' + result.error);
-            }
-        } catch (error) {
-            console.error('Calculation error:', error);
-            alert('Failed to calculate valuation. Check console for details.');
-        } finally {
-            // Restore button (only if it exists)
-            const calculateBtn = document.getElementById('calculateBtn');
-            if (calculateBtn && originalText !== null) {
-                calculateBtn.disabled = false;
-                calculateBtn.innerHTML = originalText;
-                if (window.lucide) window.lucide.createIcons();
-            }
-        }
+        // Trigger Monte Carlo simulation (this is the only valuation method)
+        await this.runMonteCarloSimulation(false); // false = manual run (not auto)
     }
 
     updateDashboardTitle(modelName) {
@@ -703,6 +940,28 @@ class ValuationApp {
     }
 
     updateDashboard(data) {
+        // CRITICAL: Only update dashboard if we have Monte Carlo results OR if explicitly allowed
+        // Deterministic calculations are disabled - dashboard should only show Monte Carlo
+        const hasMonteCarloResults = this.currentMonteCarloData && 
+                                   this.currentMonteCarloData.statistics && 
+                                   this.currentMonteCarloData.statistics.totalValue &&
+                                   this.currentMonteCarloData.statistics.totalValue.mean > 0;
+        
+        // If no Monte Carlo results, don't update dashboard with deterministic values
+        // Show empty/placeholder instead
+        if (!hasMonteCarloResults && !data._allowDeterministic) {
+            console.log('⏸️ Skipping dashboard update - waiting for Monte Carlo simulation');
+            console.log('   Dashboard will show values only after Monte Carlo runs');
+            // Show placeholder or empty state
+            const totalEl = document.getElementById('totalValue');
+            const earthEl = document.getElementById('earthValue');
+            const marsEl = document.getElementById('marsValue');
+            if (totalEl) totalEl.textContent = '--';
+            if (earthEl) earthEl.textContent = '--';
+            if (marsEl) marsEl.textContent = '--';
+            return;
+        }
+        
         if (!data || !data.total) {
             console.error('Invalid data for dashboard update:', data);
             return;
@@ -710,26 +969,37 @@ class ValuationApp {
 
         const formatValue = (value) => {
             if (!value && value !== 0) return 'N/A';
+            
             // Values from calculation engine are in billions
-            // If value is >= 1e9, it's in raw dollars, convert to trillions
-            // If value >= 1000, it's in billions but >= 1 trillion, show as trillions
-            // If value < 1000, it's in billions
+            // Format appropriately: T for trillions, B for billions
+            
+            // Handle very large values (raw dollars - shouldn't happen but safety check)
             if (value >= 1e9) {
                 // Raw dollars - convert to trillions
-                return `$${(value / 1e12).toFixed(2)}T`;
-            } else if (value >= 1000) {
-                // Billions >= 1000 = trillions
-                return `$${(value / 1000).toFixed(2)}T`;
-            } else if (value >= 1) {
-                // Billions (1-999 range)
-                return `$${value.toFixed(1)}B`;
-            } else if (value >= 0.001) {
-                // Less than 1 billion, show as millions
-                return `$${(value * 1000).toFixed(1)}M`;
-            } else {
-                // Very small values
-                return `$${(value * 1e6).toFixed(1)}K`;
+                const trillions = value / 1e12;
+                return `$${trillions.toFixed(2)}T`;
             }
+            
+            // Values >= 1000 billion = trillions
+            if (value >= 1000) {
+                const trillions = value / 1000;
+                return `$${trillions.toFixed(2)}T`;
+            }
+            
+            // Values >= 1 billion but < 1000 billion = billions
+            if (value >= 1) {
+                return `$${value.toFixed(1)}B`;
+            }
+            
+            // Values < 1 billion but >= 0.001 billion = millions
+            if (value >= 0.001) {
+                const millions = value * 1000;
+                return `$${millions.toFixed(1)}M`;
+            }
+            
+            // Very small values = thousands
+            const thousands = value * 1e6;
+            return `$${thousands.toFixed(1)}K`;
         };
 
         // Update metrics
@@ -760,21 +1030,33 @@ class ValuationApp {
             marsPercentEl.textContent = `${data.total.breakdown.marsPercent.toFixed(1)}%`;
         }
 
-        // Update charts
+        // Update charts (only if data has required structure)
         try {
             this.updateValuationChart(data);
         } catch (err) {
             console.error('Error updating valuation chart:', err);
         }
-        try {
-            this.updateCashFlowTimelineChart(data);
-        } catch (err) {
-            console.error('Error updating cash flow timeline chart:', err);
+        // Cash flow timeline chart needs earth.cashFlow array
+        if (data.earth && data.earth.cashFlow && Array.isArray(data.earth.cashFlow)) {
+            try {
+                this.updateCashFlowTimelineChart(data);
+            } catch (err) {
+                console.error('Error updating cash flow timeline chart:', err);
+            }
+        } else {
+            // Monte Carlo results don't have cash flow timeline - skip chart update
+            console.log('⏸️ Skipping cash flow timeline chart - Monte Carlo results don\'t include timeline data');
         }
-        try {
-            this.updateRevenueBreakdownChart(data);
-        } catch (err) {
-            console.error('Error updating revenue breakdown chart:', err);
+        // Revenue breakdown chart needs earth.revenue array
+        if (data.earth && data.earth.revenue && Array.isArray(data.earth.revenue)) {
+            try {
+                this.updateRevenueBreakdownChart(data);
+            } catch (err) {
+                console.error('Error updating revenue breakdown chart:', err);
+            }
+        } else {
+            // Monte Carlo results don't have revenue breakdown - skip chart update
+            console.log('⏸️ Skipping revenue breakdown chart - Monte Carlo results don\'t include revenue timeline data');
         }
 
         // Update Earth and Mars views if they're active
@@ -1174,32 +1456,62 @@ class ValuationApp {
 
     loadScenario(scenario) {
         // Load scenario inputs
-        if (scenario.earth) {
+        if (scenario.inputs && scenario.inputs.earth) {
+            document.getElementById('starlinkPenetration').value = scenario.inputs.earth.starlinkPenetration;
+            document.getElementById('bandwidthPriceDecline').value = scenario.inputs.earth.bandwidthPriceDecline;
+            document.getElementById('launchVolume').value = scenario.inputs.earth.launchVolume;
+            document.getElementById('launchPriceDecline').value = scenario.inputs.earth.launchPriceDecline;
+        } else if (scenario.earth) {
+            // Backward compatibility: handle old format
             document.getElementById('starlinkPenetration').value = scenario.earth.starlinkPenetration;
             document.getElementById('bandwidthPriceDecline').value = scenario.earth.bandwidthPriceDecline;
             document.getElementById('launchVolume').value = scenario.earth.launchVolume;
             document.getElementById('launchPriceDecline').value = scenario.earth.launchPriceDecline;
         }
         
-        if (scenario.mars) {
+        if (scenario.inputs && scenario.inputs.mars) {
+            document.getElementById('firstColonyYear').value = scenario.inputs.mars.firstColonyYear;
+            document.getElementById('transportCostDecline').value = scenario.inputs.mars.transportCostDecline;
+            document.getElementById('populationGrowth').value = scenario.inputs.mars.populationGrowth;
+            if (scenario.inputs.mars.industrialBootstrap !== undefined) {
+                document.getElementById('industrialBootstrap').checked = scenario.inputs.mars.industrialBootstrap;
+            }
+        } else if (scenario.mars) {
+            // Backward compatibility: handle old format
             document.getElementById('firstColonyYear').value = scenario.mars.firstColonyYear;
             document.getElementById('transportCostDecline').value = scenario.mars.transportCostDecline;
             document.getElementById('populationGrowth').value = scenario.mars.populationGrowth;
-            document.getElementById('industrialBootstrap').checked = scenario.mars.industrialBootstrap;
+            if (scenario.mars.industrialBootstrap !== undefined) {
+                document.getElementById('industrialBootstrap').checked = scenario.mars.industrialBootstrap;
+            }
         }
         
-        if (scenario.financial) {
+        if (scenario.inputs && scenario.inputs.financial) {
+            document.getElementById('discountRate').value = scenario.inputs.financial.discountRate;
+            document.getElementById('dilutionFactor').value = scenario.inputs.financial.dilutionFactor;
+            document.getElementById('terminalGrowth').value = scenario.inputs.financial.terminalGrowth;
+        } else if (scenario.financial) {
+            // Backward compatibility: handle old format
             document.getElementById('discountRate').value = scenario.financial.discountRate;
             document.getElementById('dilutionFactor').value = scenario.financial.dilutionFactor;
             document.getElementById('terminalGrowth').value = scenario.financial.terminalGrowth;
         }
 
+        // Save inputs
+        this.saveInputs();
+        
         // Switch to inputs view
         this.switchView('inputs');
-        this.saveInputs();
         
         // Refresh icons
         lucide.createIcons();
+        
+        // Automatically trigger Monte Carlo simulation with new scenario inputs
+        // Deterministic calculations are disabled - only Monte Carlo is used
+        setTimeout(() => {
+            console.log('🔄 Scenario loaded - triggering Monte Carlo simulation');
+            this.debouncedAutoRunMonteCarlo('scenario-change');
+        }, 100);
     }
 
     // Get default sensitivity ranges for a variable
@@ -3339,12 +3651,14 @@ class ValuationApp {
         const impact = ((stressValue - baseValue) / baseValue) * 100;
 
         // Format values correctly (already in billions)
+        // Shows T for trillions (>= 1000B), B for billions (< 1000B)
         const formatBillion = (value) => {
             if (!value && value !== 0) return 'N/A';
             // Values are already in billions
-            // If >= 1000 billion, display as trillions
+            // >= 1000 billion = trillions (show T)
+            // < 1000 billion = billions (show B)
             if (value >= 1000) {
-                return `$${(value / 1000).toFixed(1)}T`;
+                return `$${(value / 1000).toFixed(2)}T`;
             }
             return `$${value.toFixed(1)}B`;
         };
@@ -5633,9 +5947,54 @@ class ValuationApp {
     }
 
     calculateBandwidthPrice(year, earth) {
-        const basePrice = 100; // $/Gbps/month
+        // Base price and growth factors (matching Excel: $B$95*(((1+$B$94)*(1+$B$96))^(year-year0))
+        const basePrice = 100; // $/Gbps/month (equivalent to $B$95)
+        const growthFactor1 = 1.0; // (1+$B$94) - could be inflation or other growth
+        const growthFactor2 = 1.0; // (1+$B$96) - could be market growth
+        const year0 = 0; // Base year
+        
+        // Calculate base price with growth factors
+        const basePriceWithGrowth = basePrice * Math.pow(growthFactor1 * growthFactor2, year - year0);
+        
+        // If TAM data not available, use simple exponential decline
+        if (!this.tamData || this.tamData.length === 0) {
+            const declineRate = earth.bandwidthPriceDecline || 0.10;
+            return basePriceWithGrowth * Math.pow(1 - declineRate, year);
+        }
+        
+        // Calculate lookup value: I91*(1-I92)
+        // Based on TAM key range (100,000 to 1,000,000,000), I91 likely represents total capacity
+        // TAM keys start at 100,000, and year 0 capacity is 100,000 Gbps
+        // The (1-I92) adjustment might be for market dynamics, but we need lookup to be >= 100,000
+        const capacity = this.calculateBandwidthCapacity(year, earth);
         const declineRate = earth.bandwidthPriceDecline || 0.10;
-        return basePrice * Math.pow(1 - declineRate, year);
+        
+        // I91 equivalent: total capacity (in Gbps)
+        // Year 0 capacity is 100,000 Gbps which matches TAM key minimum of 100,000
+        const i91 = capacity;
+        // I92 equivalent: bandwidth price decline
+        const i92 = declineRate;
+        
+        // Lookup value: I91*(1-I92)
+        // This represents capacity adjusted by price decline for market dynamics
+        const lookupValue = i91 * (1 - i92);
+        
+        // Get TAM value from lookup table
+        const tamValue = this.lookupTAMMultiplier(lookupValue);
+        
+        // Get base TAM value for normalization (year 0)
+        const year0Capacity = this.calculateBandwidthCapacity(0, earth);
+        const year0Penetration = earth.starlinkPenetration || 0.15;
+        const year0Decline = earth.bandwidthPriceDecline || 0.10;
+        const year0Lookup = (year0Capacity * year0Penetration) * (1 - year0Decline);
+        const year0TAMValue = this.lookupTAMMultiplier(year0Lookup);
+        
+        // Normalize TAM value to get multiplier (ratio of current TAM to base TAM)
+        // This gives us a multiplier that reflects market dynamics
+        const tamMultiplier = year0TAMValue > 0 ? tamValue / year0TAMValue : 1.0;
+        
+        // Final price = base × growth factors × TAM multiplier
+        return basePriceWithGrowth * tamMultiplier;
     }
 
     calculateLaunchVolume(year, earth) {
@@ -5904,10 +6263,10 @@ class ValuationApp {
             }
         }
         
+        // Set auto-run flag BEFORE running (so displayMonteCarloResults knows)
+        const isAutoRun = skipValidation && this.autoRunningMonteCarlo;
+        
         // Clear flags
-        if (this.autoRunningMonteCarlo) {
-            this.autoRunningMonteCarlo = false;
-        }
         this.pendingMonteCarloRun = null;
         
         // Show progress modal
@@ -5968,9 +6327,11 @@ class ValuationApp {
             await new Promise(resolve => setTimeout(resolve, 500));
             
             if (result.success) {
-                // Store results for display
+                // Store results for display FIRST (before displayMonteCarloResults)
+                // This ensures deterministic calculation checks see Monte Carlo data exists
                 this.currentMonteCarloData = result.data;
-                this.displayMonteCarloResults(result.data);
+                // Pass auto-run flag to prevent double dashboard updates
+                this.displayMonteCarloResults(result.data, isAutoRun);
                 
                 // Always save simulation if we have a model loaded (for both auto and manual runs)
                 if (this.currentModelId) {
@@ -5986,6 +6347,11 @@ class ValuationApp {
             console.error('Monte Carlo error:', error);
             alert('Failed to run Monte Carlo simulation');
         } finally {
+            // Clear auto-run flag AFTER results are displayed
+            if (this.autoRunningMonteCarlo) {
+                this.autoRunningMonteCarlo = false;
+            }
+            
             // Hide progress modal
             if (progressModal) {
                 progressModal.classList.remove('active');
@@ -5999,7 +6365,7 @@ class ValuationApp {
         }
     }
 
-    displayMonteCarloResults(data) {
+    displayMonteCarloResults(data, isAutoRun = false) {
         // Store simulation results for table display
         this.currentMonteCarloSimulations = data.results || [];
         
@@ -6117,6 +6483,50 @@ class ValuationApp {
         
         // Update simulations table
         this.updateSimulationsTable();
+        
+        // Update dashboard with Monte Carlo mean values
+        // Monte Carlo simulations ARE the valuation calculations - they should drive the dashboard
+        // Always update dashboard with Monte Carlo mean (both manual and auto runs)
+        if (data.statistics && data.statistics.totalValue) {
+            const mcStats = data.statistics;
+            const dashboardData = {
+                total: {
+                    value: mcStats.totalValue.mean || 0,
+                    breakdown: {
+                        earth: mcStats.earthValue?.mean || 0,
+                        mars: mcStats.marsValue?.mean || 0,
+                        earthPercent: mcStats.totalValue.mean > 0 
+                            ? ((mcStats.earthValue?.mean || 0) / mcStats.totalValue.mean) * 100 
+                            : 0,
+                        marsPercent: mcStats.totalValue.mean > 0 
+                            ? ((mcStats.marsValue?.mean || 0) / mcStats.totalValue.mean) * 100 
+                            : 0
+                    }
+                },
+                earth: {
+                    adjustedValue: mcStats.earthValue?.mean || 0,
+                    terminalValue: mcStats.earthValue?.mean || 0
+                },
+                mars: {
+                    adjustedValue: mcStats.marsValue?.mean || 0,
+                    optionValue: mcStats.marsValue?.mean || 0
+                }
+            };
+            
+            // Update dashboard with Monte Carlo mean values
+            // Mark as allowed since this is Monte Carlo data
+            dashboardData._allowDeterministic = false; // This is Monte Carlo, not deterministic
+            this.updateDashboard(dashboardData);
+            
+            // Store Monte Carlo results as the primary valuation data
+            this.currentData = dashboardData;
+            
+            console.log('✅ Dashboard updated with Monte Carlo mean values (primary valuation):', {
+                total: mcStats.totalValue.mean,
+                earth: mcStats.earthValue?.mean,
+                mars: mcStats.marsValue?.mean
+            });
+        }
     }
     
     updateSimulationsTable() {
@@ -6163,8 +6573,13 @@ class ValuationApp {
         
         const formatValue = (val) => {
             if (val == null || val === undefined) return '--';
-            if (val >= 1000) return `$${(val / 1000).toFixed(2)}T`;
-            return `$${val.toFixed(2)}B`;
+            // Values are in billions
+            // >= 1000 billion = trillions (show T)
+            // < 1000 billion = billions (show B)
+            if (val >= 1000) {
+                return `$${(val / 1000).toFixed(2)}T`;
+            }
+            return `$${val.toFixed(1)}B`;
         };
         
         const formatPercent = (val) => {
@@ -8887,9 +9302,10 @@ class ValuationApp {
                     }, 1000);
                 }
 
-                // Automatically recalculate valuation with current inputs
-                console.log('Model loaded. Recalculating valuation...');
-                await this.calculateValuation(2030, model._id);
+                // Automatically trigger Monte Carlo simulation (deterministic is disabled)
+                console.log('Model loaded. Triggering Monte Carlo simulation...');
+                // Don't call calculateValuation - it will trigger Monte Carlo automatically
+                // But we need to wait for Monte Carlo to complete before updating dashboard
                 this.updateDashboardTitle(model.name);
 
                 // Switch to dashboard view
@@ -8901,9 +9317,9 @@ class ValuationApp {
                 // Force UI refresh
                 setTimeout(() => {
                     if (window.lucide) window.lucide.createIcons();
-                    if (this.currentData) {
-                        this.updateDashboard(this.currentData);
-                    }
+                    // Don't update dashboard with currentData - wait for Monte Carlo
+                    // Dashboard will show "--" until Monte Carlo completes
+                    console.log('⏸️ Dashboard will update after Monte Carlo simulation completes');
                     
                     // Show success notification modal AFTER UI refresh (unless silent)
                     if (!silent) {
