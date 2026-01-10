@@ -7,6 +7,8 @@ const fs = require('fs');
 const mongoose = require('mongoose');
 const fetch = require('node-fetch');
 const Mach33Lib = require('./mach33lib');
+const ValuationAlgorithms = require('./valuation-algorithms');
+const FactorModelsService = require('./services/factor-models');
 
 const app = express();
 const PORT = process.env.PORT || 2999;
@@ -40,6 +42,8 @@ app.use('/js', express.static('js'));
 // Load Excel data
 let excelData = null;
 let modelStructure = null;
+let valuationAlgorithms = null;
+const factorModelsService = new FactorModelsService();
 
 function loadData() {
   try {
@@ -49,6 +53,10 @@ function loadData() {
     if (fs.existsSync(excelDataPath)) {
       excelData = JSON.parse(fs.readFileSync(excelDataPath, 'utf8'));
       console.log('✓ Excel data loaded');
+      
+      // Initialize valuation algorithms with Excel data
+      valuationAlgorithms = new ValuationAlgorithms(excelData);
+      console.log('✓ Valuation algorithms initialized');
     }
     
     if (fs.existsSync(structurePath)) {
@@ -441,17 +449,36 @@ app.post('/api/calculate', async (req, res) => {
       const baseResults = baseModel?.results || {};
       
       // Try to get values from spreadsheet first (ground truth)
-      const spreadsheetEarth = getEarthValuesFromSpreadsheet('base');
-      const spreadsheetMars = getMarsValuesFromSpreadsheet('base');
+      // Use algorithms to calculate base values from spreadsheet formulas
+      let baseEarthValue = null;
+      let baseMarsValue = null;
       
-      const baseEarthValue = baseResults.earth?.adjustedValue || 
-                             spreadsheetEarth?.adjustedValue || 
-                             baseResults.total?.breakdown?.earth || 
-                             6739;
-      const baseMarsValue = baseResults.mars?.adjustedValue || 
-                           spreadsheetMars?.adjustedValue || 
-                           baseResults.total?.breakdown?.mars || 
-                           8.8;
+      if (valuationAlgorithms) {
+        try {
+          baseEarthValue = valuationAlgorithms.calculateEarthValuation('base');
+          baseMarsValue = valuationAlgorithms.calculateMarsValuation('base');
+          console.log(`✓ Using algorithm-calculated values: Earth=${baseEarthValue?.toFixed(3)}B, Mars=${baseMarsValue?.toFixed(3)}B`);
+        } catch (error) {
+          console.warn('⚠️ Algorithm calculation failed, falling back:', error.message);
+        }
+      }
+      
+      // Fallback to spreadsheet helper functions or database values
+      if (!baseEarthValue || !baseMarsValue) {
+        const spreadsheetEarth = getEarthValuesFromSpreadsheet('base');
+        const spreadsheetMars = getMarsValuesFromSpreadsheet('base');
+        
+        baseEarthValue = baseEarthValue || 
+                         baseResults.earth?.adjustedValue || 
+                         spreadsheetEarth?.adjustedValue || 
+                         baseResults.total?.breakdown?.earth || 
+                         6739;
+        baseMarsValue = baseMarsValue || 
+                       baseResults.mars?.adjustedValue || 
+                       spreadsheetMars?.adjustedValue || 
+                       baseResults.total?.breakdown?.mars || 
+                       8.8;
+      }
       const baseTotalValue = baseEarthValue + baseMarsValue;
       
       // Calculate multipliers based on input changes
@@ -526,7 +553,8 @@ app.post('/api/calculate', async (req, res) => {
           // Option value from spreadsheet: K54+K8-K27 (base case) or U54+U8-U27 (optimistic)
           // K54 is the cumulative value, K8 is cumulative revenue, K27 is cumulative costs
           // Option value = K54 + K8 - K27 = cumulative value + revenue - costs
-          optionValue: baseModel?.results?.mars?.optionValue || 
+          optionValue: (valuationAlgorithms ? valuationAlgorithms.calculateMarsOptionValue('base') : null) ||
+                      baseModel?.results?.mars?.optionValue || 
                       spreadsheetMars?.optionValue || 
                       getMarsOptionValueFromSpreadsheet('base') || 
                       (calculatedMarsValue > 0 ? calculatedMarsValue * 0.8 : 0),
@@ -754,15 +782,348 @@ app.post('/api/monte-carlo', (req, res) => {
   });
 });
 
-app.post('/api/monte-carlo/run', (req, res) => {
-  res.json({
-    success: true,
-    data: {
-      _id: 'temp_' + Date.now(),
-      status: 'running',
-      message: 'Simulation started'
+// Helper function to generate random value from normal distribution
+function randomNormal(mean, stdDev) {
+  // Box-Muller transform
+  const u1 = Math.random();
+  const u2 = Math.random();
+  const z0 = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
+  return mean + z0 * stdDev;
+}
+
+// Helper function to clamp value between min and max
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, value));
+}
+
+// Helper function to generate random inputs based on distributions
+function generateRandomInputs(baseInputs, distributions) {
+  const randomInputs = JSON.parse(JSON.stringify(baseInputs)); // Deep copy
+  
+  // Earth inputs
+  if (distributions.earth) {
+    if (distributions.earth.starlinkPenetration) {
+      const dist = distributions.earth.starlinkPenetration;
+      const mean = baseInputs.earth.starlinkPenetration;
+      const stdDev = dist.stdDev || 0.05;
+      randomInputs.earth.starlinkPenetration = clamp(
+        randomNormal(mean, stdDev),
+        dist.min || 0,
+        dist.max || 1
+      );
     }
+    
+    if (distributions.earth.launchVolume) {
+      const dist = distributions.earth.launchVolume;
+      const mean = baseInputs.earth.launchVolume;
+      const stdDev = dist.stdDev || 30;
+      randomInputs.earth.launchVolume = clamp(
+        randomNormal(mean, stdDev),
+        dist.min || 0,
+        dist.max || 1000
+      );
+    }
+    
+    if (distributions.earth.bandwidthPriceDecline) {
+      const dist = distributions.earth.bandwidthPriceDecline;
+      const mean = baseInputs.earth.bandwidthPriceDecline;
+      const stdDev = dist.stdDev || 0.02;
+      randomInputs.earth.bandwidthPriceDecline = clamp(
+        randomNormal(mean, stdDev),
+        dist.min || 0,
+        dist.max || 1
+      );
+    }
+  }
+  
+  // Mars inputs
+  if (distributions.mars) {
+    if (distributions.mars.firstColonyYear) {
+      const dist = distributions.mars.firstColonyYear;
+      const mean = baseInputs.mars.firstColonyYear;
+      const stdDev = dist.stdDev || 5;
+      randomInputs.mars.firstColonyYear = Math.round(clamp(
+        randomNormal(mean, stdDev),
+        dist.min || 2020,
+        dist.max || 2070
+      ));
+    }
+    
+    if (distributions.mars.populationGrowth) {
+      const dist = distributions.mars.populationGrowth;
+      const mean = baseInputs.mars.populationGrowth;
+      const stdDev = dist.stdDev || 0.15;
+      randomInputs.mars.populationGrowth = clamp(
+        randomNormal(mean, stdDev),
+        dist.min || 0,
+        dist.max || 2
+      );
+    }
+  }
+  
+  // Financial inputs
+  if (distributions.financial) {
+    if (distributions.financial.discountRate) {
+      const dist = distributions.financial.discountRate;
+      const mean = baseInputs.financial.discountRate;
+      const stdDev = dist.stdDev || 0.03;
+      randomInputs.financial.discountRate = clamp(
+        randomNormal(mean, stdDev),
+        dist.min || 0.05,
+        dist.max || 0.5
+      );
+    }
+    
+    if (distributions.financial.dilutionFactor) {
+      const dist = distributions.financial.dilutionFactor;
+      const mean = baseInputs.financial.dilutionFactor;
+      const stdDev = dist.stdDev || 0.05;
+      randomInputs.financial.dilutionFactor = clamp(
+        randomNormal(mean, stdDev),
+        dist.min || 0,
+        dist.max || 1
+      );
+    }
+  }
+  
+  return randomInputs;
+}
+
+// Helper function to calculate statistics from array of values
+function calculateStatistics(values) {
+  if (!values || values.length === 0) {
+    return {
+      mean: 0,
+      median: 0,
+      stdDev: 0,
+      min: 0,
+      max: 0,
+      p10: 0,
+      q1: 0,
+      q3: 0,
+      p90: 0
+    };
+  }
+  
+  const sorted = [...values].sort((a, b) => a - b);
+  const mean = sorted.reduce((a, b) => a + b, 0) / sorted.length;
+  const median = sorted.length % 2 === 0
+    ? (sorted[sorted.length / 2 - 1] + sorted[sorted.length / 2]) / 2
+    : sorted[Math.floor(sorted.length / 2)];
+  
+  const variance = sorted.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / sorted.length;
+  const stdDev = Math.sqrt(variance);
+  
+  return {
+    mean,
+    median,
+    stdDev,
+    min: sorted[0],
+    max: sorted[sorted.length - 1],
+    p10: sorted[Math.floor(sorted.length * 0.1)],
+    q1: sorted[Math.floor(sorted.length * 0.25)],
+    q3: sorted[Math.floor(sorted.length * 0.75)],
+    p90: sorted[Math.floor(sorted.length * 0.9)]
+  };
+}
+
+// Helper function to generate distribution histogram
+function generateDistribution(values, bins = 50) {
+  if (!values || values.length === 0) {
+    return {
+      min: 0,
+      max: 0,
+      bins: bins,
+      binSize: 0,
+      histogram: new Array(bins).fill(0),
+      binCenters: new Array(bins).fill(0)
+    };
+  }
+  
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const binSize = (max - min) / bins;
+  const histogram = new Array(bins).fill(0);
+  
+  values.forEach(val => {
+    const binIndex = Math.min(Math.floor((val - min) / binSize), bins - 1);
+    histogram[binIndex]++;
   });
+  
+  // Normalize histogram to 0-100 scale
+  const maxCount = Math.max(...histogram);
+  const normalizedHistogram = maxCount > 0
+    ? histogram.map(count => (count / maxCount) * 100)
+    : histogram;
+  
+  const binCenters = Array.from({ length: bins }, (_, i) => min + (i + 0.5) * binSize);
+  
+  return {
+    min,
+    max,
+    bins,
+    binSize,
+    histogram: normalizedHistogram,
+    binCenters
+  };
+}
+
+app.post('/api/monte-carlo/run', async (req, res) => {
+  try {
+    const { baseInputs, distributions, runs = 5000 } = req.body;
+    
+    if (!baseInputs) {
+      return res.status(400).json({
+        success: false,
+        error: 'baseInputs is required'
+      });
+    }
+    
+    // Use default distributions if not provided
+    const defaultDistributions = {
+      earth: {
+        starlinkPenetration: { stdDev: 0.05, min: 0.05, max: 0.30 },
+        launchVolume: { stdDev: 30, min: 10, max: 500 },
+        bandwidthPriceDecline: { stdDev: 0.02, min: 0, max: 0.20 }
+      },
+      mars: {
+        firstColonyYear: { stdDev: 5, min: 2025, max: 2060 },
+        populationGrowth: { stdDev: 0.15, min: 0.1, max: 1.0 }
+      },
+      financial: {
+        discountRate: { stdDev: 0.03, min: 0.08, max: 0.25 },
+        dilutionFactor: { stdDev: 0.05, min: 0.05, max: 0.30 }
+      }
+    };
+    
+    const simDistributions = distributions || defaultDistributions;
+    
+    console.log(`🎲 Starting Monte Carlo simulation: ${runs} runs`);
+    const startTime = Date.now();
+    
+    // Run simulations
+    const results = [];
+    const totalValues = [];
+    const earthValues = [];
+    const marsValues = [];
+    
+    for (let i = 0; i < runs; i++) {
+      // Generate random inputs
+      const randomInputs = generateRandomInputs(baseInputs, simDistributions);
+      
+      // Calculate valuations using the /api/calculate endpoint logic
+      // We'll use the same approach as the calculate endpoint
+      let earthValue = null;
+      let marsValue = null;
+      
+      if (valuationAlgorithms) {
+        try {
+          // For now, use base scenario calculations
+          // In a full implementation, we'd pass custom inputs to algorithms
+          earthValue = valuationAlgorithms.calculateEarthValuation('base');
+          marsValue = valuationAlgorithms.calculateMarsValuation('base');
+          
+          // Apply multipliers based on input changes (simplified approach)
+          const basePenetration = baseInputs.earth?.starlinkPenetration || 0.15;
+          const randomPenetration = randomInputs.earth?.starlinkPenetration || basePenetration;
+          if (basePenetration > 0) {
+            earthValue *= (randomPenetration / basePenetration);
+          }
+          
+          const baseLaunchVolume = baseInputs.earth?.launchVolume || 150;
+          const randomLaunchVolume = randomInputs.earth?.launchVolume || baseLaunchVolume;
+          if (baseLaunchVolume > 0) {
+            earthValue *= (randomLaunchVolume / baseLaunchVolume);
+          }
+          
+          const baseColonyYear = baseInputs.mars?.firstColonyYear || 2030;
+          const randomColonyYear = randomInputs.mars?.firstColonyYear || baseColonyYear;
+          const yearsDiff = baseColonyYear - randomColonyYear;
+          marsValue *= (1 + yearsDiff * 0.1); // 10% per year difference
+          
+          const basePopGrowth = baseInputs.mars?.populationGrowth || 0.15;
+          const randomPopGrowth = randomInputs.mars?.populationGrowth || basePopGrowth;
+          if (basePopGrowth > 0) {
+            marsValue *= (randomPopGrowth / basePopGrowth);
+          }
+          
+          // Apply discount rate adjustment
+          const baseDiscountRate = baseInputs.financial?.discountRate || 0.12;
+          const randomDiscountRate = randomInputs.financial?.discountRate || baseDiscountRate;
+          const pvAdjustment = Math.pow(1 + baseDiscountRate, 10) / Math.pow(1 + randomDiscountRate, 10);
+          earthValue *= pvAdjustment;
+          marsValue *= pvAdjustment;
+          
+        } catch (error) {
+          console.warn(`⚠️ Iteration ${i + 1} calculation error:`, error.message);
+          // Use fallback values
+          earthValue = 6739; // Base Earth value
+          marsValue = 8.8; // Base Mars value
+        }
+      } else {
+        // Fallback if algorithms not available
+        earthValue = 6739;
+        marsValue = 8.8;
+      }
+      
+      const totalValue = earthValue + marsValue;
+      
+      // Store results
+      results.push({
+        iteration: i + 1,
+        inputs: randomInputs,
+        results: {
+          totalValue,
+          earthValue,
+          marsValue
+        },
+        totalValue,
+        earthValue,
+        marsValue
+      });
+      
+      totalValues.push(totalValue);
+      earthValues.push(earthValue);
+      marsValues.push(marsValue);
+    }
+    
+    // Calculate statistics
+    const totalStats = calculateStatistics(totalValues);
+    const earthStats = calculateStatistics(earthValues);
+    const marsStats = calculateStatistics(marsValues);
+    
+    // Generate distributions
+    const totalDistribution = generateDistribution(totalValues);
+    const earthDistribution = generateDistribution(earthValues);
+    const marsDistribution = generateDistribution(marsValues);
+    
+    const elapsedSeconds = (Date.now() - startTime) / 1000;
+    
+    console.log(`✓ Monte Carlo simulation complete: ${runs} runs in ${elapsedSeconds.toFixed(2)}s`);
+    console.log(`  Total Value: mean=$${totalStats.mean.toFixed(2)}B, stdDev=$${totalStats.stdDev.toFixed(2)}B`);
+    
+    res.json({
+      success: true,
+      data: {
+        runs,
+        elapsedSeconds,
+        statistics: {
+          totalValue: totalStats,
+          earthValue: earthStats,
+          marsValue: marsStats,
+          distribution: totalDistribution
+        },
+        results: results.slice(0, 10000) // Limit to 10k results for response size
+      }
+    });
+    
+  } catch (error) {
+    console.error('❌ Monte Carlo simulation error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
 });
 
 app.get('/api/monte-carlo/scenarios', (req, res) => {
@@ -1069,6 +1430,86 @@ app.post('/api/greeks', async (req, res) => {
 });
 
 // PnL Attribution
+// Factor Models API
+app.get('/api/factor-models', (req, res) => {
+  try {
+    const models = factorModelsService.getAvailableModels();
+    res.json({ success: true, data: models });
+  } catch (error) {
+    console.error('Factor models error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.post('/api/factor-models/calculate', async (req, res) => {
+  try {
+    const { modelId, valuationData, marketData } = req.body;
+    
+    if (!modelId) {
+      return res.status(400).json({ success: false, error: 'Model ID required' });
+    }
+
+    const result = await factorModelsService.calculateFactorExposures(
+      modelId,
+      valuationData || {},
+      marketData || null
+    );
+
+    res.json({ success: true, data: result });
+  } catch (error) {
+    console.error('Factor calculation error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.post('/api/factor-models/stress-test', async (req, res) => {
+  try {
+    const { modelId, factorName, shock, baseValuation } = req.body;
+    
+    if (!modelId || !factorName || shock === undefined || !baseValuation) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Missing required parameters: modelId, factorName, shock, baseValuation' 
+      });
+    }
+
+    const result = await factorModelsService.stressTestFactor(
+      modelId,
+      factorName,
+      shock,
+      baseValuation
+    );
+
+    res.json({ success: true, data: result });
+  } catch (error) {
+    console.error('Factor stress test error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.post('/api/factor-models/adjusted-greeks', async (req, res) => {
+  try {
+    const { greeks, factorExposures } = req.body;
+    
+    if (!greeks || !factorExposures) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Missing required parameters: greeks, factorExposures' 
+      });
+    }
+
+    const adjusted = factorModelsService.calculateFactorAdjustedGreeks(
+      greeks,
+      factorExposures
+    );
+
+    res.json({ success: true, data: adjusted });
+  } catch (error) {
+    console.error('Factor-adjusted Greeks error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 app.post('/api/attribution', async (req, res) => {
   try {
     const { baseModelId, compareModelId, baseInputs } = req.body;
@@ -1245,6 +1686,418 @@ app.post('/api/attribution', async (req, res) => {
     });
   } catch (error) {
     console.error('Attribution calculation error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// VaR (Value at Risk) calculation endpoint
+app.post('/api/var', async (req, res) => {
+  try {
+    const { method = 'combined', confidence = 0.99, timeHorizon = 10 } = req.body;
+    
+    // Get current valuation and Greeks
+    const baseModel = await ValuationModel.findOne().sort({ createdAt: -1 }).lean();
+    const baseResults = baseModel?.results || {};
+    const currentValuation = baseResults.total?.value || 
+      (baseResults.earth?.adjustedValue || 0) + (baseResults.mars?.adjustedValue || 0) || 0;
+    
+    // Get Greeks data - reuse the same calculation logic from /api/greeks endpoint
+    const inputs = baseModel?.inputs || {};
+    const baseEarthValue = baseResults.earth?.adjustedValue || baseResults.total?.breakdown?.earth || 6739;
+    const baseMarsValue = baseResults.mars?.adjustedValue || baseResults.total?.breakdown?.mars || 8.8;
+    
+    // Reuse the same calculateValuationWithBump function from Greeks endpoint
+    const calculateValuationWithBump = async (inputPath, bumpedValue) => {
+      const pathParts = inputPath.split('.');
+      const modifiedInputs = JSON.parse(JSON.stringify(inputs));
+      
+      // Handle special paths for Vega, Theta, Rho (same as Greeks endpoint)
+      if (inputPath === 'volatility') {
+        const baseVolatility = 0.2;
+        const volatilityChange = bumpedValue - baseVolatility;
+        const earthMultiplier = 1 + (volatilityChange * 0.005);
+        const marsMultiplier = 1 + (volatilityChange * 0.02);
+        return {
+          earth: baseEarthValue * earthMultiplier,
+          mars: baseMarsValue * marsMultiplier,
+          total: (baseEarthValue * earthMultiplier) + (baseMarsValue * marsMultiplier)
+        };
+      } else if (inputPath === 'time') {
+        const baseColonyYear = inputs.mars?.firstColonyYear || 2030;
+        const yearsDiff = baseColonyYear - bumpedValue;
+        const marsMultiplier = Math.pow(1.1, yearsDiff);
+        return {
+          earth: baseEarthValue,
+          mars: baseMarsValue * marsMultiplier,
+          total: baseEarthValue + (baseMarsValue * marsMultiplier)
+        };
+      } else if (inputPath === 'discountRate') {
+        const baseRate = inputs.financial?.discountRate || 0.12;
+        const pvFactor = Math.pow(1 + baseRate, 10);
+        const newPvFactor = Math.pow(1 + bumpedValue, 10);
+        const pvMultiplier = newPvFactor / pvFactor;
+        return {
+          earth: baseEarthValue * pvMultiplier,
+          mars: baseMarsValue * pvMultiplier,
+          total: (baseEarthValue + baseMarsValue) * pvMultiplier
+        };
+      }
+      
+      // Handle normal paths
+      if (pathParts.length === 2) {
+        const [category, field] = pathParts;
+        if (modifiedInputs[category]) {
+          modifiedInputs[category][field] = bumpedValue;
+        }
+      }
+      
+      // Calculate multipliers (same logic as Greeks endpoint)
+      let earthMultiplier = 1.0;
+      let marsMultiplier = 1.0;
+      
+      if (modifiedInputs.earth) {
+        const basePenetration = inputs.earth?.starlinkPenetration || 0.15;
+        if (modifiedInputs.earth.starlinkPenetration !== undefined) {
+          const penetrationRatio = modifiedInputs.earth.starlinkPenetration / basePenetration;
+          earthMultiplier *= Math.pow(penetrationRatio, 0.95);
+        }
+        
+        const baseLaunchVolume = inputs.earth?.launchVolume || 150;
+        if (modifiedInputs.earth.launchVolume !== undefined) {
+          const volumeRatio = modifiedInputs.earth.launchVolume / baseLaunchVolume;
+          earthMultiplier *= Math.pow(volumeRatio, 0.98);
+        }
+      }
+      
+      if (modifiedInputs.mars) {
+        const baseColonyYear = inputs.mars?.firstColonyYear || 2030;
+        if (modifiedInputs.mars.firstColonyYear !== undefined) {
+          const yearsDiff = baseColonyYear - modifiedInputs.mars.firstColonyYear;
+          marsMultiplier *= Math.pow(1.1, yearsDiff);
+        }
+        
+        const basePopGrowth = inputs.mars?.populationGrowth || 0.15;
+        if (modifiedInputs.mars.populationGrowth !== undefined) {
+          const growthRatio = modifiedInputs.mars.populationGrowth / basePopGrowth;
+          marsMultiplier *= Math.pow(growthRatio, 0.97);
+        }
+      }
+      
+      if (modifiedInputs.financial) {
+        const baseRate = inputs.financial?.discountRate || 0.12;
+        if (modifiedInputs.financial.discountRate !== undefined) {
+          const pvFactor = Math.pow(1 + baseRate, 10);
+          const newRate = modifiedInputs.financial.discountRate;
+          const newPvFactor = Math.pow(1 + newRate, 10);
+          const pvMultiplier = newPvFactor / pvFactor;
+          earthMultiplier *= pvMultiplier;
+          marsMultiplier *= pvMultiplier;
+        }
+      }
+      
+      return {
+        earth: baseEarthValue * earthMultiplier,
+        mars: baseMarsValue * marsMultiplier,
+        total: (baseEarthValue * earthMultiplier) + (baseMarsValue * marsMultiplier)
+      };
+    };
+    
+    // Use global mach33LibSettings (same as Greeks endpoint)
+    const lib = new Mach33Lib({
+      method: mach33LibSettings.library,
+      bumpSizes: mach33LibSettings.bumpSizes,
+      useCentralDifference: mach33LibSettings.useCentralDifference
+    });
+    
+    // Calculate Greeks
+    let greeks = {};
+    try {
+      greeks = await lib.calculateAllGreeks(calculateValuationWithBump, inputs);
+    } catch (error) {
+      console.warn('Could not calculate Greeks for VaR:', error.message);
+      greeks = { earth: {}, mars: {}, total: {} };
+    }
+    
+    let varResult = {
+      method,
+      confidence,
+      timeHorizon,
+      currentValuation,
+      varValue: 0,
+      varPercent: 0,
+      expectedShortfall: 0,
+      components: {
+        earth: { varContribution: 0, greeksRisk: 0, monteCarloRisk: 0 },
+        mars: { varContribution: 0, greeksRisk: 0, monteCarloRisk: 0 }
+      },
+      breakdown: []
+    };
+    
+    // Greeks-Based VaR calculation
+    if (method === 'greeks' || method === 'combined') {
+      const earthGreeks = greeks.earth || {};
+      const marsGreeks = greeks.mars || {};
+      
+      // Calculate variance from Greeks
+      // VaR = √(Σ(Delta² × σ²)) × z-score × √time
+      const zScore = confidence === 0.95 ? 1.645 : confidence === 0.99 ? 2.326 : 3.09;
+      const timeFactor = Math.sqrt(timeHorizon / 252); // Convert days to years (252 trading days)
+      
+      // Estimate volatility for each input (as percentage of input value)
+      const inputVolatilities = {
+        'Starlink Penetration': 0.15, // 15% annual volatility
+        'Launch Volume': 0.20,
+        'Population Growth': 0.25,
+        'Colony Year': 0.10,
+        'Discount Rate': 0.05,
+        'Volatility': 0.30
+      };
+      
+      let earthVariance = 0;
+      let marsVariance = 0;
+      
+      console.log('VaR Greeks Debug - Initial:', { earthVariance, marsVariance, hasEarthDelta: !!earthGreeks.delta, hasMarsDelta: !!marsGreeks.delta });
+      
+      // Earth Greeks contribution
+      // Delta represents $B change per 0.01 (1 percentage point) change in input
+      // For VaR: contribution = (Delta × σ_units)² where σ_units converts volatility to delta units
+      // Since delta is per 0.01 change and volatility is a decimal (0.15 = 15%),
+      // we need: σ_units = volatility × current_value / 0.01
+      // But for simplicity, we'll use: contribution = (Delta × volatility × scale_factor)²
+      // where scale_factor accounts for the unit conversion
+      if (earthGreeks.delta) {
+        Object.entries(earthGreeks.delta).forEach(([input, delta]) => {
+          const vol = inputVolatilities[input] || 0.15;
+          let deltaValue = typeof delta === 'object' && delta !== null ? delta.value : delta;
+          // Ensure deltaValue is a valid number
+          if (deltaValue == null || isNaN(deltaValue) || !isFinite(deltaValue)) {
+            deltaValue = 0;
+          }
+          // Delta is in $B per 0.01 change (1 percentage point)
+          // Volatility is a decimal (0.15 = 15% standard deviation)
+          // For percentage inputs, we need to scale: if input is 0.15 and vol is 0.15,
+          // then std dev in units = 0.15 × 0.15 = 0.0225, which is 2.25 percentage points
+          // So we scale volatility by 100 to convert to percentage points: vol × 100
+          // Then: contribution = (Delta × vol × 100)² = (Delta × vol × 10)²
+          // Actually, let's use a more conservative approach: vol as percentage points directly
+          const volInPercentagePoints = vol * 100; // Convert 0.15 to 15 percentage points
+          const contribution = Math.pow(deltaValue * volInPercentagePoints / 100, 2); // Divide by 100 to get back to delta units
+          // Simplified: contribution = (Delta × vol)², treating vol as the multiplier
+          const simplifiedContribution = Math.pow(deltaValue * vol, 2);
+          
+          // Use the simplified version but cap it to prevent overflow
+          if (Math.abs(deltaValue) > 1e6) {
+            console.warn(`VaR Debug - Delta value very large for ${input}:`, deltaValue, '- capping contribution');
+            // Cap delta to prevent overflow
+            deltaValue = Math.sign(deltaValue) * Math.min(Math.abs(deltaValue), 1e6);
+          }
+          const finalContribution = Math.pow(deltaValue * vol, 2);
+          if (isFinite(finalContribution) && finalContribution < 1e15) { // Prevent Infinity, allow large but reasonable values
+            earthVariance += finalContribution;
+            varResult.breakdown.push({
+              component: 'Earth',
+              input,
+              delta: deltaValue,
+              volatility: vol,
+              contribution: finalContribution
+            });
+          } else {
+            console.log('VaR Debug - Invalid Earth contribution:', { input, deltaValue, vol, contribution: finalContribution });
+          }
+        });
+      }
+      console.log('VaR Greeks Debug - After Earth:', { earthVariance });
+      
+      // Mars Greeks contribution
+      if (marsGreeks.delta) {
+        Object.entries(marsGreeks.delta).forEach(([input, delta]) => {
+          const vol = inputVolatilities[input] || 0.15;
+          let deltaValue = typeof delta === 'object' && delta !== null ? delta.value : delta;
+          // Ensure deltaValue is a valid number
+          if (deltaValue == null || isNaN(deltaValue) || !isFinite(deltaValue)) {
+            deltaValue = 0;
+          }
+          // Cap delta to prevent overflow
+          if (Math.abs(deltaValue) > 1e6) {
+            console.warn(`VaR Debug - Delta value very large for ${input}:`, deltaValue, '- capping contribution');
+            deltaValue = Math.sign(deltaValue) * Math.min(Math.abs(deltaValue), 1e6);
+          }
+          const finalContribution = Math.pow(deltaValue * vol, 2);
+          if (isFinite(finalContribution) && finalContribution < 1e15) { // Prevent Infinity
+            marsVariance += finalContribution;
+            varResult.breakdown.push({
+              component: 'Mars',
+              input,
+              delta: deltaValue,
+              volatility: vol,
+              contribution: finalContribution
+            });
+          } else {
+            console.log('VaR Debug - Invalid Mars contribution:', { input, deltaValue, vol, contribution: finalContribution });
+          }
+        });
+      }
+      console.log('VaR Greeks Debug - After Mars:', { marsVariance });
+      
+      // Add Vega contribution (volatility risk)
+      if (earthGreeks.vega && typeof earthGreeks.vega === 'object') {
+        Object.values(earthGreeks.vega).forEach(vega => {
+          const vegaValue = typeof vega === 'object' && vega !== null ? vega.value : vega;
+          if (vegaValue != null && isFinite(vegaValue) && !isNaN(vegaValue)) {
+            const volVol = 0.30; // Volatility of volatility
+            const vegaContribution = Math.pow(vegaValue * volVol, 2);
+            if (isFinite(vegaContribution)) {
+              earthVariance += vegaContribution;
+            }
+          }
+        });
+      }
+      
+      if (marsGreeks.vega && typeof marsGreeks.vega === 'object') {
+        Object.values(marsGreeks.vega).forEach(vega => {
+          const vegaValue = typeof vega === 'object' && vega !== null ? vega.value : vega;
+          if (vegaValue != null && isFinite(vegaValue) && !isNaN(vegaValue)) {
+            const volVol = 0.30;
+            const vegaContribution = Math.pow(vegaValue * volVol, 2);
+            if (isFinite(vegaContribution)) {
+              marsVariance += vegaContribution;
+            }
+          }
+        });
+      }
+      
+      // Calculate Greeks-based VaR risk in $B
+      // VaR = √(Σ(Delta² × σ²)) × z-score × √time
+      // Ensure variance is finite and positive
+      const safeEarthVariance = isFinite(earthVariance) && earthVariance > 0 ? earthVariance : 0;
+      const safeMarsVariance = isFinite(marsVariance) && marsVariance > 0 ? marsVariance : 0;
+      
+      const earthStdDev = Math.sqrt(safeEarthVariance);
+      const marsStdDev = Math.sqrt(safeMarsVariance);
+      
+      // Calculate risk: stdDev * zScore * timeFactor
+      // Ensure all components are finite
+      const safeEarthStdDev = isFinite(earthStdDev) ? earthStdDev : 0;
+      const safeMarsStdDev = isFinite(marsStdDev) ? marsStdDev : 0;
+      const safeZScore = isFinite(zScore) ? zScore : 2.326;
+      const safeTimeFactor = isFinite(timeFactor) ? timeFactor : Math.sqrt(10 / 252);
+      
+      const earthGreeksRisk = safeEarthStdDev * safeZScore * safeTimeFactor;
+      const marsGreeksRisk = safeMarsStdDev * safeZScore * safeTimeFactor;
+      
+      // Debug logging
+      console.log('VaR Calculation Debug:', {
+        earthVariance: safeEarthVariance,
+        marsVariance: safeMarsVariance,
+        earthStdDev: safeEarthStdDev,
+        marsStdDev: safeMarsStdDev,
+        zScore: safeZScore,
+        timeFactor: safeTimeFactor,
+        earthGreeksRisk,
+        marsGreeksRisk,
+        earthGreeksRiskValid: isFinite(earthGreeksRisk),
+        marsGreeksRiskValid: isFinite(marsGreeksRisk)
+      });
+      
+      // Ensure we have valid numbers (not NaN or Infinity)
+      varResult.components.earth.greeksRisk = isFinite(earthGreeksRisk) && !isNaN(earthGreeksRisk) && earthGreeksRisk >= 0 ? earthGreeksRisk : 0;
+      varResult.components.mars.greeksRisk = isFinite(marsGreeksRisk) && !isNaN(marsGreeksRisk) && marsGreeksRisk >= 0 ? marsGreeksRisk : 0;
+    }
+    
+    // Monte Carlo VaR calculation
+    if (method === 'monte-carlo' || method === 'combined') {
+      try {
+        // Use Monte Carlo simulation results if available
+        const monteCarloResponse = await fetch(`http://localhost:${PORT}/api/monte-carlo/scenarios`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            baseInputs: baseModel?.inputs || {},
+            runs: 10000,
+            scenarios: ['2030-earth-only', '2040-earth-mars']
+          })
+        });
+        
+        if (monteCarloResponse.ok) {
+          const mcData = await monteCarloResponse.json();
+          const scenarios = mcData.data?.scenarios || {};
+          
+          // Calculate VaR from Monte Carlo distribution
+          // Find the percentile corresponding to (1 - confidence)
+          const percentile = (1 - confidence) * 100;
+          
+          // For Earth component (2030 scenario)
+          if (scenarios['2030-earth-only']) {
+            const earthDistribution = scenarios['2030-earth-only'].distribution || [];
+            if (earthDistribution.length > 0) {
+              const sortedValues = earthDistribution.map(bin => bin.value || 0).sort((a, b) => a - b);
+              const varIndex = Math.floor(sortedValues.length * (1 - confidence));
+              const varValue = sortedValues[Math.max(0, varIndex)];
+              const earthMonteCarloRisk = Math.max(0, currentValuation - varValue);
+              varResult.components.earth.monteCarloRisk = earthMonteCarloRisk;
+            }
+          }
+          
+          // For Mars component (2040 scenario)
+          if (scenarios['2040-earth-mars']) {
+            const marsDistribution = scenarios['2040-earth-mars'].distribution || [];
+            if (marsDistribution.length > 0) {
+              const sortedValues = marsDistribution.map(bin => bin.value || 0).sort((a, b) => a - b);
+              const varIndex = Math.floor(sortedValues.length * (1 - confidence));
+              const varValue = sortedValues[Math.max(0, varIndex)];
+              const marsMonteCarloRisk = Math.max(0, currentValuation - varValue);
+              varResult.components.mars.monteCarloRisk = marsMonteCarloRisk;
+            }
+          }
+        }
+      } catch (error) {
+        console.warn('Could not calculate Monte Carlo VaR:', error.message);
+        // Use simplified Monte Carlo risk estimate
+        const mcRiskPercent = 0.15; // 15% of valuation as rough estimate
+        varResult.components.earth.monteCarloRisk = currentValuation * mcRiskPercent * 0.6;
+        varResult.components.mars.monteCarloRisk = currentValuation * mcRiskPercent * 0.4;
+      }
+    }
+    
+    // Combine methods - ensure all values are numbers
+    const earthGreeksRisk = varResult.components.earth.greeksRisk || 0;
+    const marsGreeksRisk = varResult.components.mars.greeksRisk || 0;
+    const earthMonteCarloRisk = varResult.components.earth.monteCarloRisk || 0;
+    const marsMonteCarloRisk = varResult.components.mars.monteCarloRisk || 0;
+    
+    if (method === 'combined') {
+      varResult.components.earth.varContribution = 
+        Math.sqrt(Math.pow(earthGreeksRisk, 2) + Math.pow(earthMonteCarloRisk, 2));
+      varResult.components.mars.varContribution = 
+        Math.sqrt(Math.pow(marsGreeksRisk, 2) + Math.pow(marsMonteCarloRisk, 2));
+    } else if (method === 'greeks') {
+      varResult.components.earth.varContribution = earthGreeksRisk;
+      varResult.components.mars.varContribution = marsGreeksRisk;
+    } else {
+      varResult.components.earth.varContribution = earthMonteCarloRisk;
+      varResult.components.mars.varContribution = marsMonteCarloRisk;
+    }
+    
+    // Ensure contributions are valid numbers
+    varResult.components.earth.varContribution = isFinite(varResult.components.earth.varContribution) ? varResult.components.earth.varContribution : 0;
+    varResult.components.mars.varContribution = isFinite(varResult.components.mars.varContribution) ? varResult.components.mars.varContribution : 0;
+    
+    // Total VaR
+    varResult.varValue = varResult.components.earth.varContribution + varResult.components.mars.varContribution;
+    varResult.varPercent = currentValuation > 0 ? (varResult.varValue / currentValuation) * 100 : 0;
+    
+    // Expected Shortfall (Conditional VaR) - average loss beyond VaR threshold
+    varResult.expectedShortfall = varResult.varValue * 1.2; // Simplified: 20% higher than VaR
+    
+    res.json({
+      success: true,
+      data: varResult
+    });
+  } catch (error) {
+    console.error('VaR calculation error:', error);
     res.status(500).json({
       success: false,
       error: error.message
@@ -1565,6 +2418,231 @@ app.get('/api/models/:id/monte-carlo-config', (req, res) => {
     success: true,
     data: null
   });
+});
+
+// Comparables API endpoint
+app.get('/api/comparables', async (req, res) => {
+  try {
+    const sector = req.query.sector || 'space';
+    
+    // Sample comparable companies data
+    // In production, this would fetch from a financial API like Alpha Vantage, Yahoo Finance, or Fundamentals API
+    const comparablesData = {
+      space: [
+        {
+          name: 'SpaceX',
+          ticker: 'SPACEX (Private)',
+          marketCap: 180e9, // $180B estimated valuation
+          evRevenue: 10.5, // Estimated based on ~$17B revenue
+          evEbitda: 25.0, // Estimated - SpaceX is profitable
+          peRatio: null, // Not public
+          pegRatio: null,
+          revenueGrowth: 0.40 // 40% estimated growth
+        },
+        {
+          name: 'Rocket Lab',
+          ticker: 'RKLB',
+          marketCap: 2.1e9, // $2.1B
+          evRevenue: 8.5,
+          evEbitda: null, // Not profitable yet
+          peRatio: null,
+          pegRatio: null,
+          revenueGrowth: 0.35 // 35%
+        },
+        {
+          name: 'Astra Space',
+          ticker: 'ASTR',
+          marketCap: 0.3e9, // $300M
+          evRevenue: 12.0,
+          evEbitda: null,
+          peRatio: null,
+          pegRatio: null,
+          revenueGrowth: 0.20
+        },
+        {
+          name: 'Virgin Galactic',
+          ticker: 'SPCE',
+          marketCap: 0.8e9, // $800M
+          evRevenue: 15.0,
+          evEbitda: null,
+          peRatio: null,
+          pegRatio: null,
+          revenueGrowth: 0.10
+        },
+        {
+          name: 'Planet Labs',
+          ticker: 'PL',
+          marketCap: 0.6e9, // $600M
+          evRevenue: 6.5,
+          evEbitda: null,
+          peRatio: null,
+          pegRatio: null,
+          revenueGrowth: 0.25
+        }
+      ],
+      tech: [
+        {
+          name: 'Tesla',
+          ticker: 'TSLA',
+          marketCap: 800e9, // $800B
+          evRevenue: 8.2,
+          evEbitda: 35.5,
+          peRatio: 65.0,
+          pegRatio: 1.8,
+          revenueGrowth: 0.25
+        },
+        {
+          name: 'Amazon',
+          ticker: 'AMZN',
+          marketCap: 1500e9, // $1.5T
+          evRevenue: 2.8,
+          evEbitda: 18.5,
+          peRatio: 45.0,
+          pegRatio: 1.2,
+          revenueGrowth: 0.12
+        },
+        {
+          name: 'Alphabet',
+          ticker: 'GOOGL',
+          marketCap: 1600e9, // $1.6T
+          evRevenue: 5.2,
+          evEbitda: 12.5,
+          peRatio: 24.0,
+          pegRatio: 1.0,
+          revenueGrowth: 0.10
+        },
+        {
+          name: 'Microsoft',
+          ticker: 'MSFT',
+          marketCap: 2800e9, // $2.8T
+          evRevenue: 10.5,
+          evEbitda: 20.0,
+          peRatio: 32.0,
+          pegRatio: 1.5,
+          revenueGrowth: 0.15
+        },
+        {
+          name: 'Apple',
+          ticker: 'AAPL',
+          marketCap: 3000e9, // $3T
+          evRevenue: 7.5,
+          evEbitda: 22.0,
+          peRatio: 28.0,
+          pegRatio: 1.3,
+          revenueGrowth: 0.08
+        }
+      ],
+      telecom: [
+        {
+          name: 'Viasat',
+          ticker: 'VSAT',
+          marketCap: 2.5e9, // $2.5B
+          evRevenue: 3.2,
+          evEbitda: 8.5,
+          peRatio: 15.0,
+          pegRatio: 0.9,
+          revenueGrowth: 0.05
+        },
+        {
+          name: 'Eutelsat',
+          ticker: 'ETL.PA',
+          marketCap: 1.8e9, // $1.8B
+          evRevenue: 2.8,
+          evEbitda: 7.2,
+          peRatio: 12.0,
+          pegRatio: 0.8,
+          revenueGrowth: 0.03
+        },
+        {
+          name: 'Telesat',
+          ticker: 'TSAT',
+          marketCap: 0.9e9, // $900M
+          evRevenue: 4.5,
+          evEbitda: 10.0,
+          peRatio: 18.0,
+          pegRatio: 1.1,
+          revenueGrowth: 0.08
+        },
+        {
+          name: 'Iridium',
+          ticker: 'IRDM',
+          marketCap: 4.2e9, // $4.2B
+          evRevenue: 5.5,
+          evEbitda: 12.0,
+          peRatio: 22.0,
+          pegRatio: 1.2,
+          revenueGrowth: 0.12
+        }
+      ],
+      aerospace: [
+        {
+          name: 'Boeing',
+          ticker: 'BA',
+          marketCap: 120e9, // $120B
+          evRevenue: 1.8,
+          evEbitda: 25.0,
+          peRatio: null, // Negative earnings
+          pegRatio: null,
+          revenueGrowth: -0.05
+        },
+        {
+          name: 'Lockheed Martin',
+          ticker: 'LMT',
+          marketCap: 110e9, // $110B
+          evRevenue: 1.5,
+          evEbitda: 12.5,
+          peRatio: 18.0,
+          pegRatio: 1.5,
+          revenueGrowth: 0.04
+        },
+        {
+          name: 'Northrop Grumman',
+          ticker: 'NOC',
+          marketCap: 70e9, // $70B
+          evRevenue: 1.8,
+          evEbitda: 13.0,
+          peRatio: 19.0,
+          pegRatio: 1.6,
+          revenueGrowth: 0.05
+        },
+        {
+          name: 'Raytheon',
+          ticker: 'RTX',
+          marketCap: 140e9, // $140B
+          evRevenue: 2.0,
+          evEbitda: 15.0,
+          peRatio: 20.0,
+          pegRatio: 1.4,
+          revenueGrowth: 0.06
+        },
+        {
+          name: 'General Dynamics',
+          ticker: 'GD',
+          marketCap: 75e9, // $75B
+          evRevenue: 1.6,
+          evEbitda: 11.5,
+          peRatio: 17.0,
+          pegRatio: 1.3,
+          revenueGrowth: 0.03
+        }
+      ]
+    };
+    
+    const companies = comparablesData[sector] || comparablesData.space;
+    
+    res.json({
+      success: true,
+      data: companies,
+      sector: sector,
+      note: 'Data is sample data. In production, integrate with financial APIs like Alpha Vantage, Yahoo Finance, or Fundamentals API.'
+    });
+  } catch (error) {
+    console.error('Error fetching comparables:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
 });
 
 // AI endpoints
@@ -1949,6 +3027,60 @@ Keep it concise and actionable.`;
       success: true,
       data: {
         commentary: `Valuation changed by ${pctChange >= 0 ? '+' : ''}${pctChange}% (${totalChange >= 0 ? '+' : ''}${totalChange.toFixed(1)}B). ${topContributor ? `The primary driver was ${topContributor.input} (${topContributor.totalContribution >= 0 ? '+' : ''}${topContributor.totalContribution.toFixed(1)}B).` : ''} Monitor the top contributors for risk management.`
+      }
+    });
+  }
+});
+
+// AI Commentary for VaR
+app.post('/api/ai/var/commentary', async (req, res) => {
+  try {
+    const { varValue, varPercent, currentValuation, method, confidence, timeHorizon, components } = req.body;
+    
+    // Generate AI commentary using fetch to Anthropic API
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+    if (!apiKey) {
+      throw new Error('ANTHROPIC_API_KEY not configured');
+    }
+    
+    // Get model from request header or use default
+    const requestedModel = req.headers['x-ai-model'] || process.env.ANTHROPIC_DEFAULT_MODEL || 'claude-opus-4-1-20250805';
+    
+    const prompt = `Analyze the following Value at Risk (VaR) calculation for a SpaceX valuation model and provide concise, actionable insights (2-3 sentences max):
+
+Current Valuation: $${currentValuation.toFixed(1)}B
+VaR (${(confidence * 100).toFixed(1)}% confidence, ${timeHorizon} days): $${varValue.toFixed(1)}B (${varPercent.toFixed(2)}% of valuation)
+Method: ${method}
+Expected Shortfall: $${(varValue * 1.2).toFixed(1)}B
+
+Risk Breakdown:
+- Earth Component: $${components.earth.varContribution.toFixed(1)}B (Greeks: $${components.earth.greeksRisk.toFixed(1)}B, Monte Carlo: $${components.earth.monteCarloRisk.toFixed(1)}B)
+- Mars Component: $${components.mars.varContribution.toFixed(1)}B (Greeks: $${components.mars.greeksRisk.toFixed(1)}B, Monte Carlo: $${components.mars.monteCarloRisk.toFixed(1)}B)
+
+Provide insights on:
+1. Risk level assessment (high/medium/low)
+2. Primary risk drivers (which component/method contributes most)
+3. Risk management recommendations
+
+Keep it concise and actionable.`;
+
+    const commentary = await callAIAPI(requestedModel, prompt, 300);
+    
+    res.json({
+      success: true,
+      data: {
+        commentary: commentary
+      }
+    });
+  } catch (error) {
+    console.error('AI VaR commentary error:', error);
+    // Fallback commentary if AI fails
+    const riskLevel = varPercent > 20 ? 'high' : varPercent > 10 ? 'medium' : 'low';
+    const primaryComponent = components.earth.varContribution > components.mars.varContribution ? 'Earth' : 'Mars';
+    res.json({
+      success: true,
+      data: {
+        commentary: `VaR analysis shows ${riskLevel} risk exposure (${varPercent.toFixed(2)}% of valuation). The ${primaryComponent} component contributes the most to overall risk. Monitor key inputs and consider hedging strategies for high-risk scenarios.`
       }
     });
   }

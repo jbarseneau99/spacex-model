@@ -82,3 +82,6 @@ Store multiple scenario calculations:
 
 **Best Approach**: Use formulajs for critical formulas, read pre-calculated values for everything else.
 
+
+
+

@@ -11,9 +11,22 @@ class ValuationApp {
         this.currentData = null;
         this.currentModelName = null;
         this.currentGreeksData = null; // Store current Greeks data for micro AI
+        this.currentFactorRiskData = null; // Store current factor risk data
+        this.combinedRiskChartInstance = null; // Chart.js instance for combined risk
+        this.factorRiskChartInstance = null; // Chart.js instance for factor risk chart
+        this.factorExposureChartInstance = null; // Chart.js instance for factor exposure chart
         this.autoRunningMonteCarlo = false; // Flag to track auto-runs
         this.pendingMonteCarloRun = null; // Store pending run parameters
         this.currentMonteCarloConfig = null; // Store Monte Carlo config from loaded model
+        this.currentMonteCarloSimulations = []; // Store simulation results for table display
+        this.simulationsCurrentPage = 1; // Current page for simulations table
+        this.monteCarloDebounceTimer = null; // Debounce timer for input changes
+        this.isInitializing = true; // Flag to track initialization phase
+        this.autoRunningVaR = false; // Flag to track VaR auto-runs
+        this.varDebounceTimer = null; // Debounce timer for VaR input changes
+        this.autoRunningAttribution = false; // Flag to track Attribution auto-runs
+        this.attributionDebounceTimer = null; // Debounce timer for Attribution input changes
+        this.currentComparablesData = null; // Store current comparables data for charts
         this.aiModel = localStorage.getItem('aiModel') || 'claude-opus-4-1-20250805'; // Default AI model
         this.charts = {
             valuation: null,
@@ -43,7 +56,13 @@ class ValuationApp {
             deltaHeatmap: null,
             earthGreeks: null,
             marsGreeks: null,
-            attribution: null
+            attribution: null,
+            var: null,
+            varEarth: null,
+            varMars: null,
+            evRevenue: null,
+            evEbitda: null,
+            growthValuation: null
         };
         // Cache for aiTips - keyed by chartId and data hash
         this.aiTipCache = {};
@@ -53,12 +72,38 @@ class ValuationApp {
     async init() {
         this.setupEventListeners();
         this.setupAttributionListeners();
+        this.setupVaRListeners();
+        this.setupRatiosListeners();
         this.initSettingsModal();
         this.loadScenarios();
+        
+        // Initialize Monte Carlo empty state
+        this.initMonteCarloView();
         
         // Auto-load first model on startup
         await this.autoLoadFirstModel();
         this.loadSavedInputs();
+        
+        // Run Monte Carlo simulation, VaR, and Attribution calculations on initialization (after model loads)
+        // The model load will trigger auto-run, so we don't need to call it here
+        this.isInitializing = false;
+    }
+    
+    initMonteCarloView() {
+        // Show empty state if no results exist
+        const resultsSection = document.getElementById('monteCarloResultsSection');
+        const emptyState = document.getElementById('monteCarloEmptyState');
+        
+        if (resultsSection && emptyState) {
+            const hasResults = resultsSection.style.display === 'block' && this.currentMonteCarloData;
+            if (!hasResults) {
+                resultsSection.style.display = 'none';
+                emptyState.style.display = 'block';
+            } else {
+                resultsSection.style.display = 'block';
+                emptyState.style.display = 'none';
+            }
+        }
     }
 
     setupEventListeners() {
@@ -118,6 +163,11 @@ class ValuationApp {
         // Sensitivity analysis
         document.getElementById('runSensitivityBtn')?.addEventListener('click', () => {
             this.runSensitivityAnalysis();
+        });
+        
+        // Sensitivity info button
+        document.getElementById('sensitivityInfoBtn')?.addEventListener('click', () => {
+            this.openSensitivityInfo();
         });
 
         // Update sensitivity ranges when variable changes
@@ -214,15 +264,49 @@ class ValuationApp {
         document.getElementById('runCustomStressBtn').addEventListener('click', () => {
             this.runCustomStressTest();
         });
+        
+        // Stress Testing info button
+        document.getElementById('stressInfoBtn')?.addEventListener('click', () => {
+            this.openStressInfo();
+        });
 
         // Greeks calculation button
         document.getElementById('calculateGreeksBtn')?.addEventListener('click', () => {
             this.calculateGreeks();
         });
 
-        // Monte Carlo simulation
+        // Factor Risk handlers
+        document.getElementById('calculateFactorRiskBtn')?.addEventListener('click', () => {
+            this.calculateFactorRisk();
+        });
+        document.getElementById('runStressTestBtn')?.addEventListener('click', () => {
+            this.runFactorStressTest();
+        });
+        
+        // Auto-calculate when factor model changes
+        document.getElementById('factorModelSelect')?.addEventListener('change', () => {
+            this.calculateFactorRisk();
+        });
+
+        // Close factor risk info panel when clicking outside
+        document.addEventListener('click', (e) => {
+            const panel = document.getElementById('factorRiskInfoPanel');
+            const iconContainer = document.getElementById('factorRiskInfoIconContainer');
+            if (panel && panel.style.display !== 'none' && 
+                !panel.contains(e.target) && 
+                !iconContainer?.contains(e.target)) {
+                this.closeFactorRiskInfo();
+            }
+        });
+
+        // Monte Carlo simulation - always rerun and save
         document.getElementById('runMonteCarloBtn').addEventListener('click', () => {
-            this.runMonteCarloSimulation();
+            this.runMonteCarloSimulation(true); // Skip validation - always rerun
+        });
+        
+        // Monte Carlo info button
+        document.getElementById('monteCarloInfoBtn')?.addEventListener('click', () => {
+            this.openMonteCarloInfo();
         });
 
         // Scenario comparison
@@ -329,7 +413,7 @@ class ValuationApp {
             });
         });
 
-        // Insights tab switching (works for both Insights and Charts views)
+        // Insights tab switching (works for both Insights, Charts, and Monte Carlo views)
         document.querySelectorAll('.insights-tab').forEach(tab => {
             tab.addEventListener('click', () => {
                 const tabName = tab.dataset.tab;
@@ -337,17 +421,26 @@ class ValuationApp {
                 
                 // Remove active class from all tabs in this view only
                 viewContainer.querySelectorAll('.insights-tab').forEach(t => t.classList.remove('active'));
-                viewContainer.querySelectorAll('.insights-tab-content').forEach(c => c.classList.remove('active'));
+                viewContainer.querySelectorAll('.insights-tab-content').forEach(c => {
+                    c.classList.remove('active');
+                    c.style.display = 'none';
+                });
                 
                 // Add active class to clicked tab and corresponding content
                 tab.classList.add('active');
                 const contentEl = document.getElementById(`insightsTab-${tabName}`);
                 if (contentEl) {
                     contentEl.classList.add('active');
+                    contentEl.style.display = 'block';
                 }
                 
                 // Refresh icons
                 if (window.lucide) window.lucide.createIcons();
+                
+                // If switching to simulations tab, update table
+                if (tabName === 'simulations') {
+                    this.updateSimulationsTable();
+                }
                 
                 // Update chart if switching to a chart tab
                 if (this.currentData && ['cashFlywheel', 'marsCapital', 'enterpriseValue', 'starshipCost', 'orbitalPower', 'marginEvolution', 'unitEconomics', 'capexEfficiency'].includes(tabName)) {
@@ -391,11 +484,52 @@ class ValuationApp {
         if (modelSort) modelSort.addEventListener('change', () => this.loadModels());
         if (showFavoritesOnly) showFavoritesOnly.addEventListener('change', () => this.loadModels());
 
-        // Input changes trigger recalculation
+        // Simulations table controls
+        const simulationsSearch = document.getElementById('simulationsSearch');
+        const simulationsPageSize = document.getElementById('simulationsPageSize');
+        const exportSimulationsBtn = document.getElementById('exportSimulationsBtn');
+        
+        if (simulationsSearch) {
+            simulationsSearch.addEventListener('input', () => {
+                this.simulationsCurrentPage = 1; // Reset to first page on search
+                this.updateSimulationsTable();
+            });
+        }
+        if (simulationsPageSize) {
+            simulationsPageSize.addEventListener('change', () => {
+                this.simulationsCurrentPage = 1; // Reset to first page on page size change
+                this.updateSimulationsTable();
+            });
+        }
+        if (exportSimulationsBtn) {
+            exportSimulationsBtn.addEventListener('click', () => {
+                this.exportSimulationsToCSV();
+            });
+        }
+
+        // Input changes trigger recalculation and auto-run Monte Carlo and VaR
         document.querySelectorAll('#inputs input').forEach(input => {
             input.addEventListener('change', () => {
                 // Auto-save on change
                 this.saveInputs();
+                // Auto-run Monte Carlo simulation, VaR, and Attribution after input change (debounced)
+                if (!this.isInitializing) {
+                    this.debouncedAutoRunMonteCarlo('parameter-change');
+                    this.debouncedAutoRunVaR('parameter-change');
+                    this.debouncedAutoRunAttribution('parameter-change');
+                }
+            });
+        });
+        
+        // Also listen to checkbox changes
+        document.querySelectorAll('#inputs input[type="checkbox"]').forEach(input => {
+            input.addEventListener('change', () => {
+                this.saveInputs();
+                if (!this.isInitializing) {
+                    this.debouncedAutoRunMonteCarlo('parameter-change');
+                    this.debouncedAutoRunVaR('parameter-change');
+                    this.debouncedAutoRunAttribution('parameter-change');
+                }
             });
         });
     }
@@ -433,13 +567,6 @@ class ValuationApp {
             }
         }
 
-        // Update charts when switching to charts view
-        if (viewName === 'charts') {
-            if (this.currentData) {
-                this.updateChartsView(this.currentData).catch(err => console.error('Error updating charts:', err));
-            }
-        }
-
         // Auto-calculate scenarios when switching to scenarios view
         if (viewName === 'scenarios') {
             this.autoCalculateScenarios();
@@ -455,6 +582,11 @@ class ValuationApp {
             this.calculateGreeks();
         }
 
+        // Auto-calculate Factor Risk when switching to factor-risk view
+        if (viewName === 'factor-risk') {
+            this.calculateFactorRisk();
+        }
+
         // Load models for attribution when switching to attribution view
         if (viewName === 'attribution') {
             this.loadModelsForAttribution();
@@ -468,20 +600,19 @@ class ValuationApp {
             if (viewName === 'mars' && this.currentData.mars) {
                 this.updateMarsView(this.currentData);
             }
-            // Insights and Charts views are handled in switchView
         }
 
-        // Update Monte Carlo config display when switching to Monte Carlo tab
-        if (viewName === 'monte-carlo') {
-            if (this.currentMonteCarloConfig) {
-                this.displayMonteCarloConfig(this.currentMonteCarloConfig, true);
-            } else {
-                this.displayMonteCarloConfig(null, false);
+        // Update charts when switching to charts view
+        if (viewName === 'charts') {
+            if (this.currentData) {
+                this.updateChartsView(this.currentData).catch(err => console.error('Error updating charts:', err));
             }
         }
+    }
 
-        // Refresh icons
-        lucide.createIcons();
+    // Alias for switchView to match onclick handlers in HTML
+    showView(viewName) {
+        this.switchView(viewName);
     }
 
     getInputs() {
@@ -3445,6 +3576,9 @@ class ValuationApp {
             }
         }
         
+        // Check if we have factor risk data and update combined view
+        this.updateCombinedRiskView();
+        
         // Initialize AI explanation icons
         if (window.lucide) window.lucide.createIcons();
         
@@ -3456,6 +3590,530 @@ class ValuationApp {
         // AI commentary is now triggered via the icon click handler
         // This function is kept for backward compatibility but does nothing
         return;
+    }
+
+    // Factor Risk Analysis
+    async calculateFactorRisk() {
+        const modelId = document.getElementById('factorModelSelect')?.value || 'barra-style';
+        const currentValuation = this.currentResults?.total || this.currentData?.total || 800; // Fallback to $800B
+
+        try {
+            const response = await fetch('/api/factor-models/calculate', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    modelId,
+                    valuationData: { valuation: currentValuation },
+                    marketData: null
+                })
+            });
+
+            const result = await response.json();
+            if (!result.success) {
+                throw new Error(result.error || 'Failed to calculate factor risk');
+            }
+
+            this.displayFactorRisk(result.data);
+        } catch (error) {
+            console.error('Factor risk calculation error:', error);
+            alert(`Error calculating factor risk: ${error.message}`);
+        }
+    }
+
+    displayFactorRisk(data) {
+        const dashboard = document.getElementById('factorRiskDashboard');
+        if (!dashboard) return;
+
+        dashboard.style.display = 'block';
+
+        // Store factor risk data for combined view
+        this.currentFactorRiskData = data;
+
+        // Update model info
+        const modelSelect = document.getElementById('factorModelSelect');
+        const selectedOption = modelSelect?.options[modelSelect.selectedIndex];
+        document.getElementById('factorModelName').textContent = selectedOption?.text || '--';
+        document.getElementById('factorModelDescription').textContent = selectedOption?.title || '--';
+        
+        const totalRisk = (data.totalFactorRisk * 100).toFixed(1);
+        document.getElementById('totalFactorRisk').textContent = `${totalRisk}%`;
+
+        // Update exposures table
+        this.updateFactorExposuresTable(data);
+
+        // Update charts
+        this.updateFactorRiskCharts(data);
+
+        // Update stress test factor dropdown
+        this.updateStressTestFactors(data.exposures);
+
+        // Update combined risk view if Greeks are also calculated
+        this.updateCombinedRiskView();
+
+        if (window.lucide) window.lucide.createIcons();
+    }
+
+    updateCombinedRiskView() {
+        const combinedView = document.getElementById('combinedRiskView');
+        const placeholder = document.getElementById('combinedRiskPlaceholder');
+        
+        if (!combinedView || !placeholder) return;
+
+        const greeksData = this.currentGreeksData;
+        const factorData = this.currentFactorRiskData;
+
+        // Only show if both are available
+        if (!greeksData || !factorData) {
+            combinedView.style.display = 'none';
+            placeholder.style.display = 'block';
+            return;
+        }
+
+        combinedView.style.display = 'block';
+        placeholder.style.display = 'none';
+
+        // Calculate Greeks risk (simplified: sum of absolute Greeks)
+        const greeksRisk = this.calculateGreeksRisk(greeksData);
+        const factorRisk = factorData.totalFactorRisk * 100; // Convert to percentage
+        
+        // Total risk (simplified: geometric mean assuming low correlation)
+        const totalRisk = Math.sqrt(greeksRisk * greeksRisk + factorRisk * factorRisk);
+
+        document.getElementById('greeksRiskTotal').textContent = `${greeksRisk.toFixed(1)}%`;
+        document.getElementById('factorRiskTotal').textContent = `${factorRisk.toFixed(1)}%`;
+        document.getElementById('totalCombinedRisk').textContent = `${totalRisk.toFixed(1)}%`;
+
+        // Update combined risk chart
+        this.updateCombinedRiskChart(greeksRisk, factorRisk, totalRisk);
+    }
+
+    calculateGreeksRisk(greeksData) {
+        // Simplified Greeks risk calculation
+        // In practice, this would use variance-covariance matrix
+        const summary = greeksData.summary || {};
+        const greeks = [
+            Math.abs(summary.totalDelta || 0),
+            Math.abs(summary.totalGamma || 0),
+            Math.abs(summary.totalVega || 0),
+            Math.abs(summary.totalTheta || 0),
+            Math.abs(summary.totalRho || 0)
+        ];
+        
+        // Normalize to percentage (assuming base valuation ~$800B)
+        const baseValuation = greeksData.baseValues?.total || 800;
+        const totalGreeks = greeks.reduce((sum, g) => sum + g, 0);
+        
+        // Convert to risk percentage (simplified)
+        return (totalGreeks / baseValuation) * 100;
+    }
+
+    updateCombinedRiskChart(greeksRisk, factorRisk, totalRisk) {
+        const ctx = document.getElementById('combinedRiskChart');
+        if (!ctx || !window.Chart) return;
+
+        // Destroy existing chart if it exists
+        if (this.combinedRiskChartInstance) {
+            this.combinedRiskChartInstance.destroy();
+        }
+
+        this.combinedRiskChartInstance = new Chart(ctx, {
+            type: 'doughnut',
+            data: {
+                labels: ['Greeks Risk', 'Factor Risk', 'Idiosyncratic Risk'],
+                datasets: [{
+                    data: [
+                        greeksRisk,
+                        factorRisk,
+                        Math.max(0, totalRisk - greeksRisk - factorRisk)
+                    ],
+                    backgroundColor: [
+                        'rgba(0, 102, 204, 0.6)',
+                        'rgba(16, 185, 129, 0.6)',
+                        'rgba(156, 163, 175, 0.6)'
+                    ]
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    legend: {
+                        position: 'bottom'
+                    },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                return `${context.label}: ${context.parsed.toFixed(1)}%`;
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    updateFactorExposuresTable(data) {
+        // Update factor tiles instead of table
+        this.updateFactorTiles(data);
+    }
+
+    updateFactorTiles(data) {
+        const container = document.getElementById('factorTilesContainer');
+        if (!container) return;
+
+        container.innerHTML = '';
+
+        const exposures = data.exposures || {};
+        const contributions = data.contributions || {};
+
+        // Group factors by type if available
+        const styleFactors = [];
+        const industryFactors = [];
+        const countryFactors = [];
+        const otherFactors = [];
+
+        const styleFactorNames = ['Growth', 'Size', 'Value', 'Momentum', 'Volatility', 'Leverage'];
+        const industryFactorNames = ['Tech', 'Aerospace', 'Telecommunications'];
+        const countryFactorNames = ['US Market', 'Market'];
+
+        for (const [factor, exposure] of Object.entries(exposures)) {
+            const contrib = contributions[factor] || {};
+            const riskContrib = (contrib.riskContribution || contrib.contribution || 0) * 100;
+            const exposureValue = exposure;
+            const exposureColor = exposureValue >= 0 ? 'var(--success-color)' : 'var(--error-color)';
+            const exposureBg = exposureValue >= 0 ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)';
+
+            const tile = document.createElement('div');
+            tile.className = 'metric-card-small';
+            tile.style.cursor = 'pointer';
+            tile.style.padding = 'var(--spacing-sm)';
+            tile.style.minHeight = 'auto';
+            tile.onclick = () => this.stressTestFactor(factor);
+            
+            tile.innerHTML = `
+                <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 4px;">
+                    <div style="font-size: 11px; font-weight: 600; line-height: 1.2; color: var(--text-primary);">${factor}</div>
+                    <button class="btn btn-xs btn-secondary" onclick="event.stopPropagation(); app.stressTestFactor('${factor}')" title="Stress Test" style="padding: 2px 4px; min-width: auto;">
+                        <i data-lucide="zap" style="width: 12px; height: 12px;"></i>
+                    </button>
+                </div>
+                <div style="font-size: 16px; font-weight: 600; color: ${exposureColor}; margin-bottom: 2px; line-height: 1;">
+                    ${exposureValue >= 0 ? '+' : ''}${exposureValue.toFixed(2)}
+                </div>
+                <div style="font-size: 9px; color: var(--text-secondary); margin-bottom: 3px;">
+                    Beta
+                </div>
+                <div style="padding: 2px 6px; background: ${exposureBg}; border-radius: 3px; font-size: 9px; color: ${exposureColor}; font-weight: 600; display: inline-block;">
+                    ${riskContrib.toFixed(1)}%
+                </div>
+            `;
+
+            // Categorize factors
+            if (styleFactorNames.includes(factor)) {
+                styleFactors.push({ factor, exposure, contrib, riskContrib, tile });
+            } else if (industryFactorNames.includes(factor)) {
+                industryFactors.push({ factor, exposure, contrib, riskContrib, tile });
+            } else if (countryFactorNames.includes(factor)) {
+                countryFactors.push({ factor, exposure, contrib, riskContrib, tile });
+            } else {
+                otherFactors.push({ factor, exposure, contrib, riskContrib, tile });
+            }
+        }
+
+        // Add grouped sections if we have categories
+        if (styleFactors.length > 0 || industryFactors.length > 0 || countryFactors.length > 0) {
+            if (styleFactors.length > 0) {
+                const section = document.createElement('div');
+                section.style.gridColumn = '1 / -1';
+                section.style.marginTop = 'var(--spacing-sm)';
+                section.innerHTML = `<h5 style="margin: 0 0 6px 0; color: var(--text-secondary); font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px;">Style Factors</h5>`;
+                container.appendChild(section);
+                styleFactors.forEach(item => container.appendChild(item.tile));
+            }
+
+            if (industryFactors.length > 0) {
+                const section = document.createElement('div');
+                section.style.gridColumn = '1 / -1';
+                section.style.marginTop = 'var(--spacing-sm)';
+                section.innerHTML = `<h5 style="margin: 0 0 6px 0; color: var(--text-secondary); font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px;">Industry Factors</h5>`;
+                container.appendChild(section);
+                industryFactors.forEach(item => container.appendChild(item.tile));
+            }
+
+            if (countryFactors.length > 0) {
+                const section = document.createElement('div');
+                section.style.gridColumn = '1 / -1';
+                section.style.marginTop = 'var(--spacing-sm)';
+                section.innerHTML = `<h5 style="margin: 0 0 6px 0; color: var(--text-secondary); font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px;">Country Factors</h5>`;
+                container.appendChild(section);
+                countryFactors.forEach(item => container.appendChild(item.tile));
+            }
+
+            if (otherFactors.length > 0) {
+                otherFactors.forEach(item => container.appendChild(item.tile));
+            }
+        } else {
+            // No categories, just add all tiles
+            for (const [factor, exposure] of Object.entries(exposures)) {
+                const contrib = contributions[factor] || {};
+                const riskContrib = (contrib.riskContribution || contrib.contribution || 0) * 100;
+                const exposureValue = exposure;
+                const exposureColor = exposureValue >= 0 ? 'var(--success-color)' : 'var(--error-color)';
+                const exposureBg = exposureValue >= 0 ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)';
+
+                const tile = document.createElement('div');
+                tile.className = 'metric-card-small';
+                tile.style.cursor = 'pointer';
+                tile.style.padding = 'var(--spacing-sm)';
+                tile.style.minHeight = 'auto';
+                tile.onclick = () => this.stressTestFactor(factor);
+                
+                tile.innerHTML = `
+                    <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 4px;">
+                        <div style="font-size: 11px; font-weight: 600; line-height: 1.2; color: var(--text-primary);">${factor}</div>
+                        <button class="btn btn-xs btn-secondary" onclick="event.stopPropagation(); app.stressTestFactor('${factor}')" title="Stress Test" style="padding: 2px 4px; min-width: auto;">
+                            <i data-lucide="zap" style="width: 12px; height: 12px;"></i>
+                        </button>
+                    </div>
+                    <div style="font-size: 16px; font-weight: 600; color: ${exposureColor}; margin-bottom: 2px; line-height: 1;">
+                        ${exposureValue >= 0 ? '+' : ''}${exposureValue.toFixed(2)}
+                    </div>
+                    <div style="font-size: 9px; color: var(--text-secondary); margin-bottom: 3px;">
+                        Beta
+                    </div>
+                    <div style="padding: 2px 6px; background: ${exposureBg}; border-radius: 3px; font-size: 9px; color: ${exposureColor}; font-weight: 600; display: inline-block;">
+                        ${riskContrib.toFixed(1)}%
+                    </div>
+                `;
+                container.appendChild(tile);
+            }
+        }
+
+        // Show chart button
+        const chartsBtn = document.getElementById('showChartsBtn');
+        if (chartsBtn) chartsBtn.style.display = 'inline-flex';
+
+        if (window.lucide) window.lucide.createIcons();
+    }
+
+    showFactorChart(chartType) {
+        const modal = document.getElementById('factorChartsModal');
+        if (!modal) return;
+
+        modal.classList.add('active');
+        
+        // Ensure charts are rendered
+        if (this.currentFactorRiskData) {
+            // Small delay to ensure modal is visible before rendering charts
+            setTimeout(() => {
+                this.updateFactorRiskCharts(this.currentFactorRiskData);
+            }, 100);
+        }
+
+        if (window.lucide) window.lucide.createIcons();
+    }
+
+    closeFactorChartsModal() {
+        const modal = document.getElementById('factorChartsModal');
+        if (modal) {
+            modal.classList.remove('active');
+            modal.style.display = 'none';
+        }
+    }
+
+    showFactorRiskInfo(event) {
+        const panel = document.getElementById('factorRiskInfoPanel');
+        const iconContainer = document.getElementById('factorRiskInfoIconContainer');
+        if (!panel || !iconContainer) return;
+
+        // Position panel relative to icon
+        const iconRect = iconContainer.getBoundingClientRect();
+        panel.style.display = 'block';
+        panel.style.position = 'fixed';
+        panel.style.top = `${iconRect.bottom + 10}px`;
+        panel.style.left = `${iconRect.left}px`;
+        
+        // Adjust if panel would go off screen
+        setTimeout(() => {
+            const panelRect = panel.getBoundingClientRect();
+            if (panelRect.right > window.innerWidth) {
+                panel.style.left = `${window.innerWidth - panelRect.width - 20}px`;
+            }
+            if (panelRect.bottom > window.innerHeight) {
+                panel.style.top = `${iconRect.top - panelRect.height - 10}px`;
+            }
+        }, 0);
+
+        if (window.lucide) window.lucide.createIcons();
+        
+        // Prevent event bubbling
+        if (event) event.stopPropagation();
+    }
+
+    closeFactorRiskInfo() {
+        const panel = document.getElementById('factorRiskInfoPanel');
+        if (panel) {
+            panel.style.display = 'none';
+        }
+    }
+
+    updateFactorRiskCharts(data) {
+        // Factor Risk Contribution Chart
+        const riskCtx = document.getElementById('factorRiskChart');
+        if (riskCtx && window.Chart) {
+            // Destroy existing chart if it exists
+            if (this.factorRiskChartInstance) {
+                this.factorRiskChartInstance.destroy();
+                this.factorRiskChartInstance = null;
+            }
+
+            const exposures = data.exposures || {};
+            const contributions = data.contributions || {};
+
+            const factors = Object.keys(exposures);
+            const riskContribs = factors.map(f => {
+                const contrib = contributions[f] || {};
+                return Math.abs(contrib.riskContribution || contrib.contribution || 0) * 100;
+            });
+
+            this.factorRiskChartInstance = new Chart(riskCtx, {
+                type: 'bar',
+                data: {
+                    labels: factors,
+                    datasets: [{
+                        label: 'Risk Contribution (%)',
+                        data: riskContribs,
+                        backgroundColor: 'rgba(0, 102, 204, 0.6)'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    scales: {
+                        y: { beginAtZero: true }
+                    }
+                }
+            });
+        }
+
+        // Factor Exposure Comparison Chart
+        const expCtx = document.getElementById('factorExposureChart');
+        if (expCtx && window.Chart) {
+            // Destroy existing chart if it exists
+            if (this.factorExposureChartInstance) {
+                this.factorExposureChartInstance.destroy();
+                this.factorExposureChartInstance = null;
+            }
+
+            const exposures = data.exposures || {};
+            const factors = Object.keys(exposures);
+            const values = factors.map(f => exposures[f]);
+
+            this.factorExposureChartInstance = new Chart(expCtx, {
+                type: 'bar',
+                data: {
+                    labels: factors,
+                    datasets: [{
+                        label: 'Exposure (Beta)',
+                        data: values,
+                        backgroundColor: values.map(v => v >= 0 ? 'rgba(16, 185, 129, 0.6)' : 'rgba(239, 68, 68, 0.6)')
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    scales: {
+                        y: { beginAtZero: false }
+                    }
+                }
+            });
+        }
+    }
+
+    updateStressTestFactors(exposures) {
+        const select = document.getElementById('stressTestFactor');
+        if (!select) return;
+
+        select.innerHTML = '<option value="">Select factor...</option>';
+        for (const factor of Object.keys(exposures || {})) {
+            const option = document.createElement('option');
+            option.value = factor;
+            option.textContent = factor;
+            select.appendChild(option);
+        }
+    }
+
+    async runFactorStressTest() {
+        const modelId = document.getElementById('factorModelSelect')?.value || 'fama-french-3';
+        const factorName = document.getElementById('stressTestFactor')?.value;
+        const shock = parseFloat(document.getElementById('stressTestShock')?.value);
+        const baseValuation = this.currentResults?.total || 800;
+
+        if (!factorName || isNaN(shock)) {
+            alert('Please select a factor and enter a shock value');
+            return;
+        }
+
+        try {
+            const response = await fetch('/api/factor-models/stress-test', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    modelId,
+                    factorName,
+                    shock,
+                    baseValuation
+                })
+            });
+
+            const result = await response.json();
+            if (!result.success) {
+                throw new Error(result.error || 'Failed to run stress test');
+            }
+
+            this.displayStressTestResults(result.data);
+        } catch (error) {
+            console.error('Stress test error:', error);
+            alert(`Error running stress test: ${error.message}`);
+        }
+    }
+
+    stressTestFactor(factorName) {
+        document.getElementById('stressTestFactor').value = factorName;
+        this.runFactorStressTest();
+    }
+
+    displayStressTestResults(data) {
+        const resultsDiv = document.getElementById('stressTestResults');
+        if (!resultsDiv) return;
+
+        const impact = data.impact || 0;
+        const impactPct = ((impact / data.baseValuation) * 100).toFixed(1);
+        const impactColor = impact < 0 ? 'var(--error-color)' : 'var(--success-color)';
+
+        resultsDiv.innerHTML = `
+            <div class="insight-card" style="border-left: 3px solid ${impactColor}; padding: var(--spacing-md);">
+                <h4 style="margin: 0 0 var(--spacing-sm) 0;">Stress Test Results: ${data.factor}</h4>
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: var(--spacing-md);">
+                    <div>
+                        <div style="font-size: 12px; color: var(--text-secondary);">Factor Exposure</div>
+                        <div style="font-size: 20px; font-weight: 600;">${data.exposure.toFixed(2)}</div>
+                    </div>
+                    <div>
+                        <div style="font-size: 12px; color: var(--text-secondary);">Shock</div>
+                        <div style="font-size: 20px; font-weight: 600;">${(data.shock * 100).toFixed(1)}%</div>
+                    </div>
+                    <div>
+                        <div style="font-size: 12px; color: var(--text-secondary);">Impact</div>
+                        <div style="font-size: 20px; font-weight: 600; color: ${impactColor};">
+                            ${impact >= 0 ? '+' : ''}$${Math.abs(impact).toFixed(1)}B (${impactPct}%)
+                        </div>
+                    </div>
+                    <div>
+                        <div style="font-size: 12px; color: var(--text-secondary);">New Valuation</div>
+                        <div style="font-size: 20px; font-weight: 600;">$${data.newValuation.toFixed(1)}B</div>
+                    </div>
+                </div>
+            </div>
+        `;
+        resultsDiv.style.display = 'block';
     }
 
     // Standardized AI Explanation Handler - for individual Greeks
@@ -3606,6 +4264,21 @@ class ValuationApp {
                         'X-AI-Model': this.getAIModel()
                     },
                     body: JSON.stringify(this.currentAttributionData)
+                });
+            } else if (sectionId === 'varResults') {
+                // VaR commentary endpoint
+                if (!this.currentVaRData) {
+                    content.innerHTML = '<p style="margin: 0; color: var(--text-secondary);">Please calculate VaR first.</p>';
+                    if (window.lucide) window.lucide.createIcons();
+                    return;
+                }
+                response = await fetch('/api/ai/var/commentary', {
+                    method: 'POST',
+                    headers: { 
+                        'Content-Type': 'application/json',
+                        'X-AI-Model': this.getAIModel()
+                    },
+                    body: JSON.stringify(this.currentVaRData)
                 });
             } else {
                 content.innerHTML = '<p style="margin: 0; color: var(--text-secondary);">AI explanation not available.</p>';
@@ -4098,6 +4771,64 @@ class ValuationApp {
         document.getElementById('calculateAttributionBtn')?.addEventListener('click', () => {
             this.calculateAttribution();
         });
+        
+        // PnL Attribution info button
+        document.getElementById('attributionInfoBtn')?.addEventListener('click', () => {
+            this.openAttributionInfo();
+        });
+    }
+
+    setupVaRListeners() {
+        document.getElementById('calculateVaRBtn')?.addEventListener('click', () => {
+            this.calculateVaR();
+        });
+        
+        // VaR info button
+        document.getElementById('varInfoBtn')?.addEventListener('click', () => {
+            this.openVaRInfo();
+        });
+        
+        // Chart axis controls
+        const minInput = document.getElementById('varChartMin');
+        const maxInput = document.getElementById('varChartMax');
+        const resetBtn = document.getElementById('varChartReset');
+        
+        const updateChartAxis = () => {
+            if (this.currentVaRData && this.charts.var) {
+                const minVal = parseFloat(minInput?.value) || null;
+                const maxVal = parseFloat(maxInput?.value) || null;
+                this.updateVaRChart(this.currentVaRData, minVal, maxVal);
+            }
+        };
+        
+        minInput?.addEventListener('change', updateChartAxis);
+        minInput?.addEventListener('blur', updateChartAxis);
+        maxInput?.addEventListener('change', updateChartAxis);
+        maxInput?.addEventListener('blur', updateChartAxis);
+        
+        resetBtn?.addEventListener('click', () => {
+            if (minInput) minInput.value = '';
+            if (maxInput) maxInput.value = '';
+            if (this.currentVaRData && this.charts.var) {
+                // Reset zoom/pan if Chart.js zoom plugin is available
+                try {
+                    const chart = this.charts.var;
+                    // Try to reset zoom using Chart.js zoom plugin
+                    if (chart.resetZoom && typeof chart.resetZoom === 'function') {
+                        chart.resetZoom();
+                    } else if (chart.zoomScale && typeof chart.zoomScale === 'function') {
+                        chart.zoomScale('x', { min: null, max: null });
+                    } else {
+                        // Fallback: recreate chart with default range
+                        this.updateVaRChart(this.currentVaRData);
+                    }
+                } catch (e) {
+                    console.warn('Could not reset zoom, recreating chart:', e);
+                    // Fallback: recreate chart with default range
+                    this.updateVaRChart(this.currentVaRData);
+                }
+            }
+        });
     }
 
     // AI Callout Toggle Functions
@@ -4167,11 +4898,11 @@ class ValuationApp {
         }
     }
 
-    async calculateAttribution() {
+    async calculateAttribution(silent = false) {
         const btn = document.getElementById('calculateAttributionBtn');
         const originalText = btn ? btn.innerHTML : '';
         
-        if (btn) {
+        if (btn && !silent) {
             btn.disabled = true;
             btn.innerHTML = '<i data-lucide="loader"></i> Calculating...';
             if (window.lucide) window.lucide.createIcons();
@@ -4179,10 +4910,31 @@ class ValuationApp {
 
         try {
             const baseModelId = document.getElementById('attributionBaseModel')?.value;
-            const compareModelId = document.getElementById('attributionCompareModel')?.value;
+            let compareModelId = document.getElementById('attributionCompareModel')?.value;
+            
+            // For auto-run, try to find a default comparison model if none selected
+            if (!compareModelId && silent) {
+                try {
+                    const modelsResponse = await fetch('/api/models?limit=2&sortBy=createdAt&sortOrder=desc');
+                    const modelsResult = await modelsResponse.json();
+                    if (modelsResult.success && modelsResult.data.length > 1) {
+                        // Use the second most recent model as comparison (first is current)
+                        compareModelId = modelsResult.data[1]._id;
+                    } else if (modelsResult.success && modelsResult.data.length === 1 && this.currentModelId) {
+                        // Only one model exists, skip attribution (need at least 2 models)
+                        console.log('⏸️ Skipping Attribution - need at least 2 models for comparison');
+                        return;
+                    }
+                } catch (error) {
+                    console.warn('Could not find comparison model for attribution:', error);
+                    return;
+                }
+            }
             
             if (!compareModelId) {
-                alert('Please select a comparison model');
+                if (!silent) {
+                    alert('Please select a comparison model');
+                }
                 return;
             }
 
@@ -4206,13 +4958,17 @@ class ValuationApp {
             if (result.success) {
                 this.displayAttribution(result.data);
             } else {
-                alert('Error calculating attribution: ' + result.error);
+                if (!silent) {
+                    alert('Error calculating attribution: ' + result.error);
+                }
             }
         } catch (error) {
             console.error('Attribution calculation error:', error);
-            alert('Failed to calculate attribution');
+            if (!silent) {
+                alert('Failed to calculate attribution');
+            }
         } finally {
-            if (btn) {
+            if (btn && !silent) {
                 btn.disabled = false;
                 btn.innerHTML = originalText;
                 if (window.lucide) window.lucide.createIcons();
@@ -4348,6 +5104,525 @@ class ValuationApp {
                 tbody.appendChild(row);
             });
         }
+    }
+
+    async calculateVaR(silent = false) {
+        const btn = document.getElementById('calculateVaRBtn');
+        const originalText = btn ? btn.innerHTML : '';
+        
+        if (btn && !silent) {
+            btn.disabled = true;
+            btn.innerHTML = '<i data-lucide="loader"></i> Calculating...';
+            if (window.lucide) window.lucide.createIcons();
+        }
+
+        try {
+            const method = document.getElementById('varMethodSelect')?.value || 'combined';
+            const confidence = parseFloat(document.getElementById('varConfidenceSelect')?.value || 0.99);
+            const timeHorizon = parseInt(document.getElementById('varTimeHorizonSelect')?.value || 10);
+
+            const response = await fetch('/api/var', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    method,
+                    confidence,
+                    timeHorizon
+                })
+            });
+
+            const result = await response.json();
+            
+            if (result.success) {
+                this.displayVaR(result.data);
+            } else {
+                if (!silent) {
+                    alert('Error calculating VaR: ' + result.error);
+                }
+            }
+        } catch (error) {
+            console.error('VaR calculation error:', error);
+            if (!silent) {
+                alert('Failed to calculate VaR');
+            }
+        } finally {
+            if (btn && !silent) {
+                btn.disabled = false;
+                btn.innerHTML = originalText;
+                if (window.lucide) window.lucide.createIcons();
+            }
+        }
+    }
+
+    displayVaR(data) {
+        // Store data for AI explanation
+        this.currentVaRData = data;
+        
+        // Show results
+        document.getElementById('varResults').style.display = 'block';
+        
+        // Format values
+        const formatValue = (value) => {
+            if (Math.abs(value) >= 1000) {
+                return `$${(value / 1000).toFixed(2)}T`;
+            }
+            return `$${value.toFixed(1)}B`;
+        };
+        
+        // Update summary cards
+        document.getElementById('varValue').textContent = formatValue(data.varValue || 0);
+        document.getElementById('varCurrentValuation').textContent = formatValue(data.currentValuation || 0);
+        document.getElementById('varPercent').textContent = `${(data.varPercent || 0).toFixed(2)}%`;
+        document.getElementById('varExpectedShortfall').textContent = formatValue(data.expectedShortfall || 0);
+        
+        // Update charts
+        this.updateVaRChart(data);
+        this.updateVaRComponentCharts(data);
+        
+        // Update table
+        this.updateVaRTable(data);
+        
+        // Initialize AI explanation icons
+        if (window.lucide) window.lucide.createIcons();
+    }
+
+    updateVaRChart(data, customMin = null, customMax = null) {
+        const ctx = document.getElementById('varChart');
+        if (!ctx) {
+            console.error('VaR chart canvas not found');
+            return;
+        }
+        
+        // Check if Chart.js is available
+        if (typeof Chart === 'undefined') {
+            console.error('Chart.js is not loaded');
+            return;
+        }
+        
+        // Register zoom plugin if available
+        if (typeof zoomPlugin !== 'undefined' && Chart.register) {
+            try {
+                Chart.register(zoomPlugin);
+            } catch (e) {
+                console.warn('Zoom plugin already registered or not available:', e);
+            }
+        }
+        
+        if (this.charts.var) {
+            this.charts.var.destroy();
+        }
+        
+        // Ensure we have valid data
+        if (!data || !data.currentValuation || !data.varValue || data.varValue === 0) {
+            console.warn('Invalid VaR data for chart:', data);
+            return;
+        }
+        
+        // Create distribution chart showing VaR threshold
+        const bins = 200; // More bins for smoother curve
+        
+        // Calculate standard deviation for better default range
+        // VaR = z-score * stdDev * sqrt(time)
+        // So stdDev = VaR / (z-score * sqrt(time))
+        const zScore = 2.326; // 99% confidence
+        const timeFactor = Math.sqrt(10 / 252); // 10 days, 252 trading days per year
+        const stdDev = data.varValue / (zScore * timeFactor);
+        
+        // Better default range: show 3 standard deviations on each side of mean
+        // This captures ~99.7% of the distribution
+        // Ensure the range is centered on current valuation
+        const defaultMin = Math.max(0, data.currentValuation - stdDev * 3);
+        const defaultMax = data.currentValuation + stdDev * 3;
+        
+        // Debug: Log the calculation
+        console.log('VaR Chart Range Calculation:', {
+            currentValuation: data.currentValuation,
+            varValue: data.varValue,
+            zScore,
+            timeFactor,
+            stdDev,
+            defaultMin,
+            defaultMax,
+            range: defaultMax - defaultMin
+        });
+        
+        // Use custom min/max if provided, otherwise use default calculation
+        const minVal = customMin !== null ? Math.max(0, customMin) : defaultMin;
+        const maxVal = customMax !== null ? Math.max(minVal + 100, customMax) : defaultMax;
+        
+        // Update input fields with current values
+        const minInput = document.getElementById('varChartMin');
+        const maxInput = document.getElementById('varChartMax');
+        if (minInput && !minInput.value) {
+            minInput.value = Math.round(defaultMin);
+            minInput.placeholder = `Min: $${Math.round(defaultMin)}B`;
+        }
+        if (maxInput && !maxInput.value) {
+            maxInput.value = Math.round(defaultMax);
+            maxInput.placeholder = `Max: $${Math.round(defaultMax)}B`;
+        }
+        const binSize = (maxVal - minVal) / bins;
+        
+        const labels = [];
+        const values = [];
+        const varThreshold = data.currentValuation - data.varValue;
+        
+        const formatValue = (value) => {
+            if (Math.abs(value) >= 1000) {
+                return `$${(value / 1000).toFixed(2)}T`;
+            }
+            return `$${value.toFixed(1)}B`;
+        };
+        
+        // Normalize distribution so peak is at current valuation
+        let maxDensity = 0;
+        const dataPoints = [];
+        
+        // Calculate distribution values
+        for (let i = 0; i < bins; i++) {
+            const binCenter = minVal + (i + 0.5) * binSize;
+            const distance = binCenter - data.currentValuation;
+            // Normal distribution: f(x) = (1/(σ√(2π))) * exp(-0.5 * ((x-μ)/σ)²)
+            // Using stdDev calculated from VaR
+            const density = Math.exp(-0.5 * Math.pow(distance / stdDev, 2));
+            values.push(density);
+            if (density > maxDensity) maxDensity = density;
+            
+            // Create labels for all points
+            labels.push(formatValue(binCenter));
+        }
+        
+        // Normalize values to 0-1 range for better visualization
+        const normalizedValues = values.map(v => maxDensity > 0 ? v / maxDensity : 0);
+        
+        // Create data points as {x, y} objects for linear scale
+        // Ensure x values match exactly with bin centers
+        const probabilityData = [];
+        const varThresholdData = [];
+        
+        for (let i = 0; i < bins; i++) {
+            const binCenter = minVal + (i + 0.5) * binSize;
+            const yValue = normalizedValues[i];
+            
+            // Use exact bin center value (no clamping needed for proper alignment)
+            probabilityData.push({ x: binCenter, y: yValue });
+            
+            // VaR threshold line - show the curve below threshold
+            if (binCenter <= varThreshold) {
+                varThresholdData.push({ x: binCenter, y: yValue });
+            } else {
+                varThresholdData.push({ x: binCenter, y: null });
+            }
+        }
+        
+        // Add boundary points to ensure curve extends to edges and connects properly
+        probabilityData.unshift({ x: minVal, y: 0 });
+        probabilityData.push({ x: maxVal, y: 0 });
+        
+        // Debug: Verify peak is at current valuation
+        const maxY = Math.max(...normalizedValues);
+        const peakIndex = normalizedValues.indexOf(maxY);
+        const peakX = minVal + (peakIndex + 0.5) * binSize;
+        const expectedPeak = data.currentValuation;
+        const peakError = Math.abs(peakX - expectedPeak);
+        
+        console.log('Distribution peak check:', {
+            expectedPeak: expectedPeak,
+            actualPeak: peakX,
+            difference: peakError,
+            peakIndex,
+            bins,
+            binSize,
+            stdDev,
+            minVal,
+            maxVal
+        });
+        
+        // If peak is significantly off, warn
+        if (peakError > (maxVal - minVal) * 0.05) {
+            console.warn('Peak is not centered on current valuation!', {
+                expected: expectedPeak,
+                actual: peakX,
+                error: peakError
+            });
+        }
+        
+        try {
+            // Verify data alignment before creating chart
+            const firstX = probabilityData[0]?.x;
+            const lastX = probabilityData[probabilityData.length - 1]?.x;
+            const peakDataPoint = probabilityData.find(p => p.y === Math.max(...probabilityData.map(d => d.y)));
+            
+            console.log('Chart data verification:', {
+                dataPoints: probabilityData.length,
+                firstX,
+                lastX,
+                peakX: peakDataPoint?.x,
+                expectedPeak: data.currentValuation,
+                minVal,
+                maxVal
+            });
+            
+            this.charts.var = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    datasets: [{
+                        label: 'Probability Density',
+                        data: probabilityData,
+                        borderColor: 'rgba(59, 130, 246, 0.8)',
+                        backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                        fill: true,
+                        tension: 0.4,
+                        pointRadius: 0,
+                        borderWidth: 2,
+                        parsing: false // Tell Chart.js to use x/y directly, don't parse
+                    }, {
+                        label: 'VaR Threshold (' + formatValue(varThreshold) + ')',
+                        data: varThresholdData,
+                        borderColor: 'rgba(239, 68, 68, 1)',
+                        backgroundColor: 'rgba(239, 68, 68, 0.3)',
+                        fill: true,
+                        pointRadius: 0,
+                        borderWidth: 2,
+                        borderDash: [5, 5],
+                        parsing: false // Tell Chart.js to use x/y directly
+                    }]
+                },
+                options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: {
+                    mode: 'index',
+                    intersect: false,
+                },
+                plugins: {
+                    legend: { 
+                        display: true,
+                        position: 'top'
+                    },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                const label = context.dataset.label || '';
+                                const value = context.parsed.y;
+                                const xValue = formatValue(context.parsed.x);
+                                if (value === null) return '';
+                                return `${label}: ${value.toFixed(4)} at ${xValue}`;
+                            }
+                        }
+                    },
+                    zoom: {
+                        zoom: {
+                            wheel: {
+                                enabled: true,
+                                speed: 0.05
+                            },
+                            pinch: {
+                                enabled: true
+                            },
+                            mode: 'x',
+                            limits: {
+                                x: {
+                                    min: 0,
+                                    max: data.currentValuation * 3
+                                }
+                            }
+                        },
+                        pan: {
+                            enabled: true,
+                            mode: 'x',
+                            limits: {
+                                x: {
+                                    min: 0,
+                                    max: data.currentValuation * 3
+                                }
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    y: {
+                        title: { display: true, text: 'Probability Density' },
+                        beginAtZero: true,
+                        max: 1.1
+                    },
+                    x: {
+                        type: 'linear',
+                        title: { display: true, text: 'Valuation ($B)' },
+                        min: minVal,
+                        max: maxVal,
+                        position: 'bottom',
+                        ticks: {
+                            maxTicksLimit: 12,
+                            callback: function(value) {
+                                return formatValue(value);
+                            },
+                            maxRotation: 45,
+                            minRotation: 45,
+                            stepSize: (maxVal - minVal) / 10
+                        },
+                        grid: {
+                            display: true,
+                            color: 'rgba(255, 255, 255, 0.1)'
+                        },
+                        afterFit: function(scale) {
+                            // Ensure scale is properly fitted
+                            scale.min = minVal;
+                            scale.max = maxVal;
+                        }
+                    }
+                }
+            }
+        });
+            
+            // Store reset function for zoom plugin
+            if (this.charts.var && typeof this.charts.var.resetZoom === 'function') {
+                // Zoom plugin provides resetZoom method
+                console.log('Zoom plugin loaded successfully');
+            } else {
+                console.log('Zoom plugin not available, chart created without zoom');
+            }
+            
+            console.log('VaR chart created successfully', {
+                dataPoints: probabilityData.length,
+                minVal,
+                maxVal,
+                currentValuation: data.currentValuation,
+                varValue: data.varValue,
+                xRange: `${minVal.toFixed(0)} - ${maxVal.toFixed(0)}`
+            });
+        } catch (error) {
+            console.error('Error creating VaR chart:', error);
+            console.error('Chart data:', {
+                bins,
+                minVal,
+                maxVal,
+                probabilityDataLength: probabilityData?.length,
+                varThresholdDataLength: varThresholdData?.length
+            });
+        }
+    }
+
+    updateVaRComponentCharts(data) {
+        // Earth component chart
+        const earthCtx = document.getElementById('varEarthChart');
+        if (earthCtx) {
+            if (this.charts.varEarth) {
+                this.charts.varEarth.destroy();
+            }
+            
+            this.charts.varEarth = new Chart(earthCtx, {
+                type: 'doughnut',
+                data: {
+                    labels: ['Greeks Risk', 'Monte Carlo Risk'],
+                    datasets: [{
+                        data: [
+                            data.components.earth.greeksRisk || 0,
+                            data.components.earth.monteCarloRisk || 0
+                        ],
+                        backgroundColor: ['rgba(59, 130, 246, 0.6)', 'rgba(16, 185, 129, 0.6)']
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { position: 'bottom' },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    return `${context.label}: $${context.parsed.toFixed(1)}B`;
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+        
+        // Mars component chart
+        const marsCtx = document.getElementById('varMarsChart');
+        if (marsCtx) {
+            if (this.charts.varMars) {
+                this.charts.varMars.destroy();
+            }
+            
+            this.charts.varMars = new Chart(marsCtx, {
+                type: 'doughnut',
+                data: {
+                    labels: ['Greeks Risk', 'Monte Carlo Risk'],
+                    datasets: [{
+                        data: [
+                            data.components.mars.greeksRisk || 0,
+                            data.components.mars.monteCarloRisk || 0
+                        ],
+                        backgroundColor: ['rgba(59, 130, 246, 0.6)', 'rgba(16, 185, 129, 0.6)']
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { position: 'bottom' },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    return `${context.label}: $${context.parsed.toFixed(1)}B`;
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+    }
+
+    updateVaRTable(data) {
+        const tbody = document.getElementById('varTableBody');
+        if (!tbody) return;
+        
+        tbody.innerHTML = '';
+        
+        // Safely extract component data with null checks
+        const earthComp = data.components?.earth || {};
+        const marsComp = data.components?.mars || {};
+        
+        const components = [
+            {
+                name: 'Earth',
+                varContribution: earthComp.varContribution ?? null,
+                greeksRisk: earthComp.greeksRisk ?? null,
+                monteCarloRisk: earthComp.monteCarloRisk ?? null
+            },
+            {
+                name: 'Mars',
+                varContribution: marsComp.varContribution ?? null,
+                greeksRisk: marsComp.greeksRisk ?? null,
+                monteCarloRisk: marsComp.monteCarloRisk ?? null
+            }
+        ];
+        
+        components.forEach(comp => {
+            const row = document.createElement('tr');
+            // Ensure all values are numbers, defaulting to 0 if null/undefined
+            const varContribution = (comp.varContribution != null && !isNaN(comp.varContribution)) ? Number(comp.varContribution) : 0;
+            const greeksRisk = (comp.greeksRisk != null && !isNaN(comp.greeksRisk)) ? Number(comp.greeksRisk) : 0;
+            const monteCarloRisk = (comp.monteCarloRisk != null && !isNaN(comp.monteCarloRisk)) ? Number(comp.monteCarloRisk) : 0;
+            const varValue = (data.varValue != null && !isNaN(data.varValue)) ? Number(data.varValue) : 0;
+            const pct = varValue !== 0 ? ((varContribution / varValue) * 100).toFixed(1) : '0.0';
+            
+            row.innerHTML = `
+                <td><strong>${comp.name}</strong></td>
+                <td>$${varContribution.toFixed(1)}B</td>
+                <td>${pct}%</td>
+                <td>$${greeksRisk.toFixed(1)}B</td>
+                <td>$${monteCarloRisk.toFixed(1)}B</td>
+            `;
+            
+            tbody.appendChild(row);
+        });
     }
 
     // Helper calculation methods (matching backend logic)
@@ -4643,7 +5918,11 @@ class ValuationApp {
         if (progressModal) {
             progressModal.classList.add('active');
             progressBar.style.width = '10%';
-            progressText.textContent = 'Parameters have changed - Monte Carlo is producing new simulations...';
+            // Different message if auto-running vs manual
+            const isAutoRun = skipValidation && this.autoRunningMonteCarlo;
+            progressText.textContent = isAutoRun 
+                ? 'Running Monte Carlo simulation automatically...'
+                : 'Parameters have changed - Monte Carlo is producing new simulations...';
             if (window.lucide) window.lucide.createIcons();
         }
         
@@ -4693,9 +5972,12 @@ class ValuationApp {
                 this.currentMonteCarloData = result.data;
                 this.displayMonteCarloResults(result.data);
                 
-                // Automatically save simulation if we have a model loaded
+                // Always save simulation if we have a model loaded (for both auto and manual runs)
                 if (this.currentModelId) {
                     await this.autoSaveMonteCarloSimulation(result.data, baseInputs, runs);
+                    console.log('✅ Simulation saved successfully');
+                } else {
+                    console.warn('⚠️ No model loaded - simulation not saved. Please load a model to save simulations.');
                 }
             } else {
                 alert('Simulation failed: ' + result.error);
@@ -4718,9 +6000,53 @@ class ValuationApp {
     }
 
     displayMonteCarloResults(data) {
-        const stats = data.statistics.totalValue;
+        // Store simulation results for table display
+        this.currentMonteCarloSimulations = data.results || [];
+        
+        // Handle different data structures - check if statistics exists
+        if (!data || !data.statistics) {
+            console.error('Monte Carlo data missing statistics:', data);
+            // Try to calculate statistics from results if available
+            if (this.currentMonteCarloSimulations.length > 0) {
+                const values = this.currentMonteCarloSimulations
+                    .map(sim => sim.results?.totalValue || sim.totalValue || 0)
+                    .filter(v => typeof v === 'number' && !isNaN(v));
+                
+                if (values.length > 0) {
+                    values.sort((a, b) => a - b);
+                    const mean = values.reduce((a, b) => a + b, 0) / values.length;
+                    const median = values[Math.floor(values.length / 2)];
+                    const variance = values.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / values.length;
+                    const stdDev = Math.sqrt(variance);
+                    
+                    data.statistics = {
+                        totalValue: {
+                            mean,
+                            median,
+                            stdDev,
+                            min: values[0],
+                            max: values[values.length - 1],
+                            p10: values[Math.floor(values.length * 0.1)],
+                            q1: values[Math.floor(values.length * 0.25)],
+                            q3: values[Math.floor(values.length * 0.75)],
+                            p90: values[Math.floor(values.length * 0.9)]
+                        }
+                    };
+                } else {
+                    alert('Simulation completed but no valid results found.');
+                    return;
+                }
+            } else {
+                alert('Simulation completed but statistics are missing. Please check the results.');
+                return;
+            }
+        }
+        
+        // Extract statistics - handle different data structures
+        const stats = data.statistics.totalValue || data.statistics || {};
+        
         const formatBillion = (value) => {
-            if (!value && value !== 0) return 'N/A';
+            if (value == null || value === undefined || (value !== 0 && !value)) return 'N/A';
             // Values are already in billions
             // If >= 1000 billion, display as trillions
             if (value >= 1000) {
@@ -4729,7 +6055,7 @@ class ValuationApp {
             return `$${value.toFixed(2)}B`;
         };
 
-        // Update statistics
+        // Update statistics with safe access
         document.getElementById('mcMean').textContent = formatBillion(stats.mean);
         document.getElementById('mcMedian').textContent = formatBillion(stats.median);
         document.getElementById('mcStdDev').textContent = formatBillion(stats.stdDev);
@@ -4740,15 +6066,1321 @@ class ValuationApp {
         document.getElementById('mcQ3').textContent = formatBillion(stats.q3);
         document.getElementById('mcP90').textContent = formatBillion(stats.p90);
 
-        // Show results section
-        document.getElementById('monteCarloResultsSection').style.display = 'block';
+        // Show results section and hide empty state
+        const resultsSection = document.getElementById('monteCarloResultsSection');
+        const emptyState = document.getElementById('monteCarloEmptyState');
+        if (resultsSection) resultsSection.style.display = 'block';
+        if (emptyState) emptyState.style.display = 'none';
 
         // Store current simulation data for saving
         this.currentMonteCarloData = data;
 
-        // Update charts
-        this.updateMonteCarloDistributionChart(data.statistics.distribution);
-        this.updateMonteCarloComparisonChart(data.statistics);
+        // Update charts - handle missing distribution data
+        if (data.statistics && data.statistics.distribution) {
+            this.updateMonteCarloDistributionChart(data.statistics.distribution);
+        } else if (this.currentMonteCarloSimulations && this.currentMonteCarloSimulations.length > 0) {
+            // Generate distribution from results if not provided
+            const values = this.currentMonteCarloSimulations
+                .map(sim => sim.results?.totalValue || sim.totalValue || 0)
+                .filter(v => typeof v === 'number' && !isNaN(v));
+            
+            if (values.length > 0) {
+                const min = Math.min(...values);
+                const max = Math.max(...values);
+                const bins = 50;
+                const binSize = (max - min) / bins;
+                const histogram = new Array(bins).fill(0);
+                
+                values.forEach(val => {
+                    const binIndex = Math.min(Math.floor((val - min) / binSize), bins - 1);
+                    histogram[binIndex]++;
+                });
+                
+                // Normalize histogram
+                const maxCount = Math.max(...histogram);
+                const normalizedHistogram = histogram.map(count => (count / maxCount) * 100);
+                
+                this.updateMonteCarloDistributionChart({
+                    min,
+                    max,
+                    bins,
+                    binSize,
+                    histogram: normalizedHistogram,
+                    binCenters: Array.from({ length: bins }, (_, i) => min + (i + 0.5) * binSize)
+                });
+            }
+        }
+        
+        if (data.statistics) {
+            this.updateMonteCarloComparisonChart(data.statistics);
+        }
+        
+        // Update simulations table
+        this.updateSimulationsTable();
+    }
+    
+    updateSimulationsTable() {
+        if (!this.currentMonteCarloSimulations || this.currentMonteCarloSimulations.length === 0) {
+            return;
+        }
+        
+        const tbody = document.getElementById('simulationsTableBody');
+        if (!tbody) return;
+        
+        // Get pagination settings
+        const pageSize = parseInt(document.getElementById('simulationsPageSize')?.value || 100);
+        const currentPage = this.simulationsCurrentPage || 1;
+        const searchTerm = document.getElementById('simulationsSearch')?.value.toLowerCase() || '';
+        
+        // Filter simulations if search term exists
+        let filteredSimulations = this.currentMonteCarloSimulations;
+        if (searchTerm) {
+            filteredSimulations = this.currentMonteCarloSimulations.filter(sim => {
+                const iteration = sim.run || sim.iteration || '';
+                const earth = sim.results?.earthValue || sim.earthValue || 0;
+                const mars = sim.results?.marsValue || sim.marsValue || 0;
+                const total = sim.results?.totalValue || sim.totalValue || 0;
+                return iteration.toString().includes(searchTerm) ||
+                       earth.toString().includes(searchTerm) ||
+                       mars.toString().includes(searchTerm) ||
+                       total.toString().includes(searchTerm);
+            });
+        }
+        
+        // Calculate pagination
+        const totalPages = Math.ceil(filteredSimulations.length / pageSize);
+        const startIndex = (currentPage - 1) * pageSize;
+        const endIndex = Math.min(startIndex + pageSize, filteredSimulations.length);
+        const pageSimulations = filteredSimulations.slice(startIndex, endIndex);
+        
+        // Clear table
+        tbody.innerHTML = '';
+        
+        if (pageSimulations.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="13" style="text-align: center; padding: var(--spacing-lg); color: var(--text-secondary);">No simulation results found.</td></tr>';
+            return;
+        }
+        
+        const formatValue = (val) => {
+            if (val == null || val === undefined) return '--';
+            if (val >= 1000) return `$${(val / 1000).toFixed(2)}T`;
+            return `$${val.toFixed(2)}B`;
+        };
+        
+        const formatPercent = (val) => {
+            if (val == null || val === undefined) return '--';
+            return `${(val * 100).toFixed(2)}%`;
+        };
+        
+        const formatNumber = (val, decimals = 0) => {
+            if (val == null || val === undefined) return '--';
+            return val.toFixed(decimals);
+        };
+        
+        // Populate table with essential columns only
+        pageSimulations.forEach((sim, index) => {
+            const iteration = sim.run || sim.iteration || (startIndex + index + 1);
+            const inputs = sim.inputs || {};
+            const results = sim.results || {};
+            
+            // Key input parameters (most impactful)
+            const starlinkPenetration = inputs.earth?.starlinkPenetration;
+            const launchVolume = inputs.earth?.launchVolume;
+            const firstColonyYear = inputs.mars?.firstColonyYear;
+            const discountRate = inputs.financial?.discountRate;
+            
+            // Final valuations
+            const earthValue = results.earthValue || sim.earthValue || 0;
+            const marsValue = results.marsValue || sim.marsValue || 0;
+            const totalValue = results.totalValue || sim.totalValue || (earthValue + marsValue);
+            const dilutionFactor = inputs.financial?.dilutionFactor || 0.15;
+            const dilutedValue = results.dilutedValue || sim.dilutedValue || (totalValue * (1 - dilutionFactor));
+            
+            // Percentages
+            const earthPercent = totalValue > 0 ? ((earthValue / totalValue) * 100).toFixed(2) : '0.00';
+            const marsPercent = totalValue > 0 ? ((marsValue / totalValue) * 100).toFixed(2) : '0.00';
+            
+            const row = document.createElement('tr');
+            row.dataset.simulationIndex = startIndex + index;
+            row.innerHTML = `
+                <td style="text-align: center;">
+                    <button class="icon-button btn-sm" onclick="app.showSimulationDetails(${startIndex + index})" title="View details">
+                        <i data-lucide="chevron-right"></i>
+                    </button>
+                </td>
+                <td style="font-weight: 600;">${iteration}</td>
+                <td>${starlinkPenetration != null ? formatPercent(starlinkPenetration) : '--'}</td>
+                <td>${launchVolume != null ? formatNumber(launchVolume, 0) : '--'}</td>
+                <td>${firstColonyYear || '--'}</td>
+                <td>${discountRate != null ? formatPercent(discountRate) : '--'}</td>
+                <td><strong>${formatValue(earthValue)}</strong></td>
+                <td><strong>${formatValue(marsValue)}</strong></td>
+                <td><strong style="color: var(--primary-color);">${formatValue(totalValue)}</strong></td>
+                <td>${formatValue(dilutedValue)}</td>
+                <td>${earthPercent}%</td>
+                <td>${marsPercent}%</td>
+                <td>
+                    <button class="btn btn-secondary btn-sm" onclick="app.showSimulationDetails(${startIndex + index})">
+                        <i data-lucide="eye"></i> View
+                    </button>
+                </td>
+            `;
+            tbody.appendChild(row);
+        });
+        
+        if (window.lucide) window.lucide.createIcons();
+        
+        // Update pagination
+        this.updateSimulationsPagination(currentPage, totalPages, filteredSimulations.length);
+    }
+    
+    updateSimulationsPagination(currentPage, totalPages, totalResults) {
+        const pagination = document.getElementById('simulationsPagination');
+        if (!pagination) return;
+        
+        pagination.innerHTML = '';
+        
+        if (totalPages <= 1) return;
+        
+        // Previous button
+        const prevBtn = document.createElement('button');
+        prevBtn.className = 'btn btn-secondary btn-sm';
+        prevBtn.disabled = currentPage === 1;
+        prevBtn.innerHTML = '<i data-lucide="chevron-left"></i> Previous';
+        prevBtn.onclick = () => {
+            if (currentPage > 1) {
+                this.simulationsCurrentPage = currentPage - 1;
+                this.updateSimulationsTable();
+            }
+        };
+        pagination.appendChild(prevBtn);
+        
+        // Page info
+        const pageInfo = document.createElement('span');
+        pageInfo.style.padding = '0 var(--spacing-md)';
+        pageInfo.textContent = `Page ${currentPage} of ${totalPages} (${totalResults.toLocaleString()} results)`;
+        pagination.appendChild(pageInfo);
+        
+        // Next button
+        const nextBtn = document.createElement('button');
+        nextBtn.className = 'btn btn-secondary btn-sm';
+        nextBtn.disabled = currentPage === totalPages;
+        nextBtn.innerHTML = 'Next <i data-lucide="chevron-right"></i>';
+        nextBtn.onclick = () => {
+            if (currentPage < totalPages) {
+                this.simulationsCurrentPage = currentPage + 1;
+                this.updateSimulationsTable();
+            }
+        };
+        pagination.appendChild(nextBtn);
+        
+        if (window.lucide) window.lucide.createIcons();
+    }
+    
+    showSimulationDetails(index) {
+        if (!this.currentMonteCarloSimulations || index < 0 || index >= this.currentMonteCarloSimulations.length) {
+            return;
+        }
+        
+        const sim = this.currentMonteCarloSimulations[index];
+        const modal = document.getElementById('simulationDetailModal');
+        const iterationEl = document.getElementById('detailIteration');
+        const contentEl = document.getElementById('simulationDetailContent');
+        
+        if (!modal || !iterationEl || !contentEl) return;
+        
+        const iteration = sim.run || sim.iteration || index + 1;
+        iterationEl.textContent = iteration;
+        
+        const inputs = sim.inputs || {};
+        const results = sim.results || {};
+        const earthResults = sim.earthResults || results.earthResults || {};
+        const marsResults = sim.marsResults || results.marsResults || {};
+        
+        const formatValue = (val) => {
+            if (val == null || val === undefined) return 'N/A';
+            if (val >= 1000) return `$${(val / 1000).toFixed(2)}T`;
+            return `$${val.toFixed(2)}B`;
+        };
+        
+        const formatPercent = (val) => {
+            if (val == null || val === undefined) return 'N/A';
+            return `${(val * 100).toFixed(2)}%`;
+        };
+        
+        // Build detailed content
+        contentEl.innerHTML = `
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: var(--spacing-lg);">
+                <!-- Input Parameters -->
+                <div class="section">
+                    <h3 style="margin-top: 0;"><i data-lucide="sliders"></i> Input Parameters</h3>
+                    <div style="display: grid; gap: var(--spacing-sm);">
+                        <div><strong>Starlink Penetration:</strong> ${formatPercent(inputs.earth?.starlinkPenetration)}</div>
+                        <div><strong>Launch Volume:</strong> ${inputs.earth?.launchVolume || 'N/A'}</div>
+                        <div><strong>Bandwidth Price Decline:</strong> ${formatPercent(inputs.earth?.bandwidthPriceDecline)}</div>
+                        <div><strong>First Colony Year:</strong> ${inputs.mars?.firstColonyYear || 'N/A'}</div>
+                        <div><strong>Population Growth:</strong> ${formatPercent(inputs.mars?.populationGrowth)}</div>
+                        <div><strong>Discount Rate:</strong> ${formatPercent(inputs.financial?.discountRate)}</div>
+                        <div><strong>Dilution Factor:</strong> ${formatPercent(inputs.financial?.dilutionFactor || 0.15)}</div>
+                    </div>
+                </div>
+                
+                <!-- Earth Results -->
+                <div class="section">
+                    <h3 style="margin-top: 0;"><i data-lucide="globe"></i> Earth Component</h3>
+                    <div style="display: grid; gap: var(--spacing-sm);">
+                        <div><strong>Earth Value:</strong> ${formatValue(results.earthValue || earthResults.adjustedValue)}</div>
+                        <div><strong>Terminal Value:</strong> ${formatValue(earthResults.terminalValue)}</div>
+                        <div><strong>Revenue (O119):</strong> ${formatValue(earthResults.o119 || earthResults.O119)}</div>
+                        <div><strong>Final Value (O153):</strong> ${formatValue(earthResults.o153 || earthResults.O153)}</div>
+                    </div>
+                </div>
+                
+                <!-- Mars Results -->
+                <div class="section">
+                    <h3 style="margin-top: 0;"><i data-lucide="globe"></i> Mars Component</h3>
+                    <div style="display: grid; gap: var(--spacing-sm);">
+                        <div><strong>Mars Value:</strong> ${formatValue(results.marsValue || marsResults.adjustedValue)}</div>
+                        <div><strong>Option Value:</strong> ${formatValue(marsResults.optionValue)}</div>
+                        <div><strong>Cumulative Value (K54):</strong> ${formatValue(marsResults.k54 || marsResults.K54)}</div>
+                        <div><strong>Cumulative Revenue (K8):</strong> ${formatValue(marsResults.k8 || marsResults.K8)}</div>
+                        <div><strong>Cumulative Costs (K27):</strong> ${formatValue(marsResults.k27 || marsResults.K27)}</div>
+                    </div>
+                </div>
+                
+                <!-- Summary -->
+                <div class="section">
+                    <h3 style="margin-top: 0;"><i data-lucide="bar-chart"></i> Summary</h3>
+                    <div style="display: grid; gap: var(--spacing-sm);">
+                        <div><strong>Total Value:</strong> <span style="color: var(--primary-color); font-size: 1.2em;">${formatValue(results.totalValue || (results.earthValue + results.marsValue))}</span></div>
+                        <div><strong>Diluted Value:</strong> ${formatValue(results.dilutedValue)}</div>
+                        <div><strong>Earth %:</strong> ${results.totalValue > 0 ? (((results.earthValue || 0) / results.totalValue) * 100).toFixed(2) : '0.00'}%</div>
+                        <div><strong>Mars %:</strong> ${results.totalValue > 0 ? (((results.marsValue || 0) / results.totalValue) * 100).toFixed(2) : '0.00'}%</div>
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        modal.style.display = 'block';
+        if (window.lucide) window.lucide.createIcons();
+    }
+    
+    closeSimulationDetails() {
+        const modal = document.getElementById('simulationDetailModal');
+        if (modal) {
+            modal.style.display = 'none';
+        }
+    }
+    
+    openMonteCarloInfo() {
+        const modal = document.getElementById('monteCarloInfoModal');
+        if (modal) {
+            modal.style.display = 'flex';
+            if (window.lucide) window.lucide.createIcons();
+        }
+    }
+    
+    closeMonteCarloInfo() {
+        const modal = document.getElementById('monteCarloInfoModal');
+        if (modal) {
+            modal.style.display = 'none';
+        }
+    }
+    
+    openVaRInfo() {
+        const modal = document.getElementById('varInfoModal');
+        if (modal) {
+            modal.style.display = 'flex';
+            if (window.lucide) window.lucide.createIcons();
+        }
+    }
+    
+    closeVaRInfo() {
+        const modal = document.getElementById('varInfoModal');
+        if (modal) {
+            modal.style.display = 'none';
+        }
+    }
+    
+    openSensitivityInfo() {
+        const modal = document.getElementById('sensitivityInfoModal');
+        if (modal) {
+            modal.style.display = 'flex';
+            if (window.lucide) window.lucide.createIcons();
+        }
+    }
+    
+    closeSensitivityInfo() {
+        const modal = document.getElementById('sensitivityInfoModal');
+        if (modal) {
+            modal.style.display = 'none';
+        }
+    }
+    
+    openStressInfo() {
+        const modal = document.getElementById('stressInfoModal');
+        if (modal) {
+            modal.style.display = 'flex';
+            if (window.lucide) window.lucide.createIcons();
+        }
+    }
+    
+    closeStressInfo() {
+        const modal = document.getElementById('stressInfoModal');
+        if (modal) {
+            modal.style.display = 'none';
+        }
+    }
+    
+    openAttributionInfo() {
+        const modal = document.getElementById('attributionInfoModal');
+        if (modal) {
+            modal.style.display = 'flex';
+            if (window.lucide) window.lucide.createIcons();
+        }
+    }
+    
+    closeAttributionInfo() {
+        const modal = document.getElementById('attributionInfoModal');
+        if (modal) {
+            modal.style.display = 'none';
+        }
+    }
+    
+    openRatiosInfo() {
+        const modal = document.getElementById('ratiosInfoModal');
+        if (modal) {
+            modal.style.display = 'flex';
+            if (window.lucide) window.lucide.createIcons();
+        }
+    }
+    
+    closeRatiosInfo() {
+        const modal = document.getElementById('ratiosInfoModal');
+        if (modal) {
+            modal.style.display = 'none';
+        }
+    }
+    
+    setupRatiosListeners() {
+        // Ratios info button
+        document.getElementById('ratiosInfoBtn')?.addEventListener('click', () => {
+            this.openRatiosInfo();
+        });
+        
+        // Refresh comparables button
+        document.getElementById('refreshComparablesBtn')?.addEventListener('click', () => {
+            this.loadComparables();
+        });
+        
+        // Sector select change
+        document.getElementById('comparableSectorSelect')?.addEventListener('change', () => {
+            this.loadComparables();
+        });
+        
+        // Ratios tab switching
+        const ratiosView = document.getElementById('ratios');
+        if (ratiosView) {
+            ratiosView.querySelectorAll('.insights-tab').forEach(tab => {
+                tab.addEventListener('click', () => {
+                    const tabName = tab.dataset.tab;
+                    
+                    // Remove active class from all tabs in ratios view only
+                    ratiosView.querySelectorAll('.insights-tab').forEach(t => t.classList.remove('active'));
+                    ratiosView.querySelectorAll('.insights-tab-content').forEach(c => {
+                        c.classList.remove('active');
+                        c.style.display = 'none';
+                    });
+                    
+                    // Add active class to clicked tab and corresponding content
+                    tab.classList.add('active');
+                    const contentEl = document.getElementById(`ratiosTab-${tabName}`);
+                    if (contentEl) {
+                        contentEl.classList.add('active');
+                        contentEl.style.display = 'block';
+                        
+                        // Load comparables if switching to comparables tab
+                        if (tabName === 'comparables') {
+                            this.loadComparables();
+                        }
+                        // Update charts if switching to analysis tab
+                        if (tabName === 'analysis') {
+                            if (this.currentComparablesData && this.currentComparablesData.length > 0) {
+                                this.updateRatiosCharts(this.currentComparablesData);
+                            } else {
+                                // Load comparables data first
+                                this.loadComparables();
+                            }
+                        }
+                    }
+                    
+                    // Refresh icons
+                    if (window.lucide) window.lucide.createIcons();
+                });
+            });
+            
+            // Load comparables on view switch
+            const observer = new MutationObserver((mutations) => {
+                mutations.forEach((mutation) => {
+                    if (mutation.type === 'attributes' && mutation.attributeName === 'class') {
+                        if (ratiosView.classList.contains('active')) {
+                            // Check which tab is active
+                            const activeTab = ratiosView.querySelector('.insights-tab.active')?.dataset.tab || 'dashboard';
+                            if (activeTab === 'comparables' || activeTab === 'analysis') {
+                                this.loadComparables();
+                            }
+                        }
+                    }
+                });
+            });
+            observer.observe(ratiosView, { attributes: true });
+        }
+        
+        // Initial load
+        this.loadComparables();
+    }
+    
+    updateSectorSummary(companies, sector) {
+        const summaryEl = document.getElementById('ratiosSectorSummary');
+        if (!summaryEl) return;
+        
+        const count = companies.length;
+        const validEvRevenue = companies.filter(c => c.evRevenue).map(c => c.evRevenue);
+        const validEvEbitda = companies.filter(c => c.evEbitda).map(c => c.evEbitda);
+        const validPeRatio = companies.filter(c => c.peRatio).map(c => c.peRatio);
+        const avgGrowth = companies.filter(c => c.revenueGrowth).map(c => c.revenueGrowth);
+        
+        const avgEvRevenue = validEvRevenue.length > 0 
+            ? (validEvRevenue.reduce((a, b) => a + b, 0) / validEvRevenue.length).toFixed(2)
+            : 'N/A';
+        const avgEvEbitda = validEvEbitda.length > 0
+            ? (validEvEbitda.reduce((a, b) => a + b, 0) / validEvEbitda.length).toFixed(2)
+            : 'N/A';
+        const avgPeRatio = validPeRatio.length > 0
+            ? (validPeRatio.reduce((a, b) => a + b, 0) / validPeRatio.length).toFixed(2)
+            : 'N/A';
+        const avgGrowthRate = avgGrowth.length > 0
+            ? (avgGrowth.reduce((a, b) => a + b, 0) / avgGrowth.length * 100).toFixed(1)
+            : 'N/A';
+        
+        const sectorNames = {
+            space: 'Space Companies',
+            tech: 'Tech Companies',
+            telecom: 'Telecom',
+            aerospace: 'Aerospace & Defense'
+        };
+        
+        summaryEl.innerHTML = `
+            <h4 style="margin: 0 0 var(--spacing-md) 0;">${sectorNames[sector] || sector}</h4>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: var(--spacing-md);">
+                <div>
+                    <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 4px;">Companies</div>
+                    <div style="font-size: 20px; font-weight: 600;">${count}</div>
+                </div>
+                <div>
+                    <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 4px;">Avg EV/Revenue</div>
+                    <div style="font-size: 20px; font-weight: 600;">${avgEvRevenue}${avgEvRevenue !== 'N/A' ? 'x' : ''}</div>
+                </div>
+                <div>
+                    <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 4px;">Avg EV/EBITDA</div>
+                    <div style="font-size: 20px; font-weight: 600;">${avgEvEbitda}${avgEvEbitda !== 'N/A' ? 'x' : ''}</div>
+                </div>
+                <div>
+                    <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 4px;">Avg P/E Ratio</div>
+                    <div style="font-size: 20px; font-weight: 600;">${avgPeRatio}${avgPeRatio !== 'N/A' ? 'x' : ''}</div>
+                </div>
+                <div>
+                    <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 4px;">Avg Growth</div>
+                    <div style="font-size: 20px; font-weight: 600;">${avgGrowthRate}${avgGrowthRate !== 'N/A' ? '%' : ''}</div>
+                </div>
+            </div>
+        `;
+    }
+    
+    updateRatiosCharts(companies) {
+        if (!companies || companies.length === 0) return;
+        
+        // EV/Revenue Chart
+        const evRevenueCtx = document.getElementById('evRevenueChart');
+        if (evRevenueCtx) {
+            const evRevenueData = companies
+                .filter(c => c.evRevenue)
+                .sort((a, b) => b.evRevenue - a.evRevenue)
+                .slice(0, 10); // Top 10
+            
+            if (this.charts.evRevenue) {
+                this.charts.evRevenue.destroy();
+            }
+            
+            // Color SpaceX differently to highlight it
+            const colors = evRevenueData.map(c => c.name === 'SpaceX' ? 'rgba(255, 193, 7, 0.8)' : 'rgba(0, 102, 204, 0.6)');
+            
+            this.charts.evRevenue = new Chart(evRevenueCtx, {
+                type: 'bar',
+                data: {
+                    labels: evRevenueData.map(c => c.name),
+                    datasets: [{
+                        label: 'EV/Revenue',
+                        data: evRevenueData.map(c => c.evRevenue),
+                        backgroundColor: colors,
+                        borderColor: evRevenueData.map(c => c.name === 'SpaceX' ? 'rgba(255, 193, 7, 1)' : 'rgba(0, 102, 204, 1)'),
+                        borderWidth: evRevenueData.map(c => c.name === 'SpaceX' ? 2 : 1)
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            callbacks: {
+                                footer: (items) => {
+                                    const item = items[0];
+                                    if (item.label === 'SpaceX') {
+                                        return 'Estimated/Projected data';
+                                    }
+                                    return '';
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            title: { display: true, text: 'EV/Revenue Multiple' }
+                        }
+                    }
+                }
+            });
+        }
+        
+        // EV/EBITDA Chart
+        let evEbitdaCtx = document.getElementById('evEbitdaChart');
+        const evEbitdaContainer = document.querySelector('#ratiosTab-analysis .chart-container-half:nth-child(2)');
+        
+        // Restore canvas if it was replaced by "no data" message
+        if (!evEbitdaCtx && evEbitdaContainer) {
+            evEbitdaContainer.innerHTML = `
+                <h4>EV/EBITDA Comparison</h4>
+                <canvas id="evEbitdaChart"></canvas>
+            `;
+            evEbitdaCtx = document.getElementById('evEbitdaChart');
+        }
+        
+        if (evEbitdaCtx) {
+            const evEbitdaData = companies
+                .filter(c => c.evEbitda !== null && c.evEbitda !== undefined)
+                .sort((a, b) => b.evEbitda - a.evEbitda)
+                .slice(0, 10);
+            
+            if (this.charts.evEbitda) {
+                this.charts.evEbitda.destroy();
+            }
+            
+            if (evEbitdaData.length > 0) {
+                // Color SpaceX differently to highlight it
+                const colors = evEbitdaData.map(c => c.name === 'SpaceX' ? 'rgba(255, 193, 7, 0.8)' : 'rgba(34, 197, 94, 0.6)');
+                
+                this.charts.evEbitda = new Chart(evEbitdaCtx, {
+                    type: 'bar',
+                    data: {
+                        labels: evEbitdaData.map(c => c.name),
+                        datasets: [{
+                            label: 'EV/EBITDA',
+                            data: evEbitdaData.map(c => c.evEbitda),
+                            backgroundColor: colors,
+                            borderColor: evEbitdaData.map(c => c.name === 'SpaceX' ? 'rgba(255, 193, 7, 1)' : 'rgba(34, 197, 94, 1)'),
+                            borderWidth: evEbitdaData.map(c => c.name === 'SpaceX' ? 2 : 1)
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: { display: false },
+                            tooltip: {
+                                callbacks: {
+                                    footer: (items) => {
+                                        const item = items[0];
+                                        if (item.label === 'SpaceX') {
+                                            return 'Estimated/Projected data';
+                                        }
+                                        return '';
+                                    }
+                                }
+                            }
+                        },
+                        scales: {
+                            y: {
+                                beginAtZero: true,
+                                title: { display: true, text: 'EV/EBITDA Multiple' }
+                            }
+                        }
+                    }
+                });
+            } else {
+                // Show message when no EV/EBITDA data available
+                if (evEbitdaContainer) {
+                    evEbitdaContainer.innerHTML = `
+                        <h4>EV/EBITDA Comparison</h4>
+                        <div style="display: flex; align-items: center; justify-content: center; height: 300px; color: var(--text-secondary);">
+                            <div style="text-align: center;">
+                                <i data-lucide="info" style="width: 48px; height: 48px; margin-bottom: var(--spacing-md);"></i>
+                                <p style="margin: 0;">No EV/EBITDA data available for this sector.<br>Many companies may not be profitable yet.</p>
+                            </div>
+                        </div>
+                    `;
+                    if (window.lucide) window.lucide.createIcons();
+                }
+            }
+        }
+        
+        // Growth vs Valuation Chart
+        const growthValuationCtx = document.getElementById('growthValuationChart');
+        if (growthValuationCtx) {
+            const scatterData = companies
+                .filter(c => c.revenueGrowth && c.evRevenue)
+                .map(c => ({
+                    x: c.revenueGrowth * 100,
+                    y: c.evRevenue,
+                    label: c.name
+                }));
+            
+            if (this.charts.growthValuation) {
+                this.charts.growthValuation.destroy();
+            }
+            
+            // Color SpaceX point differently
+            const pointColors = scatterData.map(p => p.label === 'SpaceX' ? 'rgba(255, 193, 7, 0.8)' : 'rgba(0, 102, 204, 0.6)');
+            const pointBorders = scatterData.map(p => p.label === 'SpaceX' ? 'rgba(255, 193, 7, 1)' : 'rgba(0, 102, 204, 1)');
+            
+            this.charts.growthValuation = new Chart(growthValuationCtx, {
+                type: 'scatter',
+                data: {
+                    datasets: [{
+                        label: 'Companies',
+                        data: scatterData,
+                        backgroundColor: pointColors,
+                        borderColor: pointBorders,
+                        pointRadius: scatterData.map(p => p.label === 'SpaceX' ? 8 : 6),
+                        pointHoverRadius: scatterData.map(p => p.label === 'SpaceX' ? 10 : 8),
+                        borderWidth: scatterData.map(p => p.label === 'SpaceX' ? 2 : 1)
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            callbacks: {
+                                label: (context) => {
+                                    const point = scatterData[context.dataIndex];
+                                    return `${point.label}: ${point.y.toFixed(2)}x EV/Revenue, ${point.x.toFixed(1)}% Growth`;
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            title: { 
+                                display: true, 
+                                text: 'Revenue Growth (%)',
+                                font: { size: 14, weight: 'bold' }
+                            },
+                            beginAtZero: true,
+                            ticks: {
+                                callback: function(value) {
+                                    return value + '%';
+                                }
+                            }
+                        },
+                        y: {
+                            title: { 
+                                display: true, 
+                                text: 'EV/Revenue Multiple',
+                                font: { size: 14, weight: 'bold' }
+                            },
+                            beginAtZero: true,
+                            ticks: {
+                                callback: function(value) {
+                                    return value + 'x';
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+    }
+    
+    async loadComparables() {
+        const sector = document.getElementById('comparableSectorSelect')?.value || 'space';
+        const tbody = document.getElementById('comparablesTableBody');
+        
+        if (!tbody) return;
+        
+        // Show loading state
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="8" style="text-align: center; padding: var(--spacing-lg); color: var(--text-secondary);">
+                    <i data-lucide="loader" class="spinning"></i> Loading comparable companies...
+                </td>
+            </tr>
+        `;
+        if (window.lucide) window.lucide.createIcons();
+        
+        try {
+            const response = await fetch(`/api/comparables?sector=${sector}`);
+            const result = await response.json();
+            
+            if (result.success && result.data && result.data.length > 0) {
+                // Store current comparables data for charts
+                this.currentComparablesData = result.data;
+                
+                // Update table if comparables tab is visible
+                if (tbody) {
+                    tbody.innerHTML = result.data.map(company => `
+                        <tr>
+                            <td><strong>${company.name}</strong></td>
+                            <td>${company.ticker || '--'}</td>
+                            <td>${this.formatCurrency(company.marketCap)}</td>
+                            <td>${company.evRevenue ? company.evRevenue.toFixed(2) + 'x' : '--'}</td>
+                            <td>${company.evEbitda ? company.evEbitda.toFixed(2) + 'x' : '--'}</td>
+                            <td>${company.peRatio ? company.peRatio.toFixed(2) + 'x' : '--'}</td>
+                            <td>${company.pegRatio ? company.pegRatio.toFixed(2) : '--'}</td>
+                            <td>${company.revenueGrowth ? (company.revenueGrowth * 100).toFixed(1) + '%' : '--'}</td>
+                        </tr>
+                    `).join('');
+                }
+                
+                // Update valuation multiples section (Dashboard tab)
+                this.updateValuationMultiples(result.data);
+                
+                // Update sector summary (Dashboard tab)
+                this.updateSectorSummary(result.data, sector);
+                
+                // Calculate and display implied valuations
+                this.calculateImpliedValuations(result.data);
+                
+                // Update charts if on analysis tab
+                const ratiosView = document.getElementById('ratios');
+                if (ratiosView && ratiosView.classList.contains('active')) {
+                    const activeTab = ratiosView.querySelector('.insights-tab.active')?.dataset.tab || 'dashboard';
+                    if (activeTab === 'analysis') {
+                        this.updateRatiosCharts(result.data);
+                    }
+                }
+            } else {
+                tbody.innerHTML = `
+                    <tr>
+                        <td colspan="8" style="text-align: center; padding: var(--spacing-lg); color: var(--text-secondary);">
+                            No comparable companies found for ${sector} sector
+                        </td>
+                    </tr>
+                `;
+            }
+        } catch (error) {
+            console.error('Error loading comparables:', error);
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="8" style="text-align: center; padding: var(--spacing-lg); color: var(--error-color);">
+                        Error loading comparable companies. Please try again.
+                    </td>
+                </tr>
+            `;
+        }
+        
+        if (window.lucide) window.lucide.createIcons();
+    }
+    
+    formatCurrency(value) {
+        if (!value && value !== 0) return '--';
+        if (value >= 1e12) return `$${(value / 1e12).toFixed(2)}T`;
+        if (value >= 1e9) return `$${(value / 1e9).toFixed(2)}B`;
+        if (value >= 1e6) return `$${(value / 1e6).toFixed(2)}M`;
+        if (value >= 1e3) return `$${(value / 1e3).toFixed(2)}K`;
+        return `$${value.toFixed(2)}`;
+    }
+    
+    calculateImpliedValuations(companies) {
+        // Get SpaceX's current revenue and EBITDA from model
+        // Estimate revenue from current model data
+        let spacexRevenue = 0;
+        let spacexEbitda = 0;
+        let currentValuation = 0;
+        
+        if (this.currentData && this.currentData.earth) {
+            // Estimate revenue from Earth operations
+            const earthData = this.currentData.earth;
+            if (earthData.revenue && Array.isArray(earthData.revenue)) {
+                // Sum revenue for current year or latest year
+                const latestRevenue = earthData.revenue[earthData.revenue.length - 1];
+                if (latestRevenue && latestRevenue.total) {
+                    spacexRevenue = latestRevenue.total / 1e9; // Convert to billions
+                }
+            }
+            
+            // Estimate EBITDA (simplified: assume 20% margin)
+            spacexEbitda = spacexRevenue * 0.20;
+        }
+        
+        // Get current model valuation
+        if (this.currentData && this.currentData.total) {
+            currentValuation = (this.currentData.total.value || 0) / 1e9; // Convert to billions
+        }
+        
+        // Update current valuation display
+        const valuationEl = document.getElementById('spacexCurrentValuation');
+        const revenueEl = document.getElementById('spacexRevenue');
+        const ebitdaEl = document.getElementById('spacexEbitda');
+        
+        if (valuationEl) {
+            valuationEl.textContent = currentValuation > 0 ? this.formatCurrency(currentValuation * 1e9) : '--';
+            valuationEl.style.color = '';
+        }
+        if (revenueEl) {
+            revenueEl.textContent = spacexRevenue > 0 ? this.formatCurrency(spacexRevenue * 1e9) : '--';
+            revenueEl.style.color = '';
+        }
+        if (ebitdaEl) {
+            ebitdaEl.textContent = spacexEbitda > 0 ? this.formatCurrency(spacexEbitda * 1e9) : '--';
+            ebitdaEl.style.color = '';
+        }
+        
+        // Calculate implied valuations using each comparable's multiples
+        const impliedValuations = [];
+        
+        companies.forEach(company => {
+            if (company.name === 'SpaceX') return; // Skip SpaceX itself
+            
+            const valuations = {};
+            
+            // EV/Revenue multiple
+            if (company.evRevenue && spacexRevenue > 0) {
+                const impliedEV = spacexRevenue * company.evRevenue; // In billions
+                valuations.evRevenue = {
+                    multiple: company.evRevenue,
+                    impliedValue: impliedEV,
+                    company: company.name
+                };
+            }
+            
+            // EV/EBITDA multiple
+            if (company.evEbitda && spacexEbitda > 0) {
+                const impliedEV = spacexEbitda * company.evEbitda; // In billions
+                valuations.evEbitda = {
+                    multiple: company.evEbitda,
+                    impliedValue: impliedEV,
+                    company: company.name
+                };
+            }
+            
+            if (Object.keys(valuations).length > 0) {
+                impliedValuations.push({
+                    company: company.name,
+                    ticker: company.ticker,
+                    valuations: valuations
+                });
+            }
+        });
+        
+        // Display implied valuations
+        const container = document.getElementById('impliedValuationsContainer');
+        if (!container) return;
+        
+        if (impliedValuations.length === 0 || spacexRevenue === 0) {
+            container.innerHTML = `
+                <p style="color: var(--text-secondary); text-align: center; padding: var(--spacing-lg);">
+                    ${spacexRevenue === 0 ? 'Load a model to see implied valuations based on SpaceX revenue' : 'No comparable multiples available'}
+                </p>
+            `;
+            return;
+        }
+        
+        // Calculate averages
+        const evRevenueVals = impliedValuations
+            .filter(iv => iv.valuations.evRevenue)
+            .map(iv => iv.valuations.evRevenue.impliedValue);
+        const evEbitdaVals = impliedValuations
+            .filter(iv => iv.valuations.evEbitda)
+            .map(iv => iv.valuations.evEbitda.impliedValue);
+        
+        const avgEvRevenue = evRevenueVals.length > 0 
+            ? evRevenueVals.reduce((a, b) => a + b, 0) / evRevenueVals.length 
+            : null;
+        const avgEvEbitda = evEbitdaVals.length > 0
+            ? evEbitdaVals.reduce((a, b) => a + b, 0) / evEbitdaVals.length
+            : null;
+        
+        const minEvRevenue = evRevenueVals.length > 0 ? Math.min(...evRevenueVals) : null;
+        const maxEvRevenue = evRevenueVals.length > 0 ? Math.max(...evRevenueVals) : null;
+        const minEvEbitda = evEbitdaVals.length > 0 ? Math.min(...evEbitdaVals) : null;
+        const maxEvEbitda = evEbitdaVals.length > 0 ? Math.max(...evEbitdaVals) : null;
+        
+        container.innerHTML = `
+            <div style="display: grid; gap: var(--spacing-md);">
+                <!-- Summary Cards -->
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: var(--spacing-md); margin-bottom: var(--spacing-lg);">
+                    ${avgEvRevenue ? `
+                        <div style="padding: var(--spacing-md); background: var(--surface); border-radius: var(--radius); border: 1px solid var(--border-color);">
+                            <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 4px;">Avg Implied (EV/Rev)</div>
+                            <div style="font-size: 24px; font-weight: 600;">${this.formatCurrency(avgEvRevenue * 1e9)}</div>
+                            <div style="font-size: 11px; color: var(--text-secondary); margin-top: 4px;">
+                                Range: ${this.formatCurrency(minEvRevenue * 1e9)} - ${this.formatCurrency(maxEvRevenue * 1e9)}
+                            </div>
+                        </div>
+                    ` : ''}
+                    ${avgEvEbitda ? `
+                        <div style="padding: var(--spacing-md); background: var(--surface); border-radius: var(--radius); border: 1px solid var(--border-color);">
+                            <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 4px;">Avg Implied (EV/EBITDA)</div>
+                            <div style="font-size: 24px; font-weight: 600;">${this.formatCurrency(avgEvEbitda * 1e9)}</div>
+                            <div style="font-size: 11px; color: var(--text-secondary); margin-top: 4px;">
+                                Range: ${this.formatCurrency(minEvEbitda * 1e9)} - ${this.formatCurrency(maxEvEbitda * 1e9)}
+                            </div>
+                        </div>
+                    ` : ''}
+                    ${currentValuation > 0 ? `
+                        <div style="padding: var(--spacing-md); background: rgba(0, 102, 204, 0.1); border-radius: var(--radius); border: 2px solid var(--primary-color);">
+                            <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 4px;">Model Valuation</div>
+                            <div style="font-size: 24px; font-weight: 600; color: var(--primary-color);">${this.formatCurrency(currentValuation * 1e9)}</div>
+                            <div style="font-size: 11px; color: var(--text-secondary); margin-top: 4px;">DCF-based</div>
+                        </div>
+                    ` : ''}
+                </div>
+                
+                <!-- Detailed Table -->
+                <div class="table-container">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Company</th>
+                                <th>Ticker</th>
+                                <th>Multiple</th>
+                                <th>Implied Valuation</th>
+                                <th>vs. Model</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${impliedValuations.map(iv => {
+                                const rows = [];
+                                if (iv.valuations.evRevenue) {
+                                    const diff = currentValuation > 0 
+                                        ? ((iv.valuations.evRevenue.impliedValue - currentValuation) / currentValuation * 100).toFixed(1)
+                                        : '--';
+                                    const diffColor = currentValuation > 0 && parseFloat(diff) > 0 ? 'var(--success-color)' : 
+                                                     currentValuation > 0 && parseFloat(diff) < 0 ? 'var(--error-color)' : 'var(--text-secondary)';
+                                    rows.push(`
+                                        <tr>
+                                            <td><strong>${iv.company}</strong></td>
+                                            <td>${iv.ticker || '--'}</td>
+                                            <td>EV/Revenue: ${iv.valuations.evRevenue.multiple.toFixed(2)}x</td>
+                                            <td><strong>${this.formatCurrency(iv.valuations.evRevenue.impliedValue * 1e9)}</strong></td>
+                                            <td style="color: ${diffColor};">${diff !== '--' ? (parseFloat(diff) > 0 ? '+' : '') + diff + '%' : '--'}</td>
+                                        </tr>
+                                    `);
+                                }
+                                if (iv.valuations.evEbitda) {
+                                    const diff = currentValuation > 0 
+                                        ? ((iv.valuations.evEbitda.impliedValue - currentValuation) / currentValuation * 100).toFixed(1)
+                                        : '--';
+                                    const diffColor = currentValuation > 0 && parseFloat(diff) > 0 ? 'var(--success-color)' : 
+                                                     currentValuation > 0 && parseFloat(diff) < 0 ? 'var(--error-color)' : 'var(--text-secondary)';
+                                    rows.push(`
+                                        <tr>
+                                            <td><strong>${iv.company}</strong></td>
+                                            <td>${iv.ticker || '--'}</td>
+                                            <td>EV/EBITDA: ${iv.valuations.evEbitda.multiple.toFixed(2)}x</td>
+                                            <td><strong>${this.formatCurrency(iv.valuations.evEbitda.impliedValue * 1e9)}</strong></td>
+                                            <td style="color: ${diffColor};">${diff !== '--' ? (parseFloat(diff) > 0 ? '+' : '') + diff + '%' : '--'}</td>
+                                        </tr>
+                                    `);
+                                }
+                                return rows.join('');
+                            }).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        `;
+    }
+    
+    updateValuationMultiples(companies) {
+        // Calculate averages
+        const validEvRevenue = companies.filter(c => c.evRevenue).map(c => c.evRevenue);
+        const validEvEbitda = companies.filter(c => c.evEbitda).map(c => c.evEbitda);
+        const validPeRatio = companies.filter(c => c.peRatio).map(c => c.peRatio);
+        const validPegRatio = companies.filter(c => c.pegRatio).map(c => c.pegRatio);
+        
+        const avgEvRevenue = validEvRevenue.length > 0 
+            ? (validEvRevenue.reduce((a, b) => a + b, 0) / validEvRevenue.length).toFixed(2)
+            : '--';
+        const avgEvEbitda = validEvEbitda.length > 0
+            ? (validEvEbitda.reduce((a, b) => a + b, 0) / validEvEbitda.length).toFixed(2)
+            : '--';
+        const avgPeRatio = validPeRatio.length > 0
+            ? (validPeRatio.reduce((a, b) => a + b, 0) / validPeRatio.length).toFixed(2)
+            : '--';
+        const avgPegRatio = validPegRatio.length > 0
+            ? (validPegRatio.reduce((a, b) => a + b, 0) / validPegRatio.length).toFixed(2)
+            : '--';
+        
+        // Update the metrics cards (if they exist)
+        const evRevenueEl = document.querySelector('#ratios .metric-card-small:nth-child(1) .metric-value-small');
+        const evEbitdaEl = document.querySelector('#ratios .metric-card-small:nth-child(2) .metric-value-small');
+        const peRatioEl = document.querySelector('#ratios .metric-card-small:nth-child(3) .metric-value-small');
+        const pegRatioEl = document.querySelector('#ratios .metric-card-small:nth-child(4) .metric-value-small');
+        
+        if (evRevenueEl) {
+            evRevenueEl.textContent = avgEvRevenue !== '--' ? avgEvRevenue + 'x' : '--';
+            evRevenueEl.style.color = '';
+        }
+        if (evEbitdaEl) {
+            evEbitdaEl.textContent = avgEvEbitda !== '--' ? avgEvEbitda + 'x' : '--';
+            evEbitdaEl.style.color = '';
+        }
+        if (peRatioEl) {
+            peRatioEl.textContent = avgPeRatio !== '--' ? avgPeRatio + 'x' : '--';
+            peRatioEl.style.color = '';
+        }
+        if (pegRatioEl) {
+            pegRatioEl.textContent = avgPegRatio !== '--' ? avgPegRatio : '--';
+            pegRatioEl.style.color = '';
+        }
+        
+        // Update helper text
+        const helpers = document.querySelectorAll('#ratios .metric-card-small div[style*="font-size: 11px"]');
+        helpers.forEach(el => {
+            if (el.textContent.includes('Requires public data')) {
+                el.textContent = 'Peer average';
+            }
+        });
+    }
+    
+    // Debounced auto-run Monte Carlo for input changes
+    debouncedAutoRunMonteCarlo(reason = 'parameter-change') {
+        // Clear existing timer
+        if (this.monteCarloDebounceTimer) {
+            clearTimeout(this.monteCarloDebounceTimer);
+        }
+        
+        // Set new timer (wait 2 seconds after last input change)
+        this.monteCarloDebounceTimer = setTimeout(() => {
+            this.autoRunMonteCarloIfNeeded(reason);
+        }, 2000);
+    }
+    
+    // Debounced auto-run VaR for input changes
+    debouncedAutoRunVaR(reason = 'parameter-change') {
+        // Clear existing timer
+        if (this.varDebounceTimer) {
+            clearTimeout(this.varDebounceTimer);
+        }
+        
+        // Set new timer (wait 2 seconds after last input change)
+        this.varDebounceTimer = setTimeout(() => {
+            this.autoRunVaRIfNeeded(reason);
+        }, 2000);
+    }
+    
+    // Debounced auto-run Attribution for input changes
+    debouncedAutoRunAttribution(reason = 'parameter-change') {
+        // Clear existing timer
+        if (this.attributionDebounceTimer) {
+            clearTimeout(this.attributionDebounceTimer);
+        }
+        
+        // Set new timer (wait 2 seconds after last input change)
+        this.attributionDebounceTimer = setTimeout(() => {
+            this.autoRunAttributionIfNeeded(reason);
+        }, 2000);
+    }
+    
+    // Auto-run Monte Carlo simulation if needed
+    async autoRunMonteCarloIfNeeded(reason = 'auto') {
+        // Don't run if already running
+        if (this.autoRunningMonteCarlo) {
+            console.log('⏸️ Monte Carlo already running, skipping auto-run');
+            return;
+        }
+        
+        // Don't run if there's a pending run waiting for confirmation
+        if (this.pendingMonteCarloRun) {
+            console.log('⏸️ Monte Carlo pending confirmation, skipping auto-run');
+            return;
+        }
+        
+        // Don't run if no model is loaded (for initialization, wait for model)
+        if (!this.currentModelId && reason !== 'initialization') {
+            console.log('⏸️ No model loaded, skipping auto-run');
+            return;
+        }
+        
+        console.log(`🎲 Auto-running Monte Carlo simulation (reason: ${reason})`);
+        
+        try {
+            // Set flag to prevent duplicate runs
+            this.autoRunningMonteCarlo = true;
+            
+            // Run simulation (skip validation since we're auto-running)
+            // Progress modal will still show so user knows simulation is running
+            await this.runMonteCarloSimulation(true);
+            
+            console.log(`✅ Auto Monte Carlo simulation completed (reason: ${reason})`);
+        } catch (error) {
+            console.error(`❌ Auto Monte Carlo simulation failed (reason: ${reason}):`, error);
+            // Don't show error to user for auto-runs, just log it
+        } finally {
+            // Reset flag after a short delay
+            setTimeout(() => {
+                this.autoRunningMonteCarlo = false;
+            }, 1000);
+        }
+    }
+    
+    // Auto-run VaR calculation if needed
+    async autoRunVaRIfNeeded(reason = 'auto') {
+        // Don't run if already running
+        if (this.autoRunningVaR) {
+            console.log('⏸️ VaR already running, skipping auto-run');
+            return;
+        }
+        
+        // Don't run if no model is loaded (for initialization, wait for model)
+        if (!this.currentModelId && reason !== 'initialization') {
+            console.log('⏸️ No model loaded, skipping VaR auto-run');
+            return;
+        }
+        
+        console.log(`📊 Auto-running VaR calculation (reason: ${reason})`);
+        
+        try {
+            // Set flag to prevent duplicate runs
+            this.autoRunningVaR = true;
+            
+            // Run VaR calculation silently (no button updates for auto-runs)
+            await this.calculateVaR(true);
+            
+            console.log(`✅ Auto VaR calculation completed (reason: ${reason})`);
+        } catch (error) {
+            console.error(`❌ Auto VaR calculation failed (reason: ${reason}):`, error);
+            // Don't show error to user for auto-runs, just log it
+        } finally {
+            // Reset flag after a short delay
+            setTimeout(() => {
+                this.autoRunningVaR = false;
+            }, 1000);
+        }
+    }
+    
+    // Auto-run Attribution calculation if needed
+    async autoRunAttributionIfNeeded(reason = 'auto') {
+        // Don't run if already running
+        if (this.autoRunningAttribution) {
+            console.log('⏸️ Attribution already running, skipping auto-run');
+            return;
+        }
+        
+        // Don't run if no model is loaded (for initialization, wait for model)
+        if (!this.currentModelId && reason !== 'initialization') {
+            console.log('⏸️ No model loaded, skipping Attribution auto-run');
+            return;
+        }
+        
+        // Attribution requires at least 2 models for comparison
+        // Skip if we don't have comparison models available
+        try {
+            const modelsResponse = await fetch('/api/models?limit=2&sortBy=createdAt&sortOrder=desc');
+            const modelsResult = await modelsResponse.json();
+            if (!modelsResult.success || modelsResult.data.length < 2) {
+                console.log('⏸️ Skipping Attribution - need at least 2 models for comparison');
+                return;
+            }
+        } catch (error) {
+            console.warn('Could not check models for attribution:', error);
+            return;
+        }
+        
+        console.log(`📊 Auto-running Attribution calculation (reason: ${reason})`);
+        
+        try {
+            // Set flag to prevent duplicate runs
+            this.autoRunningAttribution = true;
+            
+            // Run Attribution calculation silently (no button updates for auto-runs)
+            await this.calculateAttribution(true);
+            
+            console.log(`✅ Auto Attribution calculation completed (reason: ${reason})`);
+        } catch (error) {
+            console.error(`❌ Auto Attribution calculation failed (reason: ${reason}):`, error);
+            // Don't show error to user for auto-runs, just log it
+        } finally {
+            // Reset flag after a short delay
+            setTimeout(() => {
+                this.autoRunningAttribution = false;
+            }, 1000);
+        }
+    }
+    
+    exportSimulationsToCSV() {
+        if (!this.currentMonteCarloSimulations || this.currentMonteCarloSimulations.length === 0) {
+            alert('No simulation data to export');
+            return;
+        }
+        
+        // Create CSV header with essential columns + all available data
+        const headers = [
+            'Iteration',
+            'Starlink Penetration', 'Launch Volume', 'First Colony Year', 'Discount Rate',
+            'Earth Value ($B)', 'Mars Value ($B)', 'Total Value ($B)', 'Diluted Value ($B)',
+            'Earth %', 'Mars %'
+        ];
+        const rows = [headers.join(',')];
+        
+        // Add data rows
+        this.currentMonteCarloSimulations.forEach(sim => {
+            const iteration = sim.run || sim.iteration || '';
+            const inputs = sim.inputs || {};
+            const results = sim.results || {};
+            
+            const starlinkPenetration = inputs.earth?.starlinkPenetration || '';
+            const launchVolume = inputs.earth?.launchVolume || '';
+            const firstColonyYear = inputs.mars?.firstColonyYear || '';
+            const discountRate = inputs.financial?.discountRate || '';
+            
+            const earthValue = results.earthValue || sim.earthValue || 0;
+            const marsValue = results.marsValue || sim.marsValue || 0;
+            const totalValue = results.totalValue || sim.totalValue || (earthValue + marsValue);
+            const dilutionFactor = inputs.financial?.dilutionFactor || 0.15;
+            const dilutedValue = results.dilutedValue || sim.dilutedValue || (totalValue * (1 - dilutionFactor));
+            const earthPercent = totalValue > 0 ? ((earthValue / totalValue) * 100).toFixed(2) : '0.00';
+            const marsPercent = totalValue > 0 ? ((marsValue / totalValue) * 100).toFixed(2) : '0.00';
+            
+            const formatCSV = (val) => {
+                if (val === null || val === undefined || val === '') return '';
+                if (typeof val === 'number') return val.toFixed(2);
+                return val.toString();
+            };
+            
+            rows.push([
+                iteration,
+                formatCSV(starlinkPenetration), formatCSV(launchVolume), formatCSV(firstColonyYear), formatCSV(discountRate),
+                formatCSV(earthValue), formatCSV(marsValue), formatCSV(totalValue), formatCSV(dilutedValue),
+                earthPercent, marsPercent
+            ].join(','));
+        });
+        
+        // Create and download CSV
+        const csvContent = rows.join('\n');
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+        const link = document.createElement('a');
+        const url = URL.createObjectURL(blob);
+        link.setAttribute('href', url);
+        link.setAttribute('download', `monte-carlo-simulations-${new Date().toISOString().split('T')[0]}.csv`);
+        link.style.visibility = 'hidden';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
     }
 
     // Display Monte Carlo configuration parameters
@@ -4773,12 +7405,25 @@ class ValuationApp {
             configDistributionType.textContent = useCustom ? 'Custom' : 'Default';
         }
         
+        // Update estimated time based on runs
+        const estimatedTimeEl = document.getElementById('configEstimatedTime');
+        if (estimatedTimeEl) {
+            // Rough estimate: ~1-2ms per run, but can vary
+            const estimatedSeconds = Math.max(1, Math.ceil(runs / 1000));
+            if (estimatedSeconds < 60) {
+                estimatedTimeEl.textContent = `~${estimatedSeconds}-${estimatedSeconds * 2} sec`;
+            } else {
+                const minutes = Math.floor(estimatedSeconds / 60);
+                estimatedTimeEl.textContent = `~${minutes}-${minutes * 2} min`;
+            }
+        }
+        
         // Update source info
         if (configSource) {
             if (fromModel && config) {
                 configSource.innerHTML = `<i data-lucide="database"></i> Loaded from model: "${this.currentModelName || 'Current Model'}"`;
             } else {
-                configSource.innerHTML = `<i data-lucide="info"></i> Using default configuration`;
+                configSource.innerHTML = `<i data-lucide="info"></i> Using default configuration. Click "Edit" to customize parameters.`;
             }
             if (window.lucide) window.lucide.createIcons();
         }
@@ -5127,6 +7772,38 @@ class ValuationApp {
             
             if (result.success) {
                 console.log('✅ Simulation auto-saved successfully');
+                
+                // Show brief notification that simulation was saved
+                const notification = document.createElement('div');
+                notification.style.cssText = `
+                    position: fixed;
+                    top: 100px;
+                    right: 20px;
+                    background: var(--success-color);
+                    color: white;
+                    padding: 12px 20px;
+                    border-radius: 8px;
+                    box-shadow: var(--shadow-lg);
+                    z-index: 10000;
+                    display: flex;
+                    align-items: center;
+                    gap: 8px;
+                    font-size: 14px;
+                `;
+                notification.innerHTML = `
+                    <i data-lucide="check-circle"></i>
+                    <span>Simulation saved successfully</span>
+                `;
+                document.body.appendChild(notification);
+                if (window.lucide) window.lucide.createIcons();
+                
+                // Remove notification after 3 seconds
+                setTimeout(() => {
+                    notification.style.transition = 'opacity 0.3s';
+                    notification.style.opacity = '0';
+                    setTimeout(() => notification.remove(), 300);
+                }, 3000);
+                
                 // Reload models to update simulation counts
                 if (this.currentView === 'models') {
                     this.loadModels();
@@ -6162,6 +8839,13 @@ class ValuationApp {
                                 // Store latest simulation for potential display
                                 this.latestSimulation = latestSim;
                                 this.simulationsNeedRerun = false;
+                                
+                                // Auto-run simulation if inputs match (to ensure fresh results)
+                                setTimeout(() => {
+                                    this.autoRunMonteCarloIfNeeded('model-load');
+                                    this.autoRunVaRIfNeeded('model-load');
+                                    this.autoRunAttributionIfNeeded('model-load');
+                                }, 500);
                             } else {
                                 console.warn(`⚠️ Model "${model.name}" inputs have changed - existing simulations are outdated`);
                                 console.warn('  Differences detected - simulations need rerun');
@@ -6170,21 +8854,37 @@ class ValuationApp {
                                 // Store flag that simulations need rerun
                                 this.simulationsNeedRerun = true;
                                 
-                                // Show confirmation modal instead of system confirm
+                                // Auto-run simulation with new inputs
                                 setTimeout(() => {
-                                    this.showMonteCarloConfirmModal(model.name);
-                                }, 1000); // Wait 1 second after model loads
+                                    this.autoRunMonteCarloIfNeeded('model-change');
+                                    this.autoRunVaRIfNeeded('model-change');
+                                    this.autoRunAttributionIfNeeded('model-change');
+                                }, 1000);
                             }
                         }
                     } catch (error) {
                         console.warn('Could not load simulations:', error);
                         this.simulationsNeedRerun = false;
                         this.latestSimulation = null;
+                        
+                        // If no simulations exist, auto-run
+                        setTimeout(() => {
+                            this.autoRunMonteCarloIfNeeded('model-load-no-sims');
+                            this.autoRunVaRIfNeeded('model-load-no-sims');
+                            this.autoRunAttributionIfNeeded('model-load-no-sims');
+                        }, 500);
                     }
                 } else {
-                    console.log(`ℹ️ Model "${model.name}" has no simulations - simulations will need to be run`);
+                    console.log(`ℹ️ Model "${model.name}" has no simulations - auto-running simulation`);
                     this.simulationsNeedRerun = false;
                     this.latestSimulation = null;
+                    
+                    // Auto-run simulation for new model
+                    setTimeout(() => {
+                        this.autoRunMonteCarloIfNeeded('model-load-no-sims');
+                        this.autoRunVaRIfNeeded('model-load-no-sims');
+                        this.autoRunAttributionIfNeeded('model-load-no-sims');
+                    }, 1000);
                 }
 
                 // Automatically recalculate valuation with current inputs

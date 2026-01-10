@@ -217,3 +217,6 @@ class GreeksCalculator {
 4. **Add caching** - Store Greeks to avoid recalculation
 5. **Add Greeks visualization** - Show how Greeks change over time
 
+
+
+

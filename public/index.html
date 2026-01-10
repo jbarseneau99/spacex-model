@@ -43,7 +43,7 @@
                 <!-- Main Views Group -->
                 <a href="#dashboard" class="nav-item active" data-view="dashboard">
                     <i data-lucide="layout-dashboard"></i>
-                    <span>Dashboard</span>
+                    <span>Model Valuation</span>
                 </a>
                 <a href="#insights" class="nav-item" data-view="insights">
                     <i data-lucide="lightbulb"></i>
@@ -52,6 +52,10 @@
                 <a href="#charts" class="nav-item" data-view="charts">
                     <i data-lucide="bar-chart-2"></i>
                     <span>Charts</span>
+                </a>
+                <a href="#ratios" class="nav-item" data-view="ratios">
+                    <i data-lucide="percent"></i>
+                    <span>Ratios & Comparables</span>
                 </a>
                 
                 <!-- Divider -->
@@ -75,31 +79,39 @@
                     <i data-lucide="layers"></i>
                     <span>Scenarios</span>
                 </a>
-                <a href="#sensitivity" class="nav-item" data-view="sensitivity">
-                    <i data-lucide="trending-up"></i>
-                    <span>Sensitivity Curves</span>
-                </a>
                 <a href="#stress" class="nav-item" data-view="stress">
                     <i data-lucide="alert-triangle"></i>
                     <span>Stress Testing</span>
                 </a>
-                <a href="#monte-carlo" class="nav-item" data-view="monte-carlo">
-                    <i data-lucide="dice-6"></i>
-                    <span>Monte Carlo</span>
+                <a href="#sensitivity" class="nav-item" data-view="sensitivity">
+                    <i data-lucide="trending-up"></i>
+                    <span>Sensitivity Curves</span>
                 </a>
                 <a href="#greeks" class="nav-item" data-view="greeks">
                     <i data-lucide="sigma"></i>
                     <span>Financial Greeks</span>
                 </a>
+                <a href="#factor-risk" class="nav-item" data-view="factor-risk">
+                    <i data-lucide="layers"></i>
+                    <span>Factor Risk</span>
+                </a>
                 <a href="#attribution" class="nav-item" data-view="attribution">
                     <i data-lucide="pie-chart"></i>
                     <span>PnL Attribution</span>
+                </a>
+                <a href="#var" class="nav-item" data-view="var">
+                    <i data-lucide="alert-octagon"></i>
+                    <span>Value at Risk (VaR)</span>
                 </a>
                 
                 <!-- Divider -->
                 <div class="nav-divider"></div>
                 
                 <!-- Data Management Group -->
+                <a href="#monte-carlo" class="nav-item" data-view="monte-carlo">
+                    <i data-lucide="dice-6"></i>
+                    <span>Monte Carlo</span>
+                </a>
                 <a href="#inputs" class="nav-item" data-view="inputs">
                     <i data-lucide="sliders-horizontal"></i>
                     <span>Inputs & Logic</span>
@@ -624,7 +636,12 @@
             <!-- Sensitivity View -->
             <div id="sensitivity" class="view">
                 <div class="view-header">
-                    <h2>Sensitivity Curves</h2>
+                    <h2 style="display: flex; align-items: center; gap: var(--spacing-sm);">
+                        Sensitivity Curves
+                        <button class="icon-button" id="sensitivityInfoBtn" title="Sensitivity Curves Overview" style="margin-left: 4px;">
+                            <i data-lucide="info"></i>
+                        </button>
+                    </h2>
                     <div style="display: flex; gap: var(--spacing-sm); align-items: center;">
                         <a href="#greeks" class="btn btn-secondary btn-sm" onclick="app.showView('greeks')" style="text-decoration: none;">
                             <i data-lucide="sigma"></i>
@@ -637,18 +654,53 @@
                     </div>
                 </div>
                 
-                <div class="section collapsible-section" style="background: rgba(0, 102, 204, 0.05); border-left: 3px solid var(--primary-color); margin-bottom: var(--spacing-md);">
-                    <h3 style="margin-top: 0; cursor: pointer; display: flex; align-items: center; gap: var(--spacing-sm);" onclick="this.parentElement.classList.toggle('collapsed')">
-                        <i data-lucide="chevron-down" class="collapse-icon"></i>
-                        <i data-lucide="info"></i> Sensitivity Curves vs. Financial Greeks
-                    </h3>
-                    <div class="collapsible-content">
-                        <p class="info-text" style="margin-bottom: 0;">
-                            <strong>Sensitivity Curves</strong> show how valuation changes across a full range of input values (e.g., "What happens if Starlink penetration goes from 10% to 20%?"). 
-                            <strong>Financial Greeks</strong> measure the instantaneous rate of change at the current point (e.g., "How sensitive is valuation to a 1% change right now?"). 
-                            Together, they provide both the full picture and point-in-time sensitivity. 
-                            <a href="#greeks" onclick="app.showView('greeks')" style="color: var(--primary-color); text-decoration: underline;">View Financial Greeks →</a>
-                        </p>
+                <!-- Sensitivity Info Modal -->
+                <div id="sensitivityInfoModal" class="modal" style="display: none;" onclick="if(event.target.id === 'sensitivityInfoModal') app.closeSensitivityInfo()">
+                    <div class="modal-content" style="max-width: 700px; max-height: 90vh; overflow-y: auto;">
+                        <div class="modal-header">
+                            <h2><i data-lucide="info"></i> Sensitivity Curves Overview</h2>
+                            <button class="icon-button" onclick="app.closeSensitivityInfo()">
+                                <i data-lucide="x"></i>
+                            </button>
+                        </div>
+                        <div class="modal-body">
+                            <div class="section">
+                                <h3>Sensitivity Curves vs. Financial Greeks</h3>
+                                <p class="info-text">
+                                    <strong>Sensitivity Curves</strong> show how valuation changes across a full range of input values (e.g., "What happens if Starlink penetration goes from 10% to 20%?"). 
+                                    <strong>Financial Greeks</strong> measure the instantaneous rate of change at the current point (e.g., "How sensitive is valuation to a 1% change right now?"). 
+                                    Together, they provide both the full picture and point-in-time sensitivity.
+                                </p>
+                                
+                                <h4 style="margin-top: 24px;">How Sensitivity Curves Work</h4>
+                                <ul style="padding-left: 20px; line-height: 1.8;">
+                                    <li><strong>Select a Variable:</strong> Choose any input parameter (e.g., Starlink penetration, discount rate)</li>
+                                    <li><strong>Set a Range:</strong> Define the minimum and maximum values to test</li>
+                                    <li><strong>Calculate Points:</strong> The system calculates valuation at multiple points across the range</li>
+                                    <li><strong>Visualize:</strong> Results are displayed as a curve showing how valuation changes</li>
+                                </ul>
+                                
+                                <h4 style="margin-top: 24px;">Key Insights</h4>
+                                <ul style="padding-left: 20px; line-height: 1.8;">
+                                    <li><strong>Linear vs. Non-Linear:</strong> Straight lines indicate linear relationships; curves show non-linear effects</li>
+                                    <li><strong>Steepness:</strong> Steeper curves indicate higher sensitivity to that input</li>
+                                    <li><strong>Inflection Points:</strong> Changes in curve direction reveal optimal ranges or thresholds</li>
+                                    <li><strong>Comparison:</strong> Compare multiple variables to identify which inputs have the most impact</li>
+                                </ul>
+                                
+                                <h4 style="margin-top: 24px;">Relationship to Financial Greeks</h4>
+                                <p class="info-text" style="margin-top: var(--spacing-md);">
+                                    Greeks are the mathematical derivatives of sensitivity curves: <strong>Delta = slope at current point</strong>, <strong>Gamma = curvature</strong>.
+                                    Use sensitivity curves to see the full picture, then use Greeks to understand the exact sensitivity at your current point.
+                                </p>
+                                
+                                <div style="margin-top: var(--spacing-lg); padding: var(--spacing-md); background: var(--surface); border-radius: var(--radius); border: 1px solid var(--border-color);">
+                                    <a href="#greeks" onclick="app.showView('greeks'); app.closeSensitivityInfo();" style="color: var(--primary-color); text-decoration: underline; font-weight: 600;">
+                                        View Financial Greeks →
+                                    </a>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
                 
@@ -690,76 +742,180 @@
                     <h2>Monte Carlo Simulation</h2>
                     <button class="btn btn-primary" id="runMonteCarloBtn">
                         <i data-lucide="dice-6"></i>
-                        Run Simulation
+                        Rerun & Save Simulation
                     </button>
                 </div>
 
-                <div class="section">
-                    <h3><i data-lucide="info"></i> Overview</h3>
-                    <p class="info-text">Run thousands of simulations with random variations to generate statistical distributions and probability ranges for valuation outcomes.</p>
+                <!-- Monte Carlo Tabs -->
+                <div class="insights-tabs" style="display: flex; gap: 8px; padding: 0 var(--spacing-lg); margin-bottom: var(--spacing-md); border-bottom: 1px solid var(--border-color);">
+                    <button class="insights-tab active" data-tab="dashboard">
+                        <i data-lucide="layout-dashboard"></i>
+                        <span>Dashboard</span>
+                    </button>
+                    <button class="insights-tab" data-tab="simulations">
+                        <i data-lucide="table"></i>
+                        <span>Simulations</span>
+                    </button>
+                    <button class="insights-tab" data-tab="parameters">
+                        <i data-lucide="settings"></i>
+                        <span>Parameters</span>
+                    </button>
                 </div>
 
-                <!-- Configuration Section (Consolidated) -->
-                <div class="section" id="monteCarloConfigSection">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
-                        <h3><i data-lucide="settings"></i> Configuration</h3>
-                        <button class="btn btn-secondary btn-sm" id="editMonteCarloConfigBtn">
-                            <i data-lucide="edit"></i> Edit
-                        </button>
-                    </div>
-                    <div id="monteCarloConfigDisplay" class="config-display">
-                        <div class="config-info">
-                            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: var(--spacing-md); margin-bottom: 16px;">
-                                <div>
-                                    <strong>Number of Runs:</strong> <span id="configRuns">5,000</span>
-                                </div>
-                                <div>
-                                    <strong>Distribution Type:</strong> <span id="configDistributionType">Default</span>
-                                </div>
+                <!-- Dashboard Tab Content -->
+                <div id="insightsTab-dashboard" class="insights-tab-content active">
+                    <!-- Results Section -->
+                    <div id="monteCarloResultsSection" class="section" style="display: none;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                            <h3 style="margin: 0; font-size: 16px;"><i data-lucide="bar-chart"></i> Statistical Summary</h3>
+                            <div style="display: flex; gap: var(--spacing-sm); align-items: center;">
+                                <button class="icon-button" id="monteCarloInfoBtn" title="Monte Carlo Overview">
+                                    <i data-lucide="info"></i>
+                                </button>
+                                <button class="btn btn-secondary btn-sm" id="saveMonteCarloBtn" onclick="app.saveMonteCarloSimulation()">
+                                    <i data-lucide="save"></i> Save
+                                </button>
                             </div>
-                            <p id="configSource" style="color: var(--text-secondary); font-size: 14px; margin-top: 8px;">
-                                <i data-lucide="info"></i> Using default configuration
-                            </p>
                         </div>
                         
-                        <div class="config-parameters" id="monteCarloParametersDisplay">
-                            <h4 style="margin-top: 16px; margin-bottom: 12px;">Distribution Parameters</h4>
-                            <div class="parameters-grid">
-                                <div class="parameter-group">
-                                    <h5>Earth Parameters</h5>
-                                    <div class="parameter-item">
-                                        <span class="param-label">Starlink Penetration:</span>
-                                        <span class="param-value">StdDev: <span id="paramEarthPenetrationStdDev">--</span>, Range: <span id="paramEarthPenetrationRange">--</span></span>
+                        <div class="statistics-grid" style="grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: var(--spacing-sm); margin-bottom: var(--spacing-md);">
+                            <div class="stat-card" style="padding: 10px 12px;">
+                                <h4 style="margin: 0 0 6px 0; font-size: 13px; color: var(--text-secondary);">Total Enterprise Value</h4>
+                                <div style="display: grid; gap: 3px;">
+                                    <div class="stat-row" style="display: flex; justify-content: space-between; padding: 2px 0; border-bottom: 1px solid var(--border-color);">
+                                        <span style="font-size: 13px;">Mean:</span>
+                                        <span id="mcMean" style="font-weight: 600; font-size: 13px;">--</span>
                                     </div>
-                                    <div class="parameter-item">
-                                        <span class="param-label">Launch Volume:</span>
-                                        <span class="param-value">StdDev: <span id="paramEarthLaunchStdDev">--</span>, Range: <span id="paramEarthLaunchRange">--</span></span>
+                                    <div class="stat-row" style="display: flex; justify-content: space-between; padding: 2px 0; border-bottom: 1px solid var(--border-color);">
+                                        <span style="font-size: 13px;">Median:</span>
+                                        <span id="mcMedian" style="font-weight: 600; font-size: 13px;">--</span>
                                     </div>
-                                    <div class="parameter-item">
-                                        <span class="param-label">Bandwidth Price Decline:</span>
-                                        <span class="param-value">StdDev: <span id="paramEarthBandwidthStdDev">--</span>, Range: <span id="paramEarthBandwidthRange">--</span></span>
+                                    <div class="stat-row" style="display: flex; justify-content: space-between; padding: 2px 0; border-bottom: 1px solid var(--border-color);">
+                                        <span style="font-size: 13px;">Std Dev:</span>
+                                        <span id="mcStdDev" style="font-weight: 600; font-size: 13px;">--</span>
                                     </div>
-                                </div>
-                                <div class="parameter-group">
-                                    <h5>Mars Parameters</h5>
-                                    <div class="parameter-item">
-                                        <span class="param-label">First Colony Year:</span>
-                                        <span class="param-value">StdDev: <span id="paramMarsColonyStdDev">--</span>, Range: <span id="paramMarsColonyRange">--</span></span>
+                                    <div class="stat-row" style="display: flex; justify-content: space-between; padding: 2px 0; border-bottom: 1px solid var(--border-color);">
+                                        <span style="font-size: 13px;">Min:</span>
+                                        <span id="mcMin" style="font-weight: 600; font-size: 13px;">--</span>
                                     </div>
-                                    <div class="parameter-item">
-                                        <span class="param-label">Population Growth:</span>
-                                        <span class="param-value">StdDev: <span id="paramMarsPopStdDev">--</span>, Range: <span id="paramMarsPopRange">--</span></span>
+                                    <div class="stat-row" style="display: flex; justify-content: space-between; padding: 2px 0;">
+                                        <span style="font-size: 13px;">Max:</span>
+                                        <span id="mcMax" style="font-weight: 600; font-size: 13px;">--</span>
                                     </div>
                                 </div>
-                                <div class="parameter-group">
-                                    <h5>Financial Parameters</h5>
-                                    <div class="parameter-item">
-                                        <span class="param-label">Discount Rate:</span>
-                                        <span class="param-value">StdDev: <span id="paramFinancialDiscountStdDev">--</span>, Range: <span id="paramFinancialDiscountRange">--</span></span>
+                            </div>
+                            <div class="stat-card" style="padding: 10px 12px;">
+                                <h4 style="margin: 0 0 6px 0; font-size: 13px; color: var(--text-secondary);">Percentiles</h4>
+                                <div style="display: grid; gap: 3px;">
+                                    <div class="stat-row" style="display: flex; justify-content: space-between; padding: 2px 0; border-bottom: 1px solid var(--border-color);">
+                                        <span style="font-size: 13px;">10th:</span>
+                                        <span id="mcP10" style="font-weight: 600; font-size: 13px;">--</span>
                                     </div>
-                                    <div class="parameter-item">
-                                        <span class="param-label">Dilution Factor:</span>
-                                        <span class="param-value">StdDev: <span id="paramFinancialDilutionStdDev">--</span>, Range: <span id="paramFinancialDilutionRange">--</span></span>
+                                    <div class="stat-row" style="display: flex; justify-content: space-between; padding: 2px 0; border-bottom: 1px solid var(--border-color);">
+                                        <span style="font-size: 13px;">25th (Q1):</span>
+                                        <span id="mcQ1" style="font-weight: 600; font-size: 13px;">--</span>
+                                    </div>
+                                    <div class="stat-row" style="display: flex; justify-content: space-between; padding: 2px 0; border-bottom: 1px solid var(--border-color);">
+                                        <span style="font-size: 13px;">75th (Q3):</span>
+                                        <span id="mcQ3" style="font-weight: 600; font-size: 13px;">--</span>
+                                    </div>
+                                    <div class="stat-row" style="display: flex; justify-content: space-between; padding: 2px 0;">
+                                        <span style="font-size: 13px;">90th:</span>
+                                        <span id="mcP90" style="font-weight: 600; font-size: 13px;">--</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="chart-container" style="margin-bottom: var(--spacing-md);">
+                            <canvas id="monteCarloDistributionChart"></canvas>
+                        </div>
+
+                        <div class="chart-container">
+                            <canvas id="monteCarloComparisonChart"></canvas>
+                        </div>
+                    </div>
+                    
+                    <!-- Empty State -->
+                    <div id="monteCarloEmptyState" class="section" style="text-align: center; padding: var(--spacing-xl); color: var(--text-secondary);">
+                        <i data-lucide="dice-6" style="width: 48px; height: 48px; margin-bottom: var(--spacing-md); opacity: 0.5;"></i>
+                        <p style="font-size: 16px; margin-bottom: var(--spacing-sm);">No simulation results yet</p>
+                        <p style="font-size: 14px;">Click "Rerun & Save Simulation" to generate Monte Carlo results</p>
+                    </div>
+                </div>
+
+                <!-- Parameters Tab Content -->
+                <div id="insightsTab-parameters" class="insights-tab-content" style="display: none;">
+                    <div class="section" id="monteCarloConfigSection">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                            <h3><i data-lucide="settings"></i> Configuration</h3>
+                            <button class="btn btn-secondary btn-sm" id="editMonteCarloConfigBtn">
+                                <i data-lucide="edit"></i> Edit
+                            </button>
+                        </div>
+                        <div id="monteCarloConfigDisplay" class="config-display">
+                            <div class="config-info">
+                                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: var(--spacing-md); margin-bottom: 16px;">
+                                    <div style="background: var(--surface); padding: 12px; border-radius: 8px; border: 1px solid var(--border-color);">
+                                        <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 4px;">Number of Runs</div>
+                                        <div style="font-size: 18px; font-weight: 600; color: var(--text-primary);" id="configRuns">5,000</div>
+                                        <div style="font-size: 11px; color: var(--text-secondary); margin-top: 4px;">Simulation iterations</div>
+                                    </div>
+                                    <div style="background: var(--surface); padding: 12px; border-radius: 8px; border: 1px solid var(--border-color);">
+                                        <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 4px;">Distribution Type</div>
+                                        <div style="font-size: 18px; font-weight: 600; color: var(--text-primary);" id="configDistributionType">Default</div>
+                                        <div style="font-size: 11px; color: var(--text-secondary); margin-top: 4px;">Input variation method</div>
+                                    </div>
+                                    <div style="background: var(--surface); padding: 12px; border-radius: 8px; border: 1px solid var(--border-color);">
+                                        <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 4px;">Estimated Time</div>
+                                        <div style="font-size: 18px; font-weight: 600; color: var(--text-primary);" id="configEstimatedTime">~5-10 sec</div>
+                                        <div style="font-size: 11px; color: var(--text-secondary); margin-top: 4px;">For 5,000 runs</div>
+                                    </div>
+                                </div>
+                                <p id="configSource" style="color: var(--text-secondary); font-size: 14px; margin-top: 8px;">
+                                    <i data-lucide="info"></i> Using default configuration. Click "Edit" to customize parameters.
+                                </p>
+                            </div>
+                            
+                            <div class="config-parameters" id="monteCarloParametersDisplay">
+                                <h4 style="margin-top: 16px; margin-bottom: 12px;">Distribution Parameters</h4>
+                                <div class="parameters-grid">
+                                    <div class="parameter-group">
+                                        <h5>Earth Parameters</h5>
+                                        <div class="parameter-item">
+                                            <span class="param-label">Starlink Penetration:</span>
+                                            <span class="param-value">StdDev: <span id="paramEarthPenetrationStdDev">--</span>, Range: <span id="paramEarthPenetrationRange">--</span></span>
+                                        </div>
+                                        <div class="parameter-item">
+                                            <span class="param-label">Launch Volume:</span>
+                                            <span class="param-value">StdDev: <span id="paramEarthLaunchStdDev">--</span>, Range: <span id="paramEarthLaunchRange">--</span></span>
+                                        </div>
+                                        <div class="parameter-item">
+                                            <span class="param-label">Bandwidth Price Decline:</span>
+                                            <span class="param-value">StdDev: <span id="paramEarthBandwidthStdDev">--</span>, Range: <span id="paramEarthBandwidthRange">--</span></span>
+                                        </div>
+                                    </div>
+                                    <div class="parameter-group">
+                                        <h5>Mars Parameters</h5>
+                                        <div class="parameter-item">
+                                            <span class="param-label">First Colony Year:</span>
+                                            <span class="param-value">StdDev: <span id="paramMarsColonyStdDev">--</span>, Range: <span id="paramMarsColonyRange">--</span></span>
+                                        </div>
+                                        <div class="parameter-item">
+                                            <span class="param-label">Population Growth:</span>
+                                            <span class="param-value">StdDev: <span id="paramMarsPopStdDev">--</span>, Range: <span id="paramMarsPopRange">--</span></span>
+                                        </div>
+                                    </div>
+                                    <div class="parameter-group">
+                                        <h5>Financial Parameters</h5>
+                                        <div class="parameter-item">
+                                            <span class="param-label">Discount Rate:</span>
+                                            <span class="param-value">StdDev: <span id="paramFinancialDiscountStdDev">--</span>, Range: <span id="paramFinancialDiscountRange">--</span></span>
+                                        </div>
+                                        <div class="parameter-item">
+                                            <span class="param-label">Dilution Factor:</span>
+                                            <span class="param-value">StdDev: <span id="paramFinancialDilutionStdDev">--</span>, Range: <span id="paramFinancialDilutionRange">--</span></span>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
@@ -767,66 +923,121 @@
                     </div>
                 </div>
 
-                <!-- Results Section -->
-                <div class="section" id="monteCarloResultsSection" style="display: none;">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
-                        <h3><i data-lucide="bar-chart"></i> Statistical Summary</h3>
-                        <button class="btn btn-secondary" id="saveMonteCarloBtn" onclick="app.saveMonteCarloSimulation()">
-                            <i data-lucide="save"></i> Save Simulation
-                        </button>
-                    </div>
-                    
-                    <div class="statistics-grid">
-                        <div class="stat-card">
-                            <h4>Total Enterprise Value</h4>
-                            <div class="stat-row">
-                                <span>Mean:</span>
-                                <span id="mcMean">--</span>
-                            </div>
-                            <div class="stat-row">
-                                <span>Median:</span>
-                                <span id="mcMedian">--</span>
-                            </div>
-                            <div class="stat-row">
-                                <span>Std Dev:</span>
-                                <span id="mcStdDev">--</span>
-                            </div>
-                            <div class="stat-row">
-                                <span>Min:</span>
-                                <span id="mcMin">--</span>
-                            </div>
-                            <div class="stat-row">
-                                <span>Max:</span>
-                                <span id="mcMax">--</span>
+                <!-- Simulations Tab Content -->
+                <div id="insightsTab-simulations" class="insights-tab-content" style="display: none;">
+                    <div class="section">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                            <h3><i data-lucide="table"></i> Simulation Results</h3>
+                            <div style="display: flex; gap: var(--spacing-sm); align-items: center;">
+                                <input type="text" id="simulationsSearch" placeholder="Search..." class="input-field" style="width: 200px;">
+                                <select id="simulationsPageSize" class="input-field" style="width: 120px;">
+                                    <option value="50">50 per page</option>
+                                    <option value="100" selected>100 per page</option>
+                                    <option value="250">250 per page</option>
+                                    <option value="500">500 per page</option>
+                                    <option value="1000">1000 per page</option>
+                                </select>
+                                <button class="btn btn-secondary btn-sm" id="exportSimulationsBtn">
+                                    <i data-lucide="download"></i> Export CSV
+                                </button>
                             </div>
                         </div>
-                        <div class="stat-card">
-                            <h4>Percentiles</h4>
-                            <div class="stat-row">
-                                <span>10th:</span>
-                                <span id="mcP10">--</span>
-                            </div>
-                            <div class="stat-row">
-                                <span>25th (Q1):</span>
-                                <span id="mcQ1">--</span>
-                            </div>
-                            <div class="stat-row">
-                                <span>75th (Q3):</span>
-                                <span id="mcQ3">--</span>
-                            </div>
-                            <div class="stat-row">
-                                <span>90th:</span>
-                                <span id="mcP90">--</span>
+                        
+                        <div class="table-container" style="max-height: 70vh; overflow-y: auto;">
+                            <table class="data-table" id="simulationsTable">
+                                <thead style="position: sticky; top: 0; background: var(--surface); z-index: 10;">
+                                    <tr>
+                                        <th style="width: 60px;"></th>
+                                        <th style="width: 80px;">Iteration</th>
+                                        <!-- Key Inputs (most impactful) -->
+                                        <th style="width: 130px;">Starlink Penetration</th>
+                                        <th style="width: 120px;">Launch Volume</th>
+                                        <th style="width: 130px;">First Colony Year</th>
+                                        <th style="width: 130px;">Discount Rate</th>
+                                        <!-- Final Valuations -->
+                                        <th style="width: 140px;">Earth Value ($B)</th>
+                                        <th style="width: 140px;">Mars Value ($B)</th>
+                                        <th style="width: 150px;">Total Value ($B)</th>
+                                        <th style="width: 140px;">Diluted Value ($B)</th>
+                                        <!-- Percentages -->
+                                        <th style="width: 100px;">Earth %</th>
+                                        <th style="width: 100px;">Mars %</th>
+                                        <!-- Actions -->
+                                        <th style="width: 80px;">Details</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="simulationsTableBody">
+                                    <tr>
+                                        <td colspan="13" style="text-align: center; padding: var(--spacing-lg); color: var(--text-secondary);">
+                                            No simulation results available. Run a simulation to see results.
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                        
+                        <!-- Monte Carlo Info Modal -->
+                        <div id="monteCarloInfoModal" class="modal" style="display: none;" onclick="if(event.target.id === 'monteCarloInfoModal') app.closeMonteCarloInfo()">
+                            <div class="modal-content" style="max-width: 700px; max-height: 90vh; overflow-y: auto;">
+                                <div class="modal-header">
+                                    <h2><i data-lucide="info"></i> Monte Carlo Simulation Overview</h2>
+                                    <button class="icon-button" onclick="app.closeMonteCarloInfo()">
+                                        <i data-lucide="x"></i>
+                                    </button>
+                                </div>
+                                <div class="modal-body">
+                                    <div class="section">
+                                        <h3>What is Monte Carlo Simulation?</h3>
+                                        <p class="info-text">Monte Carlo simulation runs thousands of simulations with random variations to generate statistical distributions and probability ranges for valuation outcomes.</p>
+                                        
+                                        <h4 style="margin-top: 24px;">How It Works</h4>
+                                        <ol style="padding-left: 20px; line-height: 1.8;">
+                                            <li><strong>Random Input Generation:</strong> Each simulation randomly varies inputs based on probability distributions</li>
+                                            <li><strong>Valuation Calculation:</strong> For each set of random inputs, the model calculates Earth and Mars valuations</li>
+                                            <li><strong>Statistical Analysis:</strong> After thousands of runs, the system calculates mean, median, percentiles, and standard deviation</li>
+                                            <li><strong>Distribution Visualization:</strong> Results are displayed as histograms showing the probability distribution of outcomes</li>
+                                        </ol>
+                                        
+                                        <h4 style="margin-top: 24px;">Key Benefits</h4>
+                                        <ul style="padding-left: 20px; line-height: 1.8;">
+                                            <li>Understand the <strong>range of possible outcomes</strong> rather than a single point estimate</li>
+                                            <li>Identify <strong>tail risks</strong> and confidence intervals</li>
+                                            <li>Quantify <strong>uncertainty</strong> in input assumptions</li>
+                                            <li>Make more <strong>informed decisions</strong> based on probability distributions</li>
+                                        </ul>
+                                        
+                                        <h4 style="margin-top: 24px;">Recommended Settings</h4>
+                                        <ul style="padding-left: 20px; line-height: 1.8;">
+                                            <li><strong>5,000 runs:</strong> Good balance between accuracy and speed (~5-10 seconds)</li>
+                                            <li><strong>10,000+ runs:</strong> Higher precision for detailed analysis (slower)</li>
+                                            <li><strong>Default distributions:</strong> Based on historical data and expert estimates</li>
+                                            <li><strong>Custom distributions:</strong> Adjust based on your specific assumptions</li>
+                                        </ul>
+                                    </div>
+                                </div>
                             </div>
                         </div>
-                    </div>
-
-                    <div class="chart-container">
-                        <canvas id="monteCarloDistributionChart"></canvas>
-                    </div>
-
-                    <div class="chart-container">
-                        <canvas id="monteCarloComparisonChart"></canvas>
+                        
+                        <!-- Detail Modal for expanded view -->
+                        <div id="simulationDetailModal" class="modal" style="display: none;" onclick="if(event.target.id === 'simulationDetailModal') app.closeSimulationDetails()">
+                            <div class="modal-content" style="max-width: 900px; max-height: 90vh; overflow-y: auto;">
+                                <div class="modal-header">
+                                    <h2>Simulation Details - Iteration <span id="detailIteration"></span></h2>
+                                    <button class="icon-button" onclick="app.closeSimulationDetails()">
+                                        <i data-lucide="x"></i>
+                                    </button>
+                                </div>
+                                <div class="modal-body">
+                                    <div id="simulationDetailContent">
+                                        <!-- Details will be populated here -->
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="pagination" id="simulationsPagination" style="margin-top: var(--spacing-md); display: flex; justify-content: center; align-items: center; gap: var(--spacing-sm);">
+                            <!-- Pagination will be added dynamically -->
+                        </div>
                     </div>
                 </div>
             </div>
@@ -834,12 +1045,67 @@
             <!-- Stress Testing View -->
             <div id="stress" class="view">
                 <div class="view-header">
-                    <h2>Stress Testing & Failure Modes</h2>
+                    <h2 style="display: flex; align-items: center; gap: var(--spacing-sm);">
+                        Stress Testing & Failure Modes
+                        <button class="icon-button" id="stressInfoBtn" title="Stress Testing Overview" style="margin-left: 4px;">
+                            <i data-lucide="info"></i>
+                        </button>
+                    </h2>
                 </div>
 
-                <div class="section">
-                    <h3><i data-lucide="alert-triangle"></i> Overview</h3>
-                    <p class="info-text">Test valuation under adverse conditions and failure modes. This analysis helps identify key risk factors and their impact on enterprise value.</p>
+                <!-- Stress Testing Info Modal -->
+                <div id="stressInfoModal" class="modal" style="display: none;" onclick="if(event.target.id === 'stressInfoModal') app.closeStressInfo()">
+                    <div class="modal-content" style="max-width: 700px; max-height: 90vh; overflow-y: auto;">
+                        <div class="modal-header">
+                            <h2><i data-lucide="info"></i> Stress Testing Overview</h2>
+                            <button class="icon-button" onclick="app.closeStressInfo()">
+                                <i data-lucide="x"></i>
+                            </button>
+                        </div>
+                        <div class="modal-body">
+                            <div class="section">
+                                <h3>What is Stress Testing?</h3>
+                                <p class="info-text">Stress testing evaluates valuation under adverse conditions and failure modes. This analysis helps identify key risk factors and their impact on enterprise value.</p>
+                                
+                                <h4 style="margin-top: 24px;">How Stress Testing Works</h4>
+                                <p class="info-text" style="margin-top: var(--spacing-md);">
+                                    While Monte Carlo simulation explores the <strong>distribution of outcomes</strong> under normal uncertainty, stress testing evaluates <strong>specific adverse scenarios</strong> and failure modes. It answers: "What happens if things go wrong?"
+                                </p>
+                                
+                                <h4 style="margin-top: 24px;">What Stress Testing Does</h4>
+                                <ul style="padding-left: 20px; line-height: 1.8;">
+                                    <li><strong>Tests extreme scenarios:</strong> Evaluates what happens under adverse conditions</li>
+                                    <li><strong>Identifies failure modes:</strong> Reveals which assumptions, if violated, would most impact valuation</li>
+                                    <li><strong>Quantifies downside risk:</strong> Shows how much value could be lost in worst-case scenarios</li>
+                                    <li><strong>Validates model robustness:</strong> Ensures the valuation model behaves reasonably under stress</li>
+                                </ul>
+                                
+                                <h4 style="margin-top: 24px;">Predefined Stress Scenarios</h4>
+                                <p class="info-text" style="margin-top: var(--spacing-md);">
+                                    The system includes predefined scenarios such as:
+                                </p>
+                                <ul style="padding-left: 20px; line-height: 1.8;">
+                                    <li><strong>Mars Delay:</strong> Tests impact of delayed Mars colonization</li>
+                                    <li><strong>Increased Competition:</strong> Evaluates effect of reduced market share</li>
+                                    <li><strong>Regulatory Risk:</strong> Assesses impact of regulatory changes</li>
+                                    <li><strong>Technology Failure:</strong> Tests resilience to technical setbacks</li>
+                                </ul>
+                                
+                                <h4 style="margin-top: 24px;">Custom Stress Tests</h4>
+                                <p class="info-text" style="margin-top: var(--spacing-md);">
+                                    You can also create custom stress tests by modifying specific inputs and comparing the results to your base case. This allows you to test any scenario you can imagine.
+                                </p>
+                                
+                                <h4 style="margin-top: 24px;">Key Insights</h4>
+                                <ul style="padding-left: 20px; line-height: 1.8;">
+                                    <li><strong>Risk Identification:</strong> Discover which inputs have the most impact when stressed</li>
+                                    <li><strong>Valuation Resilience:</strong> Understand how robust your valuation is to adverse conditions</li>
+                                    <li><strong>Scenario Planning:</strong> Prepare for different future outcomes</li>
+                                    <li><strong>Decision Support:</strong> Make informed decisions about risk management and mitigation</li>
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
                 </div>
 
                 <!-- Predefined Stress Scenarios -->
@@ -1334,6 +1600,42 @@
                         </div>
                     </div>
 
+                    <!-- Combined Risk View -->
+                    <div class="section" style="margin-top: var(--spacing-lg); background: rgba(0, 102, 204, 0.03); border-left: 3px solid var(--primary-color); padding: var(--spacing-md);">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--spacing-md);">
+                            <h3 style="margin: 0;"><i data-lucide="layers"></i> Combined Risk Analysis</h3>
+                            <a href="#factor-risk" class="btn btn-secondary btn-sm" onclick="app.showView('factor-risk')" style="text-decoration: none;">
+                                <i data-lucide="bar-chart-3"></i>
+                                View Factor Risk
+                            </a>
+                        </div>
+                        <div id="combinedRiskView" style="display: none;">
+                            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: var(--spacing-md);">
+                                <div class="metric-card-small">
+                                    <div class="metric-label-small">Greeks Risk</div>
+                                    <div class="metric-value-small" id="greeksRiskTotal">--</div>
+                                    <div style="font-size: 11px; color: var(--text-secondary);">Model input sensitivity</div>
+                                </div>
+                                <div class="metric-card-small">
+                                    <div class="metric-label-small">Factor Risk</div>
+                                    <div class="metric-value-small" id="factorRiskTotal">--</div>
+                                    <div style="font-size: 11px; color: var(--text-secondary);">Market factor exposure</div>
+                                </div>
+                                <div class="metric-card-small">
+                                    <div class="metric-label-small">Total Risk</div>
+                                    <div class="metric-value-small" id="totalCombinedRisk">--</div>
+                                    <div style="font-size: 11px; color: var(--text-secondary);">Combined risk estimate</div>
+                                </div>
+                            </div>
+                            <div style="margin-top: var(--spacing-md);">
+                                <canvas id="combinedRiskChart"></canvas>
+                            </div>
+                        </div>
+                        <div id="combinedRiskPlaceholder" style="text-align: center; padding: var(--spacing-lg); color: var(--text-secondary);">
+                            <p style="margin: 0;">Calculate both Greeks and Factor Risk to see combined analysis</p>
+                        </div>
+                    </div>
+
                     <!-- Detailed Tables -->
                     <div class="section" style="margin-top: var(--spacing-lg);">
                         <h3><i data-lucide="table"></i> Detailed Greeks Values</h3>
@@ -1382,15 +1684,169 @@
                 </div>
             </div>
 
-            <!-- PnL Attribution View -->
-            <div id="attribution" class="view">
+            <!-- Factor Risk View -->
+            <div id="factor-risk" class="view">
                 <div class="view-header">
-                    <h2>PnL Attribution</h2>
+                    <h2>Factor Risk Analysis</h2>
                     <div style="display: flex; gap: var(--spacing-sm); align-items: center;">
                         <a href="#greeks" class="btn btn-secondary btn-sm" onclick="app.showView('greeks')" style="text-decoration: none;">
                             <i data-lucide="sigma"></i>
                             View Greeks
                         </a>
+                        <select id="factorModelSelect" class="input-field" style="min-width: 200px;">
+                            <option value="fama-french-3">Fama-French 3-Factor</option>
+                            <option value="fama-french-5">Fama-French 5-Factor</option>
+                            <option value="barra-style" selected>Barra-Style Multi-Factor</option>
+                            <option value="custom">Custom Model</option>
+                        </select>
+                        <button class="btn btn-primary" id="calculateFactorRiskBtn">
+                            <i data-lucide="bar-chart-3"></i>
+                            Calculate Factor Risk
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Factor Risk Info Icon -->
+                <div id="factorRiskInfoIconContainer" style="position: relative; display: inline-block; margin-bottom: var(--spacing-md);">
+                    <button class="icon-button" onclick="app.showFactorRiskInfo(event)" title="Factor Risk Explained" style="position: relative;">
+                        <i data-lucide="info"></i>
+                    </button>
+                </div>
+
+                <!-- Factor Risk Info Floating Panel -->
+                <div id="factorRiskInfoPanel" class="floating-panel" style="display: none;">
+                    <div class="floating-panel-content">
+                        <div class="floating-panel-header">
+                            <h3 style="margin: 0; display: flex; align-items: center; gap: var(--spacing-sm);">
+                                <i data-lucide="info"></i> Factor Risk Explained
+                            </h3>
+                            <button class="icon-button" onclick="app.closeFactorRiskInfo()" style="padding: 4px;">
+                                <i data-lucide="x"></i>
+                            </button>
+                        </div>
+                        <div class="floating-panel-body">
+                            <p class="info-text" style="margin-bottom: var(--spacing-md);">
+                                <strong>Factor Risk</strong> measures how SpaceX valuation correlates with market/systematic factors (what you can't control), 
+                                while <strong>Greeks</strong> measure sensitivity to model inputs (what you can control).
+                            </p>
+                            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: var(--spacing-md); margin-top: var(--spacing-md);">
+                                <div>
+                                    <strong>Greeks (Model Inputs)</strong>: "What if Starlink penetration changes?"<br>
+                                    <em>Example:</em> Delta = $50B per 1% increase in penetration
+                                </div>
+                                <div>
+                                    <strong>Factors (Market)</strong>: "What if tech sector crashes?"<br>
+                                    <em>Example:</em> Tech Growth Factor exposure = 0.75 beta → 20% crash = -$120B
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Factor Risk Dashboard -->
+                <div class="section" id="factorRiskDashboard" style="display: none;">
+                    <h3><i data-lucide="bar-chart-3"></i> Factor Exposure Dashboard</h3>
+                    
+                    <!-- Model Info -->
+                    <div id="factorModelInfo" style="margin-bottom: var(--spacing-lg); padding: var(--spacing-md); background: var(--surface); border-radius: var(--radius);">
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <div>
+                                <h4 style="margin: 0 0 4px 0;" id="factorModelName">--</h4>
+                                <p style="margin: 0; font-size: 13px; color: var(--text-secondary);" id="factorModelDescription">--</p>
+                            </div>
+                            <div style="text-align: right;">
+                                <div style="font-size: 12px; color: var(--text-secondary);">Total Factor Risk</div>
+                                <div style="font-size: 24px; font-weight: 600;" id="totalFactorRisk">--</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Factor Tiles -->
+                    <div class="section">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--spacing-md);">
+                            <h4 style="margin: 0;">Factor Exposures</h4>
+                            <button class="btn btn-secondary btn-sm" onclick="app.showFactorChart()" id="showChartsBtn" style="display: none;">
+                                <i data-lucide="bar-chart-3"></i>
+                                View Charts
+                            </button>
+                        </div>
+                        <div id="factorTilesContainer" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: var(--spacing-sm);">
+                            <!-- Factor tiles will be populated here -->
+                        </div>
+                    </div>
+
+                    <!-- Factor Charts Modal -->
+                    <div id="factorChartsModal" class="modal" style="display: none;" onclick="if(event.target.id === 'factorChartsModal') app.closeFactorChartsModal()">
+                        <div class="modal-content modal-large" onclick="event.stopPropagation()">
+                            <div class="modal-header">
+                                <h2><i data-lucide="bar-chart-3"></i> Factor Charts</h2>
+                                <button class="modal-close" onclick="app.closeFactorChartsModal()">
+                                    <i data-lucide="x"></i>
+                                </button>
+                            </div>
+                            <div class="modal-body">
+                                <div class="charts-row">
+                                    <div class="chart-container-half">
+                                        <h4>Factor Risk Contribution</h4>
+                                        <canvas id="factorRiskChart"></canvas>
+                                    </div>
+                                    <div class="chart-container-half">
+                                        <h4>Factor Exposure Comparison</h4>
+                                        <canvas id="factorExposureChart"></canvas>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Stress Testing -->
+                    <div class="section" style="margin-top: var(--spacing-lg);">
+                        <h4><i data-lucide="alert-triangle"></i> Factor Stress Testing</h4>
+                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: var(--spacing-md);">
+                            <div>
+                                <label class="input-label">Factor</label>
+                                <select id="stressTestFactor" class="input-field">
+                                    <option value="">Select factor...</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="input-label">Shock (%)</label>
+                                <input type="number" id="stressTestShock" class="input-field" step="0.01" value="-0.20" placeholder="-0.20">
+                            </div>
+                            <div style="display: flex; align-items: flex-end;">
+                                <button class="btn btn-secondary" id="runStressTestBtn">
+                                    <i data-lucide="zap"></i>
+                                    Run Stress Test
+                                </button>
+                            </div>
+                        </div>
+                        <div id="stressTestResults" style="margin-top: var(--spacing-md); display: none;">
+                            <!-- Results will be populated here -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- PnL Attribution View -->
+            <div id="attribution" class="view">
+                <div class="view-header">
+                    <h2 style="display: flex; align-items: center; gap: var(--spacing-sm);">
+                        PnL Attribution
+                        <button class="icon-button" id="attributionInfoBtn" title="PnL Attribution Overview" style="margin-left: 4px;">
+                            <i data-lucide="info"></i>
+                        </button>
+                    </h2>
+                    <div style="display: flex; gap: var(--spacing-sm); align-items: center;">
+                        <a href="#greeks" class="btn btn-secondary btn-sm" onclick="app.showView('greeks')" style="text-decoration: none;">
+                            <i data-lucide="sigma"></i>
+                            View Greeks
+                        </a>
+                        <select id="attributionBaseModel" class="input-field" style="min-width: 180px;">
+                            <option value="">Current Model</option>
+                        </select>
+                        <select id="attributionCompareModel" class="input-field" style="min-width: 180px;">
+                            <option value="">Select model...</option>
+                        </select>
                         <button class="btn btn-primary" id="calculateAttributionBtn">
                             <i data-lucide="pie-chart"></i>
                             Calculate Attribution
@@ -1398,60 +1854,78 @@
                     </div>
                 </div>
 
-                <div class="section collapsible-section" style="background: rgba(0, 102, 204, 0.05); border-left: 3px solid var(--primary-color); margin-bottom: var(--spacing-md);">
-                    <h3 style="margin-top: 0; cursor: pointer; display: flex; align-items: center; gap: var(--spacing-sm);" onclick="this.parentElement.classList.toggle('collapsed')">
-                        <i data-lucide="chevron-down" class="collapse-icon"></i>
-                        <i data-lucide="info"></i> PnL Attribution Explained
-                    </h3>
-                    <div class="collapsible-content">
-                        <p class="info-text" style="margin-bottom: var(--spacing-md);">
-                            <strong>PnL Attribution</strong> uses Financial Greeks to explain <em>why</em> valuation changed. It decomposes valuation movements into contributions from each input:
-                        </p>
-                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: var(--spacing-md); margin-top: var(--spacing-md);">
-                            <div>
-                                <strong>Delta Attribution</strong>: ΔValue = Delta × ΔInput<br>
-                                <em>Example:</em> If Starlink penetration increases by 2% and Delta = $45B/%, then Delta PnL = $90B
-                            </div>
-                            <div>
-                                <strong>Gamma Attribution</strong>: ΔValue = 0.5 × Gamma × (ΔInput)²<br>
-                                <em>Example:</em> Captures non-linear/convexity effects when inputs change significantly
-                            </div>
-                            <div>
-                                <strong>Vega Attribution</strong>: ΔValue = Vega × ΔVolatility<br>
-                                <em>Example:</em> If uncertainty increases by 5% and Vega = $200B/%, then Vega PnL = $1T
-                            </div>
-                            <div>
-                                <strong>Theta Attribution</strong>: ΔValue = Theta × ΔTime<br>
-                                <em>Example:</em> Time decay for Mars option as colony date approaches
-                            </div>
-                            <div>
-                                <strong>Rho Attribution</strong>: ΔValue = Rho × ΔDiscountRate<br>
-                                <em>Example:</em> If discount rate increases by 1% and Rho = -$35B/%, then Rho PnL = -$35B
-                            </div>
+                <!-- PnL Attribution Info Modal -->
+                <div id="attributionInfoModal" class="modal" style="display: none;" onclick="if(event.target.id === 'attributionInfoModal') app.closeAttributionInfo()">
+                    <div class="modal-content" style="max-width: 700px; max-height: 90vh; overflow-y: auto;">
+                        <div class="modal-header">
+                            <h2><i data-lucide="info"></i> PnL Attribution Overview</h2>
+                            <button class="icon-button" onclick="app.closeAttributionInfo()">
+                                <i data-lucide="x"></i>
+                            </button>
                         </div>
-                        <p class="info-text" style="margin-top: var(--spacing-md); margin-bottom: 0;">
-                            <strong>Total PnL</strong> = Sum of all Greek contributions. This allows you to answer: "Why did valuation change from $4.5T to $4.8T?" by attributing the $300B change to specific input movements.
-                        </p>
-                    </div>
-                </div>
-
-                <!-- Attribution Comparison -->
-                <div class="section">
-                    <h3><i data-lucide="git-compare"></i> Compare Scenarios</h3>
-                    <p class="info-text">Select two models or scenarios to see how valuation changes are attributed to each input.</p>
-                    
-                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--spacing-lg); margin-top: var(--spacing-md);">
-                        <div class="form-group">
-                            <label>Base Scenario</label>
-                            <select id="attributionBaseModel" class="select-input">
-                                <option value="">Current Model</option>
-                            </select>
-                        </div>
-                        <div class="form-group">
-                            <label>Comparison Scenario</label>
-                            <select id="attributionCompareModel" class="select-input">
-                                <option value="">Select model...</option>
-                            </select>
+                        <div class="modal-body">
+                            <div class="section">
+                                <h3>What is PnL Attribution?</h3>
+                                <p class="info-text">
+                                    <strong>PnL Attribution</strong> uses Financial Greeks to explain <em>why</em> valuation changed. It decomposes valuation movements into contributions from each input, allowing you to understand exactly what drove the change.
+                                </p>
+                                
+                                <h4 style="margin-top: 24px;">How PnL Attribution Works</h4>
+                                <p class="info-text" style="margin-top: var(--spacing-md);">
+                                    When comparing two scenarios or models, PnL Attribution breaks down the total valuation change into contributions from each Greek:
+                                </p>
+                                
+                                <div style="display: grid; grid-template-columns: 1fr; gap: var(--spacing-md); margin-top: var(--spacing-md);">
+                                    <div style="padding: var(--spacing-md); background: var(--surface); border-radius: var(--radius); border: 1px solid var(--border-color);">
+                                        <strong>Delta Attribution</strong>
+                                        <p style="margin: var(--spacing-sm) 0 0 0; font-size: 14px; color: var(--text-secondary);">
+                                            <strong>Formula:</strong> ΔValue = Delta × ΔInput<br>
+                                            <em>Example:</em> If Starlink penetration increases by 2% and Delta = $45B/%, then Delta PnL = $90B
+                                        </p>
+                                    </div>
+                                    <div style="padding: var(--spacing-md); background: var(--surface); border-radius: var(--radius); border: 1px solid var(--border-color);">
+                                        <strong>Gamma Attribution</strong>
+                                        <p style="margin: var(--spacing-sm) 0 0 0; font-size: 14px; color: var(--text-secondary);">
+                                            <strong>Formula:</strong> ΔValue = 0.5 × Gamma × (ΔInput)²<br>
+                                            <em>Example:</em> Captures non-linear/convexity effects when inputs change significantly
+                                        </p>
+                                    </div>
+                                    <div style="padding: var(--spacing-md); background: var(--surface); border-radius: var(--radius); border: 1px solid var(--border-color);">
+                                        <strong>Vega Attribution</strong>
+                                        <p style="margin: var(--spacing-sm) 0 0 0; font-size: 14px; color: var(--text-secondary);">
+                                            <strong>Formula:</strong> ΔValue = Vega × ΔVolatility<br>
+                                            <em>Example:</em> If uncertainty increases by 5% and Vega = $200B/%, then Vega PnL = $1T
+                                        </p>
+                                    </div>
+                                    <div style="padding: var(--spacing-md); background: var(--surface); border-radius: var(--radius); border: 1px solid var(--border-color);">
+                                        <strong>Theta Attribution</strong>
+                                        <p style="margin: var(--spacing-sm) 0 0 0; font-size: 14px; color: var(--text-secondary);">
+                                            <strong>Formula:</strong> ΔValue = Theta × ΔTime<br>
+                                            <em>Example:</em> Time decay for Mars option as colony date approaches
+                                        </p>
+                                    </div>
+                                    <div style="padding: var(--spacing-md); background: var(--surface); border-radius: var(--radius); border: 1px solid var(--border-color);">
+                                        <strong>Rho Attribution</strong>
+                                        <p style="margin: var(--spacing-sm) 0 0 0; font-size: 14px; color: var(--text-secondary);">
+                                            <strong>Formula:</strong> ΔValue = Rho × ΔDiscountRate<br>
+                                            <em>Example:</em> If discount rate increases by 1% and Rho = -$35B/%, then Rho PnL = -$35B
+                                        </p>
+                                    </div>
+                                </div>
+                                
+                                <h4 style="margin-top: 24px;">Total PnL Calculation</h4>
+                                <p class="info-text" style="margin-top: var(--spacing-md);">
+                                    <strong>Total PnL</strong> = Sum of all Greek contributions. This allows you to answer: "Why did valuation change from $4.5T to $4.8T?" by attributing the $300B change to specific input movements.
+                                </p>
+                                
+                                <h4 style="margin-top: 24px;">Key Benefits</h4>
+                                <ul style="padding-left: 20px; line-height: 1.8;">
+                                    <li><strong>Understand Drivers:</strong> See exactly which inputs caused valuation changes</li>
+                                    <li><strong>Quantify Impact:</strong> Measure the dollar impact of each input change</li>
+                                    <li><strong>Compare Scenarios:</strong> Understand differences between models or time periods</li>
+                                    <li><strong>Risk Management:</strong> Identify which inputs pose the greatest risk</li>
+                                </ul>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -1516,6 +1990,436 @@
                                 <tbody id="attributionTableBody">
                                 </tbody>
                             </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- VaR (Value at Risk) View -->
+            <div id="var" class="view">
+                <div class="view-header">
+                    <h2 style="display: flex; align-items: center; gap: var(--spacing-sm);">
+                        Value at Risk (VaR)
+                        <button class="icon-button" id="varInfoBtn" title="VaR Overview" style="margin-left: 4px;">
+                            <i data-lucide="info"></i>
+                        </button>
+                    </h2>
+                    <div style="display: flex; gap: var(--spacing-sm); align-items: center;">
+                        <select id="varMethodSelect" class="input-field" style="min-width: 200px;">
+                            <option value="greeks">Greeks-Based VaR</option>
+                            <option value="monte-carlo">Monte Carlo VaR</option>
+                            <option value="combined">Combined (Greeks + Monte Carlo)</option>
+                        </select>
+                        <select id="varConfidenceSelect" class="input-field" style="min-width: 150px;">
+                            <option value="0.95">95% Confidence</option>
+                            <option value="0.99" selected>99% Confidence</option>
+                            <option value="0.999">99.9% Confidence</option>
+                        </select>
+                        <select id="varTimeHorizonSelect" class="input-field" style="min-width: 150px;">
+                            <option value="1">1 Day</option>
+                            <option value="5">5 Days</option>
+                            <option value="10" selected>10 Days</option>
+                            <option value="30">30 Days</option>
+                            <option value="90">90 Days</option>
+                        </select>
+                        <button class="btn btn-primary" id="calculateVaRBtn">
+                            <i data-lucide="calculator"></i>
+                            Calculate VaR
+                        </button>
+                    </div>
+                </div>
+
+                <!-- VaR Info Modal -->
+                <div id="varInfoModal" class="modal" style="display: none;" onclick="if(event.target.id === 'varInfoModal') app.closeVaRInfo()">
+                    <div class="modal-content" style="max-width: 700px; max-height: 90vh; overflow-y: auto;">
+                        <div class="modal-header">
+                            <h2><i data-lucide="info"></i> Value at Risk (VaR) Overview</h2>
+                            <button class="icon-button" onclick="app.closeVaRInfo()">
+                                <i data-lucide="x"></i>
+                            </button>
+                        </div>
+                        <div class="modal-body">
+                            <div class="section">
+                                <h3>What is Value at Risk?</h3>
+                                <p class="info-text">Value at Risk (VaR) estimates the maximum potential loss in valuation over a specified time period with a given confidence level.</p>
+                                
+                                <h4 style="margin-top: 24px;">VaR Calculation Methods</h4>
+                                <div style="display: grid; grid-template-columns: 1fr; gap: var(--spacing-md); margin-top: var(--spacing-md);">
+                                    <div style="padding: var(--spacing-md); background: var(--surface); border-radius: var(--radius); border: 1px solid var(--border-color);">
+                                        <strong>Greeks-Based VaR</strong>
+                                        <p style="margin: var(--spacing-sm) 0 0 0; font-size: 14px; color: var(--text-secondary);">
+                                            Uses sensitivity analysis (Greeks) to estimate risk based on input volatility.<br>
+                                            <em>Formula:</em> VaR = √(Σ(Delta² × σ²)) × confidence_factor × √time
+                                        </p>
+                                    </div>
+                                    <div style="padding: var(--spacing-md); background: var(--surface); border-radius: var(--radius); border: 1px solid var(--border-color);">
+                                        <strong>Monte Carlo VaR</strong>
+                                        <p style="margin: var(--spacing-sm) 0 0 0; font-size: 14px; color: var(--text-secondary);">
+                                            Uses simulation to generate distribution of outcomes and find percentile loss.<br>
+                                            <em>Method:</em> Run thousands of scenarios, find percentile loss
+                                        </p>
+                                    </div>
+                                    <div style="padding: var(--spacing-md); background: var(--surface); border-radius: var(--radius); border: 1px solid var(--border-color);">
+                                        <strong>Combined VaR</strong>
+                                        <p style="margin: var(--spacing-sm) 0 0 0; font-size: 14px; color: var(--text-secondary);">
+                                            Combines both methods for comprehensive risk assessment.<br>
+                                            <em>Benefit:</em> Captures both model sensitivity and distributional risk
+                                        </p>
+                                    </div>
+                                </div>
+                                
+                                <h4 style="margin-top: 24px;">Understanding VaR Results</h4>
+                                <p class="info-text" style="margin-top: var(--spacing-md);">
+                                    <strong>Example:</strong> A 99% VaR of $500B over 10 days means there's a 1% chance of losing more than $500B in the next 10 days.
+                                </p>
+                                
+                                <h4 style="margin-top: 24px;">Key Metrics</h4>
+                                <ul style="padding-left: 20px; line-height: 1.8;">
+                                    <li><strong>VaR Value:</strong> Maximum expected loss at the specified confidence level</li>
+                                    <li><strong>VaR %:</strong> VaR as a percentage of current valuation</li>
+                                    <li><strong>Expected Shortfall:</strong> Average loss beyond the VaR threshold (Conditional VaR)</li>
+                                    <li><strong>Risk Contribution:</strong> Breakdown by component (Earth vs Mars) and method (Greeks vs Monte Carlo)</li>
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- VaR Results -->
+                <div class="section" id="varResults" style="display: none; position: relative;">
+                    <button class="ai-explanation-icon" onclick="app.showAIExplanation('varResults', event)" title="AI Analysis">
+                        <i data-lucide="sparkles"></i>
+                    </button>
+                    <div class="ai-explanation-floating-panel" id="aiExplanation-varResults" style="display: none;">
+                        <div class="ai-explanation-floating-panel-content">
+                            <div class="ai-explanation-floating-panel-header">
+                                <h3 style="margin: 0; display: flex; align-items: center; gap: var(--spacing-sm);">
+                                    <i data-lucide="sparkles"></i> VaR Analysis
+                                </h3>
+                                <button class="icon-button" onclick="app.closeFloatingAIExplanation('varResults')" style="padding: 4px;">
+                                    <i data-lucide="x"></i>
+                                </button>
+                            </div>
+                            <div class="ai-explanation-floating-panel-body" id="aiExplanation-varResults-content">
+                                <i data-lucide="loader" class="spinning"></i> Loading...
+                            </div>
+                        </div>
+                    </div>
+                    <h3><i data-lucide="alert-octagon"></i> VaR Analysis</h3>
+                    
+                    <!-- Summary Cards -->
+                    <div class="metrics-grid" style="margin-bottom: var(--spacing-lg);">
+                        <div class="metric-card-small">
+                            <div class="metric-label-small">VaR (99%)</div>
+                            <div class="metric-value-small" id="varValue">--</div>
+                            <div style="font-size: 11px; color: var(--text-secondary);">Maximum expected loss</div>
+                        </div>
+                        <div class="metric-card-small">
+                            <div class="metric-label-small">Current Valuation</div>
+                            <div class="metric-value-small" id="varCurrentValuation">--</div>
+                            <div style="font-size: 11px; color: var(--text-secondary);">Base valuation</div>
+                        </div>
+                        <div class="metric-card-small">
+                            <div class="metric-label-small">VaR %</div>
+                            <div class="metric-value-small" id="varPercent">--</div>
+                            <div style="font-size: 11px; color: var(--text-secondary);">% of valuation</div>
+                        </div>
+                        <div class="metric-card-small">
+                            <div class="metric-label-small">Expected Shortfall</div>
+                            <div class="metric-value-small" id="varExpectedShortfall">--</div>
+                            <div style="font-size: 11px; color: var(--text-secondary);">Conditional VaR</div>
+                        </div>
+                    </div>
+
+                    <!-- VaR Chart -->
+                    <div class="chart-container-half">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--spacing-md); flex-wrap: wrap; gap: var(--spacing-sm);">
+                            <h3 style="margin: 0;">VaR Distribution</h3>
+                            <div style="display: flex; gap: var(--spacing-sm); align-items: center; flex-wrap: wrap;">
+                                <div style="display: flex; gap: var(--spacing-xs); align-items: center; font-size: 11px; color: var(--text-secondary);">
+                                    <i data-lucide="zoom-in"></i>
+                                    <span>Scroll to zoom, drag to pan</span>
+                                </div>
+                                <label style="font-size: 12px; color: var(--text-secondary);">Min:</label>
+                                <input type="number" id="varChartMin" class="input-field" style="width: 100px; padding: 4px 8px; font-size: 12px;" placeholder="Min $B">
+                                <label style="font-size: 12px; color: var(--text-secondary);">Max:</label>
+                                <input type="number" id="varChartMax" class="input-field" style="width: 100px; padding: 4px 8px; font-size: 12px;" placeholder="Max $B">
+                                <button class="btn btn-secondary" id="varChartReset" style="padding: 4px 12px; font-size: 12px;" title="Reset zoom/pan to default range">
+                                    <i data-lucide="refresh-cw"></i> Reset
+                                </button>
+                            </div>
+                        </div>
+                        <canvas id="varChart"></canvas>
+                    </div>
+
+                    <!-- Component Breakdown -->
+                    <div class="section" style="margin-top: var(--spacing-lg);">
+                        <h3><i data-lucide="layers"></i> Risk Contribution by Component</h3>
+                        <div class="charts-row">
+                            <div class="chart-container-half">
+                                <h4>Earth Component</h4>
+                                <canvas id="varEarthChart"></canvas>
+                            </div>
+                            <div class="chart-container-half">
+                                <h4>Mars Component</h4>
+                                <canvas id="varMarsChart"></canvas>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Detailed VaR Table -->
+                    <div class="section" style="margin-top: var(--spacing-lg);">
+                        <h3><i data-lucide="table"></i> Detailed VaR Breakdown</h3>
+                        <div class="table-container">
+                            <table class="data-table" id="varTable">
+                                <thead>
+                                    <tr>
+                                        <th>Component</th>
+                                        <th>VaR Contribution</th>
+                                        <th>% of Total VaR</th>
+                                        <th>Greeks Risk</th>
+                                        <th>Monte Carlo Risk</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="varTableBody">
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Ratios & Comparables View -->
+            <div id="ratios" class="view">
+                <div class="view-header">
+                    <h2 style="display: flex; align-items: center; gap: var(--spacing-sm);">
+                        Ratios & Comparables
+                        <button class="icon-button" id="ratiosInfoBtn" title="Ratios & Comparables Overview" style="margin-left: 4px;">
+                            <i data-lucide="info"></i>
+                        </button>
+                    </h2>
+                    <div style="display: flex; gap: var(--spacing-sm); align-items: center;">
+                        <select id="comparableSectorSelect" class="input-field" style="min-width: 200px;">
+                            <option value="space">Space Companies</option>
+                            <option value="tech">Tech Companies</option>
+                            <option value="telecom">Telecom</option>
+                            <option value="aerospace">Aerospace & Defense</option>
+                        </select>
+                        <button class="btn btn-secondary" id="refreshComparablesBtn" title="Refresh comparable company data">
+                            <i data-lucide="refresh-cw"></i>
+                            Refresh Data
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Ratios & Comparables Info Modal -->
+                <div id="ratiosInfoModal" class="modal" style="display: none;" onclick="if(event.target.id === 'ratiosInfoModal') app.closeRatiosInfo()">
+                    <div class="modal-content" style="max-width: 700px; max-height: 90vh; overflow-y: auto;">
+                        <div class="modal-header">
+                            <h2><i data-lucide="info"></i> Ratios & Comparables Overview</h2>
+                            <button class="icon-button" onclick="app.closeRatiosInfo()">
+                                <i data-lucide="x"></i>
+                            </button>
+                        </div>
+                        <div class="modal-body">
+                            <div class="section">
+                                <h3>What are Valuation Ratios & Comparables?</h3>
+                                <p class="info-text">
+                                    <strong>Ratios & Comparables</strong> analysis compares SpaceX's valuation metrics against similar companies in the market. This helps determine whether SpaceX is fairly valued, overvalued, or undervalued relative to its peers.
+                                </p>
+                                
+                                <h4 style="margin-top: 24px;">Key Valuation Multiples</h4>
+                                <div style="display: grid; grid-template-columns: 1fr; gap: var(--spacing-md); margin-top: var(--spacing-md);">
+                                    <div style="padding: var(--spacing-md); background: var(--surface); border-radius: var(--radius); border: 1px solid var(--border-color);">
+                                        <strong>EV/Revenue</strong>
+                                        <p style="margin: var(--spacing-sm) 0 0 0; font-size: 14px; color: var(--text-secondary);">
+                                            Enterprise Value divided by Revenue. Lower ratios may indicate undervaluation or lower growth expectations.
+                                        </p>
+                                    </div>
+                                    <div style="padding: var(--spacing-md); background: var(--surface); border-radius: var(--radius); border: 1px solid var(--border-color);">
+                                        <strong>EV/EBITDA</strong>
+                                        <p style="margin: var(--spacing-sm) 0 0 0; font-size: 14px; color: var(--text-secondary);">
+                                            Enterprise Value divided by EBITDA. Measures operating profitability relative to enterprise value. Common range: 8-15x for mature companies.
+                                        </p>
+                                    </div>
+                                    <div style="padding: var(--spacing-md); background: var(--surface); border-radius: var(--radius); border: 1px solid var(--border-color);">
+                                        <strong>P/E Ratio</strong>
+                                        <p style="margin: var(--spacing-sm) 0 0 0; font-size: 14px; color: var(--text-secondary);">
+                                            Price-to-Earnings ratio. Compares stock price to earnings per share. Higher ratios suggest growth expectations.
+                                        </p>
+                                    </div>
+                                    <div style="padding: var(--spacing-md); background: var(--surface); border-radius: var(--radius); border: 1px solid var(--border-color);">
+                                        <strong>PEG Ratio</strong>
+                                        <p style="margin: var(--spacing-sm) 0 0 0; font-size: 14px; color: var(--text-secondary);">
+                                            P/E ratio divided by growth rate. Accounts for growth expectations. PEG < 1 may indicate undervaluation.
+                                        </p>
+                                    </div>
+                                </div>
+                                
+                                <h4 style="margin-top: 24px;">Comparable Company Analysis</h4>
+                                <p class="info-text" style="margin-top: var(--spacing-md);">
+                                    This section compares SpaceX against similar companies across different sectors:
+                                </p>
+                                <ul style="padding-left: 20px; line-height: 1.8; margin-top: var(--spacing-sm);">
+                                    <li><strong>Space Companies:</strong> Direct competitors in space technology and launch services</li>
+                                    <li><strong>Tech Companies:</strong> High-growth technology companies with similar business models</li>
+                                    <li><strong>Telecom:</strong> Companies in satellite communications and connectivity</li>
+                                    <li><strong>Aerospace & Defense:</strong> Traditional aerospace and defense contractors</li>
+                                </ul>
+                                
+                                <h4 style="margin-top: 24px;">How to Use This Analysis</h4>
+                                <ul style="padding-left: 20px; line-height: 1.8; margin-top: var(--spacing-sm);">
+                                    <li><strong>Benchmark Valuation:</strong> Compare SpaceX's multiples against peer averages</li>
+                                    <li><strong>Identify Outliers:</strong> Find companies with similar growth profiles</li>
+                                    <li><strong>Market Context:</strong> Understand how the market values similar businesses</li>
+                                    <li><strong>Valuation Range:</strong> Use peer multiples to estimate fair value range</li>
+                                </ul>
+                                
+                                <div style="margin-top: var(--spacing-lg); padding: var(--spacing-md); background: rgba(255, 193, 7, 0.1); border-left: 3px solid #ffc107; border-radius: var(--radius);">
+                                    <p style="margin: 0; font-size: 14px; color: var(--text-secondary);">
+                                        <strong>Note:</strong> Data is sourced from public financial APIs. For SpaceX, actual public market data will be available once the company goes public.
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Ratios & Comparables Tabs -->
+                <div class="insights-tabs" style="display: flex; gap: 8px; padding: 0 var(--spacing-lg); margin-bottom: var(--spacing-md); border-bottom: 1px solid var(--border-color);">
+                    <button class="insights-tab active" data-tab="dashboard">
+                        <i data-lucide="layout-dashboard"></i>
+                        <span>Dashboard</span>
+                    </button>
+                    <button class="insights-tab" data-tab="comparables">
+                        <i data-lucide="table"></i>
+                        <span>Comparables</span>
+                    </button>
+                    <button class="insights-tab" data-tab="analysis">
+                        <i data-lucide="bar-chart-3"></i>
+                        <span>Analysis</span>
+                    </button>
+                </div>
+
+                <!-- Dashboard Tab -->
+                <div class="insights-tab-content active" id="ratiosTab-dashboard">
+                    <!-- Current Model Valuation -->
+                    <div class="section" style="background: rgba(0, 102, 204, 0.05); border-left: 3px solid var(--primary-color);">
+                        <h3><i data-lucide="target"></i> SpaceX Current Valuation</h3>
+                        <div class="metrics-grid">
+                            <div class="metric-card-small">
+                                <div class="metric-label-small">Model Valuation</div>
+                                <div class="metric-value-small" id="spacexCurrentValuation">--</div>
+                                <div style="font-size: 11px; color: var(--text-secondary);">From DCF model</div>
+                            </div>
+                            <div class="metric-card-small">
+                                <div class="metric-label-small">Revenue (Est.)</div>
+                                <div class="metric-value-small" id="spacexRevenue">--</div>
+                                <div style="font-size: 11px; color: var(--text-secondary);">Annual revenue</div>
+                            </div>
+                            <div class="metric-card-small">
+                                <div class="metric-label-small">EBITDA (Est.)</div>
+                                <div class="metric-value-small" id="spacexEbitda">--</div>
+                                <div style="font-size: 11px; color: var(--text-secondary);">Operating profit</div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Implied Valuations from Comparables -->
+                    <div class="section">
+                        <h3><i data-lucide="calculator"></i> Implied Valuations from Comparables</h3>
+                        <div id="impliedValuationsContainer">
+                            <p style="color: var(--text-secondary); text-align: center; padding: var(--spacing-lg);">
+                                Loading comparable companies to calculate implied valuations...
+                            </p>
+                        </div>
+                    </div>
+                    
+                    <div class="section">
+                        <h3><i data-lucide="bar-chart-3"></i> Peer Multiples Summary</h3>
+                        <div class="metrics-grid">
+                            <div class="metric-card-small">
+                                <div class="metric-label-small">Avg EV/Revenue</div>
+                                <div class="metric-value-small" style="color: var(--text-secondary);">--</div>
+                                <div style="font-size: 11px; color: var(--text-secondary);">Peer average</div>
+                            </div>
+                            <div class="metric-card-small">
+                                <div class="metric-label-small">Avg EV/EBITDA</div>
+                                <div class="metric-value-small" style="color: var(--text-secondary);">--</div>
+                                <div style="font-size: 11px; color: var(--text-secondary);">Peer average</div>
+                            </div>
+                            <div class="metric-card-small">
+                                <div class="metric-label-small">Avg P/E Ratio</div>
+                                <div class="metric-value-small" style="color: var(--text-secondary);">--</div>
+                                <div style="font-size: 11px; color: var(--text-secondary);">Peer average</div>
+                            </div>
+                            <div class="metric-card-small">
+                                <div class="metric-label-small">Avg PEG Ratio</div>
+                                <div class="metric-value-small" style="color: var(--text-secondary);">--</div>
+                                <div style="font-size: 11px; color: var(--text-secondary);">Peer average</div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="section">
+                        <h3><i data-lucide="trending-up"></i> Sector Summary</h3>
+                        <div id="ratiosSectorSummary" style="padding: var(--spacing-md); background: var(--surface); border-radius: var(--radius); border: 1px solid var(--border-color);">
+                            <p style="margin: 0; color: var(--text-secondary);">Select a sector to view summary statistics</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Comparables Tab -->
+                <div class="insights-tab-content" id="ratiosTab-comparables">
+                    <div class="section">
+                        <h3><i data-lucide="table"></i> Comparable Companies</h3>
+                        <div class="table-container">
+                            <table class="data-table" id="comparablesTable">
+                                <thead>
+                                    <tr>
+                                        <th>Company</th>
+                                        <th>Ticker</th>
+                                        <th>Market Cap</th>
+                                        <th>EV/Revenue</th>
+                                        <th>EV/EBITDA</th>
+                                        <th>P/E Ratio</th>
+                                        <th>PEG Ratio</th>
+                                        <th>Revenue Growth</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="comparablesTableBody">
+                                    <tr>
+                                        <td colspan="8" style="text-align: center; padding: var(--spacing-lg); color: var(--text-secondary);">
+                                            <i data-lucide="loader" class="spinning"></i> Loading comparable companies...
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Analysis Tab -->
+                <div class="insights-tab-content" id="ratiosTab-analysis">
+                    <div class="section">
+                        <h3><i data-lucide="bar-chart-3"></i> Multiples Comparison</h3>
+                        <div class="charts-row">
+                            <div class="chart-container-half">
+                                <h4>EV/Revenue Comparison</h4>
+                                <canvas id="evRevenueChart"></canvas>
+                            </div>
+                            <div class="chart-container-half">
+                                <h4>EV/EBITDA Comparison</h4>
+                                <canvas id="evEbitdaChart"></canvas>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="section">
+                        <h3><i data-lucide="trending-up"></i> Growth vs. Valuation</h3>
+                        <div class="chart-container-half">
+                            <h4>Revenue Growth vs. Valuation Multiples</h4>
+                            <canvas id="growthValuationChart"></canvas>
                         </div>
                     </div>
                 </div>
@@ -2565,7 +3469,14 @@
         </div>
     </div>
 
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
+    <script>
+        // Register zoom plugin after Chart.js loads
+        if (typeof Chart !== 'undefined' && typeof zoomPlugin !== 'undefined') {
+            Chart.register(zoomPlugin);
+        }
+    </script>
     <script src="/js/app.js"></script>
     <script>
         // Initialize Lucide icons

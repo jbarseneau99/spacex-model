@@ -526,6 +526,28 @@ body {
     font-size: 14px;
 }
 
+/* Smaller font for simulations table */
+#simulationsTable th,
+#simulationsTable td {
+    font-size: 11px;
+    padding: 6px 8px;
+    white-space: nowrap;
+}
+
+#simulationsTable th {
+    font-weight: 600;
+    font-size: 11px;
+    background: var(--background) !important;
+}
+
+#simulationsTable tbody tr:hover {
+    background: var(--surface);
+}
+
+#simulationsTable tbody tr td {
+    color: var(--text-primary);
+}
+
 .data-table tbody tr:hover {
     background: var(--background);
 }
@@ -2111,3 +2133,57 @@ textarea:focus {
     }
 }
 
+
+/* Factor Risk Info Floating Panel */
+.floating-panel {
+    position: fixed;
+    z-index: 1001;
+    background: var(--surface);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-lg);
+    border: 1px solid var(--border-color);
+    min-width: 400px;
+    max-width: 600px;
+    max-height: 80vh;
+    overflow: hidden;
+    animation: slideIn 0.2s ease-out;
+}
+
+@keyframes slideIn {
+    from {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.floating-panel-content {
+    display: flex;
+    flex-direction: column;
+    max-height: 80vh;
+}
+
+.floating-panel-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: var(--spacing-md) var(--spacing-lg);
+    border-bottom: 1px solid var(--border-color);
+    background: rgba(0, 102, 204, 0.05);
+}
+
+.floating-panel-header h3 {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.floating-panel-body {
+    padding: var(--spacing-lg);
+    overflow-y: auto;
+    flex: 1;
+}

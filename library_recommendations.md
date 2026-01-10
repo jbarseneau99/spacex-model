@@ -154,3 +154,6 @@ class GreeksCalculator {
 4. **Test:** Compare results with current hardcoded values
 5. **Integrate:** Replace hardcoded multipliers with real calculations
 
+
+
+

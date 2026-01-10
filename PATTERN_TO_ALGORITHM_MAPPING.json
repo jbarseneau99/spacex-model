@@ -1,0 +1,2175 @@
+{
+  "summary": {
+    "totalPatterns": 113,
+    "totalFormulas": 8890,
+    "implemented": 102,
+    "partial": 9,
+    "notImplemented": 2,
+    "unmapped": 0
+  },
+  "mappings": [
+    {
+      "patternIndex": 1,
+      "pattern": "=CELL",
+      "count": 2230,
+      "complexity": "Simple",
+      "functions": [],
+      "sheets": [
+        "Earth",
+        "Mars"
+      ],
+      "example": "=O153",
+      "algorithm": "directReference",
+      "status": "✅ Implemented",
+      "method": "directReference(sourceCell)",
+      "needsUpdate": false
+    },
+    {
+      "patternIndex": 2,
+      "pattern": "=CELL*CELL",
+      "count": 908,
+      "complexity": "Simple",
+      "functions": [],
+      "sheets": [
+        "Earth",
+        "Mars"
+      ],
+      "example": "=B7*B8",
+      "algorithm": "multiply",
+      "status": "✅ Implemented",
+      "method": "multiply(a, b)",
+      "needsUpdate": false
+    },
+    {
+      "patternIndex": 3,
+      "pattern": "=SUM(CELL:CELL)",
+      "count": 401,
+      "complexity": "Medium",
+      "functions": [
+        "SUM"
+      ],
+      "sheets": [
+        "Earth",
+        "Mars"
+      ],
+      "example": "=SUM(I20:I21)",
+      "algorithm": "sumRange",
+      "status": "✅ Implemented",
+      "method": "sumRange(sheetName, startCell, endCell)",
+      "needsUpdate": false
+    },
+    {
+      "patternIndex": 4,
+      "pattern": "=CELL/CELL",
+      "count": 380,
+      "complexity": "Simple",
+      "functions": [],
+      "sheets": [
+        "Earth",
+        "Mars"
+      ],
+      "example": "=O408/$I$408",
+      "algorithm": "divide",
+      "status": "✅ Implemented",
+      "method": "divide(a, b)",
+      "needsUpdate": false
+    },
+    {
+      "patternIndex": 5,
+      "pattern": "SHEET!CELL",
+      "count": 367,
+      "complexity": "Medium",
+      "functions": [
+        "MIN"
+      ],
+      "sheets": [
+        "Earth",
+        "Valuation Outputs",
+        "Mars"
+      ],
+      "example": "=Mars!K54+Mars!K8-Mars!K27",
+      "algorithm": "crossSheetReference",
+      "status": "✅ Implemented",
+      "method": "crossSheetReference(sheetName, cellRef)",
+      "needsUpdate": false
+    },
+    {
+      "patternIndex": 6,
+      "pattern": "=CELL+CELL",
+      "count": 348,
+      "complexity": "Simple",
+      "functions": [],
+      "sheets": [
+        "Earth",
+        "Mars"
+      ],
+      "example": "=B9+B10",
+      "algorithm": "add",
+      "status": "✅ Implemented",
+      "method": "add(a, b)",
+      "needsUpdate": false
+    },
+    {
+      "patternIndex": 7,
+      "pattern": "=IF(CELL=STR,CELL,CELL)",
+      "count": 312,
+      "complexity": "Medium",
+      "functions": [
+        "IF"
+      ],
+      "sheets": [
+        "Earth"
+      ],
+      "example": "=IF(J245=\"Starlink Constellation Complete\",J267,J398)",
+      "algorithm": "ifStatement",
+      "status": "✅ Implemented",
+      "method": "ifStatement(condition, trueValue, falseValue)",
+      "needsUpdate": false,
+      "note": "May need enhanced IF for complex conditions"
+    },
+    {
+      "patternIndex": 8,
+      "pattern": "=CELL-CELL",
+      "count": 183,
+      "complexity": "Simple",
+      "functions": [],
+      "sheets": [
+        "Earth",
+        "Mars"
+      ],
+      "example": "=J86-J87",
+      "algorithm": "subtract",
+      "status": "✅ Implemented",
+      "method": "subtract(a, b)",
+      "needsUpdate": false
+    },
+    {
+      "patternIndex": 9,
+      "pattern": "=IF(CELL=STR,CELL,NUM)",
+      "count": 130,
+      "complexity": "Medium",
+      "functions": [
+        "IF"
+      ],
+      "sheets": [
+        "Earth",
+        "Mars"
+      ],
+      "example": "=IF(J264=\"No\",J270,0)",
+      "algorithm": "ifStatement",
+      "status": "✅ Implemented",
+      "method": "ifStatement(condition, trueValue, falseValue)",
+      "needsUpdate": false,
+      "note": "May need enhanced IF for complex conditions"
+    },
+    {
+      "patternIndex": 10,
+      "pattern": "=IF(CELL=STR,NUM,CELL)",
+      "count": 104,
+      "complexity": "Medium",
+      "functions": [
+        "IF"
+      ],
+      "sheets": [
+        "Earth"
+      ],
+      "example": "=IF(J245=\"Launch\",0,J431)",
+      "algorithm": "ifStatement",
+      "status": "✅ Implemented",
+      "method": "ifStatement(condition, trueValue, falseValue)",
+      "needsUpdate": false,
+      "note": "May need enhanced IF for complex conditions"
+    },
+    {
+      "patternIndex": 11,
+      "pattern": "=IF(CELL=STR,CELL-CELL,NUM)",
+      "count": 104,
+      "complexity": "Medium",
+      "functions": [
+        "IF"
+      ],
+      "sheets": [
+        "Earth"
+      ],
+      "example": "=IF(J275=\"No\",J273-J247,0)",
+      "algorithm": "ifStatement",
+      "status": "✅ Implemented",
+      "method": "ifStatement(condition, trueValue, falseValue)",
+      "needsUpdate": false,
+      "note": "May need enhanced IF for complex conditions"
+    },
+    {
+      "patternIndex": 12,
+      "pattern": "=IFERROR(CELL*(CELL/CELL),NUM)",
+      "count": 104,
+      "complexity": "Medium",
+      "functions": [
+        "OR",
+        "IFERROR"
+      ],
+      "sheets": [
+        "Earth"
+      ],
+      "example": "=IFERROR(J298*(J290/J292),0)",
+      "algorithm": "ifError",
+      "status": "✅ Implemented",
+      "method": "ifError(value, defaultValue)",
+      "needsUpdate": false
+    },
+    {
+      "patternIndex": 13,
+      "pattern": "=(CELL+CELL)*CELL",
+      "count": 81,
+      "complexity": "Medium",
+      "functions": [],
+      "sheets": [
+        "Earth"
+      ],
+      "example": "=(I47+I55)*I65",
+      "algorithm": "add",
+      "status": "✅ Implemented",
+      "method": "add(a, b)",
+      "needsUpdate": false
+    },
+    {
+      "patternIndex": 14,
+      "pattern": "=CELL*CELL*CELL",
+      "count": 80,
+      "complexity": "Medium",
+      "functions": [],
+      "sheets": [
+        "Earth"
+      ],
+      "example": "=I48*I65*$B$70",
+      "algorithm": "multiply",
+      "status": "✅ Implemented",
+      "method": "multiply(a, b)",
+      "needsUpdate": false
+    },
+    {
+      "patternIndex": 15,
+      "pattern": "=NUM-CELL",
+      "count": 80,
+      "complexity": "Simple",
+      "functions": [],
+      "sheets": [
+        "Earth",
+        "Mars"
+      ],
+      "example": "=1-I128",
+      "algorithm": "arithmetic",
+      "status": "✅ Implemented via basic operations",
+      "method": "add/subtract/multiply/divide",
+      "needsUpdate": false
+    },
+    {
+      "patternIndex": 16,
+      "pattern": "=CELL+(CELL/CELL)",
+      "count": 78,
+      "complexity": "Medium",
+      "functions": [],
+      "sheets": [
+        "Earth"
+      ],
+      "example": "=I171+(J189/J174)",
+      "algorithm": "divide",
+      "status": "✅ Implemented",
+      "method": "divide(a, b)",
+      "needsUpdate": false
+    },
+    {
+      "patternIndex": 17,
+      "pattern": "=IF(CELL>CELL,STR,STR)",
+      "count": 78,
+      "complexity": "Medium",
+      "functions": [
+        "IF"
+      ],
+      "sheets": [
+        "Earth"
+      ],
+      "example": "=IF($B$234>J16,\"Falcon 9\",\"Starship\")",
+      "algorithm": "ifStatement",
+      "status": "✅ Implemented",
+      "method": "ifStatement(condition, trueValue, falseValue)",
+      "needsUpdate": false,
+      "note": "May need enhanced IF for complex conditions"
+    },
+    {
+      "patternIndex": 18,
+      "pattern": "=MIN(CELL,CELL)",
+      "count": 78,
+      "complexity": "Medium",
+      "functions": [
+        "MIN"
+      ],
+      "sheets": [
+        "Earth"
+      ],
+      "example": "=MIN(J341,J345)",
+      "algorithm": "minRange",
+      "status": "🟡 Partial - Needs multi-arg support",
+      "method": "minRange(sheetName, startCell, endCell)",
+      "needsUpdate": true,
+      "note": "May need min(...values) for multiple arguments"
+    },
+    {
+      "patternIndex": 19,
+      "pattern": "=INDEX(CELL:CELL,MATCH(CELL-CELL,CELL:CELL))",
+      "count": 78,
+      "complexity": "Medium",
+      "functions": [
+        "INDEX",
+        "MATCH"
+      ],
+      "sheets": [
+        "Earth"
+      ],
+      "example": "=INDEX($E$428:J$428,MATCH(J410-$B411,$E$410:J$410))",
+      "algorithm": "indexMatch",
+      "status": "❌ Not Implemented",
+      "method": "indexMatch(lookupValue, lookupRange, returnRange, exactMatch)",
+      "needsUpdate": true,
+      "priority": "P0"
+    },
+    {
+      "patternIndex": 20,
+      "pattern": "=CELL+NUM",
+      "count": 76,
+      "complexity": "Simple",
+      "functions": [],
+      "sheets": [
+        "Mars",
+        "Earth"
+      ],
+      "example": "=K6+1",
+      "algorithm": "arithmetic",
+      "status": "✅ Implemented via basic operations",
+      "method": "add/subtract/multiply/divide",
+      "needsUpdate": false
+    },
+    {
+      "patternIndex": 21,
+      "pattern": "=CELL*(NUM-CELL)",
+      "count": 76,
+      "complexity": "Simple",
+      "functions": [],
+      "sheets": [
+        "Earth",
+        "Mars"
+      ],
+      "example": "=J329*(1-J331)",
+      "algorithm": "arithmetic",
+      "status": "✅ Implemented via basic operations",
+      "method": "add/subtract/multiply/divide",
+      "needsUpdate": false
+    },
+    {
+      "patternIndex": 22,
+      "pattern": "=(CELL*CELL)",
+      "count": 57,
+      "complexity": "Simple",
+      "functions": [],
+      "sheets": [
+        "Earth"
+      ],
+      "example": "=(J249*J250)",
+      "algorithm": "multiply",
+      "status": "✅ Implemented",
+      "method": "multiply(a, b)",
+      "needsUpdate": false
+    },
+    {
+      "patternIndex": 23,
+      "pattern": "=CELL+CELL+CELL+CELL",
+      "count": 54,
+      "complexity": "Medium",
+      "functions": [],
+      "sheets": [
+        "Earth"
+      ],
+      "example": "=I35+I36+I37+I38",
+      "algorithm": "add",
+      "status": "✅ Implemented",
+      "method": "add(a, b)",
+      "needsUpdate": false
+    },
+    {
+      "patternIndex": 24,
+      "pattern": "=SUM(CELL:CELL,CELL)",
+      "count": 54,
+      "complexity": "Medium",
+      "functions": [
+        "SUM"
+      ],
+      "sheets": [
+        "Earth"
+      ],
+      "example": "=SUM(I47:I48,I55)",
+      "algorithm": "sumRange",
+      "status": "🟡 Partial - Needs multi-range support",
+      "method": "sumRange(sheetName, startCell, endCell)",
+      "needsUpdate": true,
+      "note": "May need sumRangeMultiple() for multiple ranges"
+    },
+    {
+      "patternIndex": 25,
+      "pattern": "=CELL/(NUM-CELL)",
+      "count": 54,
+      "complexity": "Simple",
+      "functions": [],
+      "sheets": [
+        "Earth"
+      ],
+      "example": "=I127/(1-I106)",
+      "algorithm": "arithmetic",
+      "status": "✅ Implemented via basic operations",
+      "method": "add/subtract/multiply/divide",
+      "needsUpdate": false
+    },
+    {
+      "patternIndex": 26,
+      "pattern": "=(CELL+CELL)/CELL",
+      "count": 54,
+      "complexity": "Medium",
+      "functions": [],
+      "sheets": [
+        "Earth"
+      ],
+      "example": "=(I130+I159)/I65",
+      "algorithm": "add",
+      "status": "✅ Implemented",
+      "method": "add(a, b)",
+      "needsUpdate": false
+    },
+    {
+      "patternIndex": 27,
+      "pattern": "=CELL-CELL-CELL",
+      "count": 54,
+      "complexity": "Medium",
+      "functions": [],
+      "sheets": [
+        "Earth"
+      ],
+      "example": "=I119-I144-I152",
+      "algorithm": "subtract",
+      "status": "✅ Implemented",
+      "method": "subtract(a, b)",
+      "needsUpdate": false
+    },
+    {
+      "patternIndex": 28,
+      "pattern": "=CELL+CELL+CELL",
+      "count": 54,
+      "complexity": "Medium",
+      "functions": [],
+      "sheets": [
+        "Earth"
+      ],
+      "example": "=I171+I172+I173",
+      "algorithm": "add",
+      "status": "✅ Implemented",
+      "method": "add(a, b)",
+      "needsUpdate": false
+    },
+    {
+      "patternIndex": 29,
+      "pattern": "=IF(CELL>=NUM,MIN(CELL,CELL*(NUM+CELL)),MAX(CELL*(NUM+CELL),CELL))",
+      "count": 52,
+      "complexity": "Complex",
+      "functions": [
+        "IF",
+        "MAX",
+        "MIN"
+      ],
+      "sheets": [
+        "Earth"
+      ],
+      "example": "=IF($B$106>=0,MIN($B$105,I106*(1+$B$106)),MAX(I106*(1+$B$106),$B$105))",
+      "algorithm": "ifStatement",
+      "status": "✅ Implemented",
+      "method": "ifStatement(condition, trueValue, falseValue)",
+      "needsUpdate": false,
+      "note": "May need enhanced IF for complex conditions"
+    },
+    {
+      "patternIndex": 30,
+      "pattern": "=(CELL*CELL*CELL)+(CELL*CELL)",
+      "count": 52,
+      "complexity": "Medium",
+      "functions": [],
+      "sheets": [
+        "Earth"
+      ],
+      "example": "=(J219*J221*J222)+(J225*J219)",
+      "algorithm": "multiply",
+      "status": "✅ Implemented",
+      "method": "multiply(a, b)",
+      "needsUpdate": false
+    },
+    {
+      "patternIndex": 31,
+      "pattern": "=(CELL/CELL)/(NUM/CELL)",
+      "count": 52,
+      "complexity": "Medium",
+      "functions": [],
+      "sheets": [
+        "Earth"
+      ],
+      "example": "=(J258/J253)/(1/J42)",
+      "algorithm": "divide",
+      "status": "✅ Implemented",
+      "method": "divide(a, b)",
+      "needsUpdate": false
+    },
+    {
+      "patternIndex": 32,
+      "pattern": "=IF(AND(CELL=STR,CELL=STR,CELL=STR),CELL-CELL,NUM)",
+      "count": 52,
+      "complexity": "Medium",
+      "functions": [
+        "IF",
+        "AND"
+      ],
+      "sheets": [
+        "Earth"
+      ],
+      "example": "=IF(AND(J264=\"No\",J265=\"No\",J234=\"Falcon 9\"),J261-J25,0)",
+      "algorithm": "ifStatement",
+      "status": "✅ Implemented",
+      "method": "ifStatement(condition, trueValue, falseValue)",
+      "needsUpdate": false,
+      "note": "May need enhanced IF for complex conditions"
+    },
+    {
+      "patternIndex": 33,
+      "pattern": "=IF(CELL>=CELL,STR,STR)",
+      "count": 52,
+      "complexity": "Medium",
+      "functions": [
+        "IF"
+      ],
+      "sheets": [
+        "Earth"
+      ],
+      "example": "=IF(J247>=J273,\"Yes\",\"No\")",
+      "algorithm": "ifStatement",
+      "status": "✅ Implemented",
+      "method": "ifStatement(condition, trueValue, falseValue)",
+      "needsUpdate": false,
+      "note": "May need enhanced IF for complex conditions"
+    },
+    {
+      "patternIndex": 34,
+      "pattern": "=IFERROR(MAX(CELL,CELL)+(CELL/CELL),MAX(CELL,CELL))",
+      "count": 52,
+      "complexity": "Complex",
+      "functions": [
+        "MAX",
+        "OR",
+        "IFERROR"
+      ],
+      "sheets": [
+        "Earth"
+      ],
+      "example": "=IFERROR(MAX(I278,I361)+(J276/J281),MAX(I278,I361))",
+      "algorithm": "maxRange",
+      "status": "🟡 Partial - Needs multi-arg support",
+      "method": "maxRange(sheetName, startCell, endCell)",
+      "needsUpdate": true,
+      "note": "May need max(...values) for multiple arguments"
+    },
+    {
+      "patternIndex": 35,
+      "pattern": "=IF(AND(CELL=STR,CELL=STR),CELL+CELL,NUM)",
+      "count": 52,
+      "complexity": "Medium",
+      "functions": [
+        "IF",
+        "AND"
+      ],
+      "sheets": [
+        "Earth"
+      ],
+      "example": "=IF(AND(J245=\"Starlink Constellation Complete\",J275=\"Yes\"),J25+J26,0)",
+      "algorithm": "ifStatement",
+      "status": "✅ Implemented",
+      "method": "ifStatement(condition, trueValue, falseValue)",
+      "needsUpdate": false,
+      "note": "May need enhanced IF for complex conditions"
+    },
+    {
+      "patternIndex": 36,
+      "pattern": "=IF(AND(CELL=STR,CELL=STR),(CELL/CELL)-CELL,NUM)",
+      "count": 52,
+      "complexity": "Medium",
+      "functions": [
+        "IF",
+        "AND"
+      ],
+      "sheets": [
+        "Earth"
+      ],
+      "example": "=IF(AND(J245=\"Starlink Constellation Complete\",J275=\"Yes\"),(J286/J288)-J270,0)",
+      "algorithm": "ifStatement",
+      "status": "✅ Implemented",
+      "method": "ifStatement(condition, trueValue, falseValue)",
+      "needsUpdate": false,
+      "note": "May need enhanced IF for complex conditions"
+    },
+    {
+      "patternIndex": 37,
+      "pattern": "=CELL*(NUM+CELL)",
+      "count": 52,
+      "complexity": "Simple",
+      "functions": [],
+      "sheets": [
+        "Earth"
+      ],
+      "example": "=I295*(1+$B$295)",
+      "algorithm": "arithmetic",
+      "status": "✅ Implemented via basic operations",
+      "method": "add/subtract/multiply/divide",
+      "needsUpdate": false
+    },
+    {
+      "patternIndex": 38,
+      "pattern": "=IF(CELL=STR,(SUM(CELL,CELL)/CELL)-CELL,CELL-CELL)",
+      "count": 52,
+      "complexity": "Medium",
+      "functions": [
+        "IF",
+        "SUM"
+      ],
+      "sheets": [
+        "Earth"
+      ],
+      "example": "=IF(J275=\"No\",(SUM(J25,J26)/J42)-J270,J290-J299)",
+      "algorithm": "sumRange",
+      "status": "🟡 Partial - Needs multi-range support",
+      "method": "sumRange(sheetName, startCell, endCell)",
+      "needsUpdate": true,
+      "note": "May need sumRangeMultiple() for multiple ranges"
+    },
+    {
+      "patternIndex": 39,
+      "pattern": "=CELL+((CELL+CELL+CELL)*(NUM/CELL))",
+      "count": 52,
+      "complexity": "Medium",
+      "functions": [],
+      "sheets": [
+        "Earth"
+      ],
+      "example": "=J380+((J382+J226+J227)*(1/J385))",
+      "algorithm": "add",
+      "status": "✅ Implemented",
+      "method": "add(a, b)",
+      "needsUpdate": false
+    },
+    {
+      "patternIndex": 40,
+      "pattern": "=MAX(CELL:CELL)*(NUM+CELL)",
+      "count": 52,
+      "complexity": "Medium",
+      "functions": [
+        "MAX"
+      ],
+      "sheets": [
+        "Earth"
+      ],
+      "example": "=MAX($I$20:I20)*(1+$B$394)",
+      "algorithm": "maxRange",
+      "status": "✅ Implemented",
+      "method": "maxRange(sheetName, startCell, endCell)",
+      "needsUpdate": false
+    },
+    {
+      "patternIndex": 41,
+      "pattern": "SHEET!CELL)*CELL)",
+      "count": 27,
+      "complexity": "Medium",
+      "functions": [
+        "MIN"
+      ],
+      "sheets": [
+        "Earth"
+      ],
+      "example": "=-(MIN(Mars!E14,Mars!E15)*I43)",
+      "algorithm": "crossSheetReference",
+      "status": "✅ Implemented",
+      "method": "crossSheetReference(sheetName, cellRef)",
+      "needsUpdate": false
+    },
+    {
+      "patternIndex": 42,
+      "pattern": "=MAX(-CELL,IF(CELL>CELL,-CELL,-(CELL*CELL)))",
+      "count": 27,
+      "complexity": "Medium",
+      "functions": [
+        "IF",
+        "MAX"
+      ],
+      "sheets": [
+        "Earth"
+      ],
+      "example": "=MAX(-I35,IF($B$31>I16,-I35,-(I59*$B$28)))",
+      "algorithm": "ifStatement",
+      "status": "✅ Implemented",
+      "method": "ifStatement(condition, trueValue, falseValue)",
+      "needsUpdate": false,
+      "note": "May need enhanced IF for complex conditions"
+    },
+    {
+      "patternIndex": 43,
+      "pattern": "=-CELL",
+      "count": 27,
+      "complexity": "Simple",
+      "functions": [],
+      "sheets": [
+        "Earth"
+      ],
+      "example": "=-I32",
+      "algorithm": "arithmetic",
+      "status": "✅ Implemented via basic operations",
+      "method": "add/subtract/multiply/divide",
+      "needsUpdate": false
+    },
+    {
+      "patternIndex": 44,
+      "pattern": "=CELL/NUM",
+      "count": 27,
+      "complexity": "Simple",
+      "functions": [],
+      "sheets": [
+        "Earth"
+      ],
+      "example": "=I66/0.75",
+      "algorithm": "arithmetic",
+      "status": "✅ Implemented via basic operations",
+      "method": "add/subtract/multiply/divide",
+      "needsUpdate": false
+    },
+    {
+      "patternIndex": 45,
+      "pattern": "SHEET!CELL))*(IF((CELL*(NUM-CELL))>MAX(SHEET!CELL:CELL),INDEX(SHEET!CELL:CELL, MATCH(NUM999999999999E+NUM,SHEET!CELL:CELL)),INDEX(SHEET!CELL:CELL, MATCH((CELL*(NUM-CELL)), SHEET!CELL:CELL, NUM))\n+ ((CELL*(NUM-CELL)) - INDEX(SHEET!CELL:CELL, MATCH((CELL*(NUM-CELL)), SHEET!CELL:CELL, NUM))) *\n( INDEX(SHEET!CELL:CELL, MATCH((CELL*(NUM-CELL)), SHEET!CELL:CELL, NUM)+NUM) - INDEX(SHEET!CELL:CELL, MATCH((CELL*(NUM-CELL)), SHEET!CELL:CELL, NUM)) ) /\n( INDEX(SHEET!CELL:CELL, MATCH((CELL*(NUM-CELL)), SHEET!CELL:CELL, NUM)+NUM) - INDEX(SHEET!CELL:CELL, MATCH((CELL*(NUM-CELL)), SHEET!CELL:CELL, NUM)) )))",
+      "count": 27,
+      "complexity": "Complex",
+      "functions": [
+        "IF",
+        "INDEX",
+        "MATCH",
+        "MAX"
+      ],
+      "sheets": [
+        "Earth"
+      ],
+      "example": "=$B$95*(((1+$B$94)*(1+$B$96))^(Earth!I16-Earth!$I$16))*(IF((I91*(1-I92))>MAX('Earth Bandwidth TAM'!$A$8:$A$1012),INDEX('Earth Bandwidth TAM'!$B$8:$B$1012, MATCH(9.999999999999E+307,'Earth Bandwidth TAM'!$A$8:$A$1012)),INDEX('Earth Bandwidth TAM'!$B$8:$B$1012, MATCH((I91*(1-I92)), 'Earth Bandwidth TAM'!$A$8:$A$1012, 1))\n+ ((I91*(1-I92)) - INDEX('Earth Bandwidth TAM'!$A$8:$A$1012, MATCH((I91*(1-I92)), 'Earth Bandwidth TAM'!$A$8:$A$1012, 1))) *\n( INDEX('Earth Bandwidth TAM'!$B$8:$B$1012, MATCH((I91*(1-I92)), 'Earth Bandwidth TAM'!$A$8:$A$1012, 1)+1) - INDEX('Earth Bandwidth TAM'!$B$8:$B$1012, MATCH((I91*(1-I92)), 'Earth Bandwidth TAM'!$A$8:$A$1012, 1)) ) /\n( INDEX('Earth Bandwidth TAM'!$A$8:$A$1012, MATCH((I91*(1-I92)), 'Earth Bandwidth TAM'!$A$8:$A$1012, 1)+1) - INDEX('Earth Bandwidth TAM'!$A$8:$A$1012, MATCH((I91*(1-I92)), 'Earth Bandwidth TAM'!$A$8:$A$1012, 1)) )))",
+      "algorithm": "ifStatement",
+      "status": "✅ Implemented",
+      "method": "ifStatement(condition, trueValue, falseValue)",
+      "needsUpdate": false,
+      "note": "May need enhanced IF for complex conditions"
+    },
+    {
+      "patternIndex": 46,
+      "pattern": "=(CELL-CELL)*CELL*CELL",
+      "count": 27,
+      "complexity": "Medium",
+      "functions": [],
+      "sheets": [
+        "Earth"
+      ],
+      "example": "=(I86-H86)*I426*I122",
+      "algorithm": "multiply",
+      "status": "✅ Implemented",
+      "method": "multiply(a, b)",
+      "needsUpdate": false
+    },
+    {
+      "patternIndex": 47,
+      "pattern": "=CELL+CELL+CELL+CELL+CELL+CELL",
+      "count": 27,
+      "complexity": "Medium",
+      "functions": [],
+      "sheets": [
+        "Earth"
+      ],
+      "example": "=I187+I186+I185+I189+I190+I191",
+      "algorithm": "add",
+      "status": "✅ Implemented",
+      "method": "add(a, b)",
+      "needsUpdate": false
+    },
+    {
+      "patternIndex": 48,
+      "pattern": "=CELL-CELL+CELL",
+      "count": 27,
+      "complexity": "Medium",
+      "functions": [],
+      "sheets": [
+        "Earth"
+      ],
+      "example": "=I182-I192+I196",
+      "algorithm": "add",
+      "status": "✅ Implemented",
+      "method": "add(a, b)",
+      "needsUpdate": false
+    },
+    {
+      "patternIndex": 49,
+      "pattern": "=MAX(CELL,CELL)",
+      "count": 27,
+      "complexity": "Medium",
+      "functions": [
+        "MAX"
+      ],
+      "sheets": [
+        "Earth"
+      ],
+      "example": "=MAX(I361,I278)",
+      "algorithm": "maxRange",
+      "status": "🟡 Partial - Needs multi-arg support",
+      "method": "maxRange(sheetName, startCell, endCell)",
+      "needsUpdate": true,
+      "note": "May need max(...values) for multiple arguments"
+    },
+    {
+      "patternIndex": 50,
+      "pattern": "=MAX(-CELL,-(CELL*CELL))",
+      "count": 26,
+      "complexity": "Medium",
+      "functions": [
+        "MAX"
+      ],
+      "sheets": [
+        "Earth"
+      ],
+      "example": "=MAX(-J27,-(J58*$B$28))",
+      "algorithm": "maxRange",
+      "status": "🟡 Partial - Needs multi-arg support",
+      "method": "maxRange(sheetName, startCell, endCell)",
+      "needsUpdate": true,
+      "note": "May need max(...values) for multiple arguments"
+    },
+    {
+      "patternIndex": 51,
+      "pattern": "=(CELL/NUM)*(CELL/CELL)^((LN(NUM-CELL)/LN(NUM)))+(NUM/NUM)",
+      "count": 26,
+      "complexity": "Medium",
+      "functions": [
+        "LN"
+      ],
+      "sheets": [
+        "Earth"
+      ],
+      "example": "=($B$42/365)*(I77/$B$77)^((LN(1-$B$43)/LN(2)))+(2/365)",
+      "algorithm": "log",
+      "status": "✅ Implemented",
+      "method": "log(value, base = Math.E)",
+      "needsUpdate": false
+    },
+    {
+      "patternIndex": 52,
+      "pattern": "=IF(CELL>CELL,NUM,((CELL/NUM)*(CELL/CELL)^((LN(NUM-CELL)/LN(NUM))))+(NUM/(NUM*NUM)))",
+      "count": 26,
+      "complexity": "Medium",
+      "functions": [
+        "IF",
+        "LN"
+      ],
+      "sheets": [
+        "Earth"
+      ],
+      "example": "=IF($B$31>J16,1,(($B$42/365)*(I80/$B$80)^((LN(1-$B$43)/LN(2))))+(1/(24*365)))",
+      "algorithm": "ifStatement",
+      "status": "✅ Implemented",
+      "method": "ifStatement(condition, trueValue, falseValue)",
+      "needsUpdate": false,
+      "note": "May need enhanced IF for complex conditions"
+    },
+    {
+      "patternIndex": 53,
+      "pattern": "=IF(CELL>=NUM,MIN(CELL,CELL*(NUM+CELL)),MAX(CELL,CELL*(NUM+CELL)))",
+      "count": 26,
+      "complexity": "Complex",
+      "functions": [
+        "IF",
+        "MAX",
+        "MIN"
+      ],
+      "sheets": [
+        "Earth"
+      ],
+      "example": "=IF($B$65>=0,MIN($B$64,I66*(1+$B$65)),MAX($B$66,I66*(1+$B$65)))",
+      "algorithm": "ifStatement",
+      "status": "✅ Implemented",
+      "method": "ifStatement(condition, trueValue, falseValue)",
+      "needsUpdate": false,
+      "note": "May need enhanced IF for complex conditions"
+    },
+    {
+      "patternIndex": 54,
+      "pattern": "=CELL+((CELL*(CELL+CELL))+(CELL*(CELL+CELL)))",
+      "count": 26,
+      "complexity": "Medium",
+      "functions": [],
+      "sheets": [
+        "Earth"
+      ],
+      "example": "=I86+((J83*(J47+J55))+(J84*(J50+J56)))",
+      "algorithm": "add",
+      "status": "✅ Implemented",
+      "method": "add(a, b)",
+      "needsUpdate": false
+    },
+    {
+      "patternIndex": 55,
+      "pattern": "=CELL+(CELL*CELL)-(CELL*CELL)",
+      "count": 26,
+      "complexity": "Medium",
+      "functions": [],
+      "sheets": [
+        "Earth"
+      ],
+      "example": "=I90+(J426*J428)-(J431*J435)",
+      "algorithm": "multiply",
+      "status": "✅ Implemented",
+      "method": "multiply(a, b)",
+      "needsUpdate": false
+    },
+    {
+      "patternIndex": 56,
+      "pattern": "=(CELL+(CELL*CELL)-(CELL*CELL))",
+      "count": 26,
+      "complexity": "Medium",
+      "functions": [],
+      "sheets": [
+        "Earth"
+      ],
+      "example": "=(I91+(J428*J425)-(J431*J434))",
+      "algorithm": "multiply",
+      "status": "✅ Implemented",
+      "method": "multiply(a, b)",
+      "needsUpdate": false
+    },
+    {
+      "patternIndex": 57,
+      "pattern": "=(CELL/(CELL*(NUM-CELL)))*(CELL/(CELL/(CELL*(NUM-CELL))))",
+      "count": 26,
+      "complexity": "Medium",
+      "functions": [],
+      "sheets": [
+        "Earth"
+      ],
+      "example": "=(J95/(J91*(1-J92)))*($I$98/($I$95/($I$91*(1-$I$92))))",
+      "algorithm": "composite",
+      "status": "✅ Implemented via basic operations",
+      "method": "divide/multiply combined",
+      "needsUpdate": false,
+      "note": "Complex arithmetic pattern - uses divide and multiply"
+    },
+    {
+      "patternIndex": 58,
+      "pattern": "=MIN(((CELL-(NUM/(NUM*NUM)))*CELL)/(CELL-(NUM/(NUM*NUM))),NUM)",
+      "count": 26,
+      "complexity": "Medium",
+      "functions": [
+        "MIN"
+      ],
+      "sheets": [
+        "Earth"
+      ],
+      "example": "=MIN(((J43-(1/(24*365)))*$I$128)/($I$42-(1/(24*365))),1)",
+      "algorithm": "minRange",
+      "status": "🟡 Partial - Needs multi-arg support",
+      "method": "minRange(sheetName, startCell, endCell)",
+      "needsUpdate": true,
+      "note": "May need min(...values) for multiple arguments"
+    },
+    {
+      "patternIndex": 59,
+      "pattern": "=MIN(NUM,IF(CELL>=NUM,CELL,CELL*(NUM-(CELL/NUM))))",
+      "count": 26,
+      "complexity": "Medium",
+      "functions": [
+        "IF",
+        "MIN"
+      ],
+      "sheets": [
+        "Earth"
+      ],
+      "example": "=MIN(1,IF(J244>=0,I147,I147*(1-(J244/4))))",
+      "algorithm": "ifStatement",
+      "status": "✅ Implemented",
+      "method": "ifStatement(condition, trueValue, falseValue)",
+      "needsUpdate": false,
+      "note": "May need enhanced IF for complex conditions"
+    },
+    {
+      "patternIndex": 60,
+      "pattern": "=CELL*(CELL-CELL)",
+      "count": 26,
+      "complexity": "Medium",
+      "functions": [],
+      "sheets": [
+        "Earth"
+      ],
+      "example": "=$B$189*(J86-I86)",
+      "algorithm": "subtract",
+      "status": "✅ Implemented",
+      "method": "subtract(a, b)",
+      "needsUpdate": false
+    },
+    {
+      "patternIndex": 61,
+      "pattern": "=(CELL*(NUM-CELL))",
+      "count": 26,
+      "complexity": "Simple",
+      "functions": [],
+      "sheets": [
+        "Earth"
+      ],
+      "example": "=(I91*(1-I92))",
+      "algorithm": "arithmetic",
+      "status": "✅ Implemented via basic operations",
+      "method": "add/subtract/multiply/divide",
+      "needsUpdate": false
+    },
+    {
+      "patternIndex": 62,
+      "pattern": "=-IF(CELL=STR,(CELL+CELL+CELL+CELL)/(CELL*CELL),(CELL+CELL+CELL+CELL)/(CELL*CELL))",
+      "count": 26,
+      "complexity": "Complex",
+      "functions": [
+        "IF"
+      ],
+      "sheets": [
+        "Earth"
+      ],
+      "example": "=-IF(J234=\"Starship\",(J230+J215+J226+J227)/(J423*J220),(J229+J209+J226+J227)/(J418*J219))",
+      "algorithm": "ifStatement",
+      "status": "✅ Implemented",
+      "method": "ifStatement(condition, trueValue, falseValue)",
+      "needsUpdate": false,
+      "note": "May need enhanced IF for complex conditions"
+    },
+    {
+      "patternIndex": 63,
+      "pattern": "=(IF((CELL+NUM)>MAX(SHEET!CELL:CELL),INDEX(SHEET!CELL:CELL, MATCH(NUM999999999999E+NUM,SHEET!CELL:CELL)),INDEX(SHEET!CELL:CELL, MATCH((CELL+NUM), SHEET!CELL:CELL, NUM))\n+ ((CELL+NUM) - INDEX(SHEET!CELL:CELL, MATCH((CELL+NUM), SHEET!CELL:CELL, NUM))) *\n( INDEX(SHEET!CELL:CELL, MATCH((CELL+NUM), SHEET!CELL:CELL, NUM)+NUM) - INDEX(SHEET!CELL:CELL, MATCH((CELL+NUM), SHEET!CELL:CELL, NUM)) ) /\n( INDEX(SHEET!CELL:CELL, MATCH((CELL+NUM), SHEET!CELL:CELL, NUM)+NUM) - INDEX(SHEET!CELL:CELL, MATCH((CELL+NUM), SHEET!CELL:CELL, NUM)) ))\n\n-IF(CELL>MAX(SHEET!CELL:CELL),INDEX(SHEET!CELL:CELL, MATCH(NUM999999999999E+NUM,SHEET!CELL:CELL)),INDEX(SHEET!CELL:CELL, MATCH(CELL, SHEET!CELL:CELL, NUM))\n+ (CELL - INDEX(SHEET!CELL:CELL, MATCH(CELL, SHEET!CELL:CELL, NUM))) *\n( INDEX(SHEET!CELL:CELL, MATCH(CELL, SHEET!CELL:CELL, NUM)+NUM) - INDEX(SHEET!CELL:CELL, MATCH(CELL, SHEET!CELL:CELL, NUM)) ) /\n( INDEX(SHEET!CELL:CELL, MATCH(CELL, SHEET!CELL:CELL, NUM)+NUM) - INDEX(SHEET!CELL:CELL, MATCH(CELL, SHEET!CELL:CELL, NUM)) )))",
+      "count": 26,
+      "complexity": "Complex",
+      "functions": [
+        "IF",
+        "INDEX",
+        "MATCH",
+        "MAX"
+      ],
+      "sheets": [
+        "Earth"
+      ],
+      "example": "=(IF((J236+1)>MAX('Earth Bandwidth TAM'!$A$8:$A$1012),INDEX('Earth Bandwidth TAM'!$B$8:$B$1012, MATCH(9.999999999999E+307,'Earth Bandwidth TAM'!$A$8:$A$1012)),INDEX('Earth Bandwidth TAM'!$B$8:$B$1012, MATCH((J236+1), 'Earth Bandwidth TAM'!$A$8:$A$1012, 1))\n+ ((J236+1) - INDEX('Earth Bandwidth TAM'!$A$8:$A$1012, MATCH((J236+1), 'Earth Bandwidth TAM'!$A$8:$A$1012, 1))) *\n( INDEX('Earth Bandwidth TAM'!$B$8:$B$1012, MATCH((J236+1), 'Earth Bandwidth TAM'!$A$8:$A$1012, 1)+1) - INDEX('Earth Bandwidth TAM'!$B$8:$B$1012, MATCH((J236+1), 'Earth Bandwidth TAM'!$A$8:$A$1012, 1)) ) /\n( INDEX('Earth Bandwidth TAM'!$A$8:$A$1012, MATCH((J236+1), 'Earth Bandwidth TAM'!$A$8:$A$1012, 1)+1) - INDEX('Earth Bandwidth TAM'!$A$8:$A$1012, MATCH((J236+1), 'Earth Bandwidth TAM'!$A$8:$A$1012, 1)) ))\n\n-IF(J236>MAX('Earth Bandwidth TAM'!$A$8:$A$1012),INDEX('Earth Bandwidth TAM'!$B$8:$B$1012, MATCH(9.999999999999E+307,'Earth Bandwidth TAM'!$A$8:$A$1012)),INDEX('Earth Bandwidth TAM'!$B$8:$B$1012, MATCH(J236, 'Earth Bandwidth TAM'!$A$8:$A$1012, 1))\n+ (J236 - INDEX('Earth Bandwidth TAM'!$A$8:$A$1012, MATCH(J236, 'Earth Bandwidth TAM'!$A$8:$A$1012, 1))) *\n( INDEX('Earth Bandwidth TAM'!$B$8:$B$1012, MATCH(J236, 'Earth Bandwidth TAM'!$A$8:$A$1012, 1)+1) - INDEX('Earth Bandwidth TAM'!$B$8:$B$1012, MATCH(J236, 'Earth Bandwidth TAM'!$A$8:$A$1012, 1)) ) /\n( INDEX('Earth Bandwidth TAM'!$A$8:$A$1012, MATCH(J236, 'Earth Bandwidth TAM'!$A$8:$A$1012, 1)+1) - INDEX('Earth Bandwidth TAM'!$A$8:$A$1012, MATCH(J236, 'Earth Bandwidth TAM'!$A$8:$A$1012, 1)) )))",
+      "algorithm": "ifStatement",
+      "status": "✅ Implemented",
+      "method": "ifStatement(condition, trueValue, falseValue)",
+      "needsUpdate": false,
+      "note": "May need enhanced IF for complex conditions"
+    },
+    {
+      "patternIndex": 64,
+      "pattern": "=IFERROR(IRR(CELL:CELL),NUM)",
+      "count": 26,
+      "complexity": "Complex",
+      "functions": [
+        "OR",
+        "IFERROR",
+        "IRR"
+      ],
+      "sheets": [
+        "Earth"
+      ],
+      "example": "=IFERROR(IRR(J237:J242),0)",
+      "algorithm": "ifError",
+      "status": "✅ Implemented",
+      "method": "ifError(value, defaultValue)",
+      "needsUpdate": false
+    },
+    {
+      "patternIndex": 65,
+      "pattern": "=IF(CELL=STR,STR,IF(CELL=STR,IF(CELL>CELL,STR,STR),STR))",
+      "count": 26,
+      "complexity": "Medium",
+      "functions": [
+        "IF"
+      ],
+      "sheets": [
+        "Earth"
+      ],
+      "example": "=IF(I245=\"Starlink Constellation Complete\",\"Starlink Constellation Complete\",IF(J234=\"Starship\",IF(J243>$B$243,\"Launch\",\"Starlink Constellation Complete\"),\"Launch\"))",
+      "algorithm": "ifStatement",
+      "status": "✅ Implemented",
+      "method": "ifStatement(condition, trueValue, falseValue)",
+      "needsUpdate": false,
+      "note": "May need enhanced IF for complex conditions"
+    },
+    {
+      "patternIndex": 66,
+      "pattern": "=IF(CELL=STR,NUM,IF(CELL>=NUM,CELL,NUM))",
+      "count": 26,
+      "complexity": "Medium",
+      "functions": [
+        "IF"
+      ],
+      "sheets": [
+        "Earth"
+      ],
+      "example": "=IF(J245=\"Launch\",0,IF(J232>=0,J232,0))",
+      "algorithm": "ifStatement",
+      "status": "✅ Implemented",
+      "method": "ifStatement(condition, trueValue, falseValue)",
+      "needsUpdate": false,
+      "note": "May need enhanced IF for complex conditions"
+    },
+    {
+      "patternIndex": 67,
+      "pattern": "=IF(OR(CELL=STR,AND(CELL=STR,CELL=STR)),CELL/CELL,NUM)",
+      "count": 26,
+      "complexity": "Complex",
+      "functions": [
+        "IF",
+        "AND",
+        "OR"
+      ],
+      "sheets": [
+        "Earth"
+      ],
+      "example": "=IF(OR(J234=\"Falcon 9\",AND(J265=\"No\",J264=\"Yes\")),J258/J253,0)",
+      "algorithm": "ifStatement",
+      "status": "✅ Implemented",
+      "method": "ifStatement(condition, trueValue, falseValue)",
+      "needsUpdate": false,
+      "note": "May need enhanced IF for complex conditions"
+    },
+    {
+      "patternIndex": 68,
+      "pattern": "=IF(CELL=STR,IF(AND(CELL=STR, CELL=STR),NUM,CELL/CELL),NUM)",
+      "count": 26,
+      "complexity": "Medium",
+      "functions": [
+        "IF",
+        "AND"
+      ],
+      "sheets": [
+        "Earth"
+      ],
+      "example": "=IF(J234=\"Starship\",IF(AND(J265=\"No\", J264=\"Yes\"),0,J259/J254),0)",
+      "algorithm": "ifStatement",
+      "status": "✅ Implemented",
+      "method": "ifStatement(condition, trueValue, falseValue)",
+      "needsUpdate": false,
+      "note": "May need enhanced IF for complex conditions"
+    },
+    {
+      "patternIndex": 69,
+      "pattern": "=(CELL*CELL)+(CELL*CELL)+(CELL*(CELL+CELL+CELL))+(CELL*(CELL+CELL+CELL))",
+      "count": 26,
+      "complexity": "Complex",
+      "functions": [],
+      "sheets": [
+        "Earth"
+      ],
+      "example": "=(J267*J210)+(J268*J216)+(J270*(J229+J226+J227))+(J271*(J230+J226+J227))",
+      "algorithm": "multiply",
+      "status": "✅ Implemented",
+      "method": "multiply(a, b)",
+      "needsUpdate": false
+    },
+    {
+      "patternIndex": 70,
+      "pattern": "=CELL/SUM(CELL:CELL)",
+      "count": 26,
+      "complexity": "Medium",
+      "functions": [
+        "SUM"
+      ],
+      "sheets": [
+        "Earth"
+      ],
+      "example": "=J283/SUM(J226:J227)",
+      "algorithm": "sumRange",
+      "status": "✅ Implemented",
+      "method": "sumRange(sheetName, startCell, endCell)",
+      "needsUpdate": false
+    },
+    {
+      "patternIndex": 71,
+      "pattern": "=MIN(CELL,CELL,CELL)",
+      "count": 26,
+      "complexity": "Medium",
+      "functions": [
+        "MIN"
+      ],
+      "sheets": [
+        "Earth"
+      ],
+      "example": "=MIN(J296,J292,J284)",
+      "algorithm": "minRange",
+      "status": "🟡 Partial - Needs multi-arg support",
+      "method": "minRange(sheetName, startCell, endCell)",
+      "needsUpdate": true,
+      "note": "May need min(...values) for multiple arguments"
+    },
+    {
+      "patternIndex": 72,
+      "pattern": "=CELL*(CELL+CELL)",
+      "count": 26,
+      "complexity": "Medium",
+      "functions": [],
+      "sheets": [
+        "Earth"
+      ],
+      "example": "=J298*(J226+J227)",
+      "algorithm": "add",
+      "status": "✅ Implemented",
+      "method": "add(a, b)",
+      "needsUpdate": false
+    },
+    {
+      "patternIndex": 73,
+      "pattern": "=CELL-CELL+CELL-CELL",
+      "count": 26,
+      "complexity": "Medium",
+      "functions": [],
+      "sheets": [
+        "Earth"
+      ],
+      "example": "=J247-J273+J276-J303",
+      "algorithm": "add",
+      "status": "✅ Implemented",
+      "method": "add(a, b)",
+      "needsUpdate": false
+    },
+    {
+      "patternIndex": 74,
+      "pattern": "=IF(CELL=STR,IF(CELL>=NUM,CELL,NUM),NUM)",
+      "count": 26,
+      "complexity": "Medium",
+      "functions": [
+        "IF"
+      ],
+      "sheets": [
+        "Earth"
+      ],
+      "example": "=IF(J245=\"Launch\",IF(J232>=0,J232,0),0)",
+      "algorithm": "ifStatement",
+      "status": "✅ Implemented",
+      "method": "ifStatement(condition, trueValue, falseValue)",
+      "needsUpdate": false,
+      "note": "May need enhanced IF for complex conditions"
+    },
+    {
+      "patternIndex": 75,
+      "pattern": "=IF(CELL=STR,NUM%,NUM)",
+      "count": 26,
+      "complexity": "Medium",
+      "functions": [
+        "IF"
+      ],
+      "sheets": [
+        "Earth"
+      ],
+      "example": "=IF(J234=\"Falcon 9\",66%,0)",
+      "algorithm": "ifStatement",
+      "status": "✅ Implemented",
+      "method": "ifStatement(condition, trueValue, falseValue)",
+      "needsUpdate": false,
+      "note": "May need enhanced IF for complex conditions"
+    },
+    {
+      "patternIndex": 76,
+      "pattern": "=IF(CELL>=NUM,MIN(NUM,CELL*(NUM+CELL)),MAX(CELL*(NUM+CELL),CELL))",
+      "count": 26,
+      "complexity": "Complex",
+      "functions": [
+        "IF",
+        "MAX",
+        "MIN"
+      ],
+      "sheets": [
+        "Earth"
+      ],
+      "example": "=IF($B$334>=0,MIN(1,I332*(1+$B$334)),MAX(I332*(1+$B$334),$B$333))",
+      "algorithm": "ifStatement",
+      "status": "✅ Implemented",
+      "method": "ifStatement(condition, trueValue, falseValue)",
+      "needsUpdate": false,
+      "note": "May need enhanced IF for complex conditions"
+    },
+    {
+      "patternIndex": 77,
+      "pattern": "=IF(CELL=STR,CELL*CELL,NUM)",
+      "count": 26,
+      "complexity": "Medium",
+      "functions": [
+        "IF"
+      ],
+      "sheets": [
+        "Earth"
+      ],
+      "example": "=IF(J245=\"Launch\",J344*$B$345,0)",
+      "algorithm": "ifStatement",
+      "status": "✅ Implemented",
+      "method": "ifStatement(condition, trueValue, falseValue)",
+      "needsUpdate": false,
+      "note": "May need enhanced IF for complex conditions"
+    },
+    {
+      "patternIndex": 78,
+      "pattern": "=(CELL+CELL)*(CELL+CELL)",
+      "count": 26,
+      "complexity": "Medium",
+      "functions": [],
+      "sheets": [
+        "Earth"
+      ],
+      "example": "=(J337+J347)*(J226+J227)",
+      "algorithm": "add",
+      "status": "✅ Implemented",
+      "method": "add(a, b)",
+      "needsUpdate": false
+    },
+    {
+      "patternIndex": 79,
+      "pattern": "=IF(CELL=STR,CELL/CELL,NUM)",
+      "count": 26,
+      "complexity": "Medium",
+      "functions": [
+        "IF"
+      ],
+      "sheets": [
+        "Earth"
+      ],
+      "example": "=IF(J234=\"Falcon 9\",J378/J388,0)",
+      "algorithm": "ifStatement",
+      "status": "✅ Implemented",
+      "method": "ifStatement(condition, trueValue, falseValue)",
+      "needsUpdate": false,
+      "note": "May need enhanced IF for complex conditions"
+    },
+    {
+      "patternIndex": 80,
+      "pattern": "=IF(CELL=STR,NUM,CELL/CELL)",
+      "count": 26,
+      "complexity": "Medium",
+      "functions": [
+        "IF"
+      ],
+      "sheets": [
+        "Earth"
+      ],
+      "example": "=IF(J234=\"Falcon 9\",0,J378/J389)",
+      "algorithm": "ifStatement",
+      "status": "✅ Implemented",
+      "method": "ifStatement(condition, trueValue, falseValue)",
+      "needsUpdate": false,
+      "note": "May need enhanced IF for complex conditions"
+    },
+    {
+      "patternIndex": 81,
+      "pattern": "=IF(CELL=STR,IF(CELL<CELL,(CELL-CELL)*CELL,NUM),IF(CELL<CELL,(CELL-CELL)*CELL,NUM))",
+      "count": 26,
+      "complexity": "Complex",
+      "functions": [
+        "IF"
+      ],
+      "sheets": [
+        "Earth"
+      ],
+      "example": "=IF(J234=\"Falcon 9\",IF(J398<J391,(J391-J398)*J388,0),IF(J399<J392,(J392-J399)*J389,0))",
+      "algorithm": "ifStatement",
+      "status": "✅ Implemented",
+      "method": "ifStatement(condition, trueValue, falseValue)",
+      "needsUpdate": false,
+      "note": "May need enhanced IF for complex conditions"
+    },
+    {
+      "patternIndex": 82,
+      "pattern": "=(CELL)*(CELL/CELL)^((LN(NUM+CELL)/LN(NUM)))",
+      "count": 26,
+      "complexity": "Medium",
+      "functions": [
+        "LN"
+      ],
+      "sheets": [
+        "Earth"
+      ],
+      "example": "=($B$423)*(I413/$B$422)^((LN(1+$B$421)/LN(2)))",
+      "algorithm": "log",
+      "status": "✅ Implemented",
+      "method": "log(value, base = Math.E)",
+      "needsUpdate": false
+    },
+    {
+      "patternIndex": 83,
+      "pattern": "=SUM(CELL:CELL)-SUM(CELL:CELL)",
+      "count": 26,
+      "complexity": "Medium",
+      "functions": [
+        "SUM"
+      ],
+      "sheets": [
+        "Mars"
+      ],
+      "example": "=SUM($F7:F7)-SUM($E27:E27)",
+      "algorithm": "sumRange",
+      "status": "✅ Implemented",
+      "method": "sumRange(sheetName, startCell, endCell)",
+      "needsUpdate": false
+    },
+    {
+      "patternIndex": 84,
+      "pattern": "SHEET!CELL,MOD(CELL,NUM)=NUM),STR,STR)",
+      "count": 26,
+      "complexity": "Complex",
+      "functions": [
+        "IF",
+        "AND",
+        "MOD"
+      ],
+      "sheets": [
+        "Mars"
+      ],
+      "example": "=IF(AND(F6>=Earth!$B234,MOD(F6,2)=0),\"Go For Launch\",\"It Ain't Your Year\")",
+      "algorithm": "ifStatement",
+      "status": "✅ Implemented",
+      "method": "ifStatement(condition, trueValue, falseValue)",
+      "needsUpdate": false,
+      "note": "May need enhanced IF for complex conditions"
+    },
+    {
+      "patternIndex": 85,
+      "pattern": "SHEET!CELL+CELL/CELL",
+      "count": 26,
+      "complexity": "Medium",
+      "functions": [],
+      "sheets": [
+        "Mars"
+      ],
+      "example": "=Earth!J139*Earth!J135*(F37+1)+F38*Earth!J216/Earth!J66+F43/$B45",
+      "algorithm": "add",
+      "status": "✅ Implemented",
+      "method": "add(a, b)",
+      "needsUpdate": false
+    },
+    {
+      "patternIndex": 86,
+      "pattern": "=IFERROR(CELL/CELL,STR)",
+      "count": 26,
+      "complexity": "Medium",
+      "functions": [
+        "OR",
+        "IFERROR"
+      ],
+      "sheets": [
+        "Mars"
+      ],
+      "example": "=IFERROR(F10/F11,\"\")",
+      "algorithm": "ifError",
+      "status": "✅ Implemented",
+      "method": "ifError(value, defaultValue)",
+      "needsUpdate": false
+    },
+    {
+      "patternIndex": 87,
+      "pattern": "=CELL*(CELL+NUM)",
+      "count": 26,
+      "complexity": "Simple",
+      "functions": [],
+      "sheets": [
+        "Mars"
+      ],
+      "example": "=F12*(F37+1)",
+      "algorithm": "arithmetic",
+      "status": "✅ Implemented via basic operations",
+      "method": "add/subtract/multiply/divide",
+      "needsUpdate": false
+    },
+    {
+      "patternIndex": 88,
+      "pattern": "=IF(CELL<=CELL,SHEET!STR)",
+      "count": 26,
+      "complexity": "Medium",
+      "functions": [
+        "IF"
+      ],
+      "sheets": [
+        "Mars"
+      ],
+      "example": "=IF(F15<=F14,\"We Need More Rockets!\",\"We Need More Money!\")",
+      "algorithm": "ifStatement",
+      "status": "✅ Implemented",
+      "method": "ifStatement(condition, trueValue, falseValue)",
+      "needsUpdate": false,
+      "note": "May need enhanced IF for complex conditions"
+    },
+    {
+      "patternIndex": 89,
+      "pattern": "=ROUNDDOWN(MIN(CELL:CELL)/(CELL+NUM),NUM)*(NUM+CELL)",
+      "count": 26,
+      "complexity": "Medium",
+      "functions": [
+        "MIN",
+        "ROUNDDOWN"
+      ],
+      "sheets": [
+        "Mars"
+      ],
+      "example": "=ROUNDDOWN(MIN(F22:F23)/(F37+1),0)*(1+F37)",
+      "algorithm": "minRange",
+      "status": "✅ Implemented",
+      "method": "minRange(sheetName, startCell, endCell)",
+      "needsUpdate": false
+    },
+    {
+      "patternIndex": 90,
+      "pattern": "=IF(CELL=NUM,NUM,IF(AND(CELL>NUM,CELL=NUM),CELL,CELL*(NUM-CELL)^LOG(CELL/CELL,NUM)))",
+      "count": 26,
+      "complexity": "Complex",
+      "functions": [
+        "IF",
+        "AND",
+        "LOG"
+      ],
+      "sheets": [
+        "Mars"
+      ],
+      "example": "=IF(F29=0,0,IF(AND(F29>0,E30=0),$B30,E30*(1-$B31)^LOG(F29/E29,2)))",
+      "algorithm": "ifStatement",
+      "status": "✅ Implemented",
+      "method": "ifStatement(condition, trueValue, falseValue)",
+      "needsUpdate": false,
+      "note": "May need enhanced IF for complex conditions"
+    },
+    {
+      "patternIndex": 91,
+      "pattern": "=SUM(CELL,CELL)*(NUM+CELL)",
+      "count": 26,
+      "complexity": "Medium",
+      "functions": [
+        "SUM"
+      ],
+      "sheets": [
+        "Mars"
+      ],
+      "example": "=SUM(F19,F25)*(1+F37)",
+      "algorithm": "sumRange",
+      "status": "🟡 Partial - Needs multi-range support",
+      "method": "sumRange(sheetName, startCell, endCell)",
+      "needsUpdate": true,
+      "note": "May need sumRangeMultiple() for multiple ranges"
+    },
+    {
+      "patternIndex": 92,
+      "pattern": "SHEET!CELL/NUM)",
+      "count": 26,
+      "complexity": "Medium",
+      "functions": [
+        "EXP"
+      ],
+      "sheets": [
+        "Mars"
+      ],
+      "example": "=(((Earth!J67/1000)+(0.186*(39.68*(Earth!J67/1000)^0.766)^0.85))*(EXP(5500/(F36*9.80665))-1))/(Earth!J67/1000)",
+      "algorithm": "crossSheetReference",
+      "status": "✅ Implemented",
+      "method": "crossSheetReference(sheetName, cellRef)",
+      "needsUpdate": false
+    },
+    {
+      "patternIndex": 93,
+      "pattern": "=CELL/CELL*CELL",
+      "count": 26,
+      "complexity": "Medium",
+      "functions": [],
+      "sheets": [
+        "Mars"
+      ],
+      "example": "=F31/$B45*$B40",
+      "algorithm": "multiply",
+      "status": "✅ Implemented",
+      "method": "multiply(a, b)",
+      "needsUpdate": false
+    },
+    {
+      "patternIndex": 94,
+      "pattern": "=SUM(CELL:CELL)-OFFSET(CELL,NUM,MAX(-CELL,-(COLUMN()-NUM)))",
+      "count": 26,
+      "complexity": "Complex",
+      "functions": [
+        "SUM",
+        "MAX",
+        "OFFSET",
+        "COLUMN"
+      ],
+      "sheets": [
+        "Mars"
+      ],
+      "example": "=SUM($F47:F47)-OFFSET(F52,0,MAX(-$B51,-(COLUMN()-5)))",
+      "algorithm": "sumRange",
+      "status": "✅ Implemented",
+      "method": "sumRange(sheetName, startCell, endCell)",
+      "needsUpdate": false
+    },
+    {
+      "patternIndex": 95,
+      "pattern": "=CELL+CELL*(NUM-NUM/CELL)",
+      "count": 26,
+      "complexity": "Medium",
+      "functions": [],
+      "sheets": [
+        "Mars"
+      ],
+      "example": "=F53+E54*(1-1/$B54)",
+      "algorithm": "add",
+      "status": "✅ Implemented",
+      "method": "add(a, b)",
+      "needsUpdate": false
+    },
+    {
+      "patternIndex": 96,
+      "pattern": "=IFERROR((CELL-CELL)/CELL,NUM)",
+      "count": 25,
+      "complexity": "Medium",
+      "functions": [
+        "OR",
+        "IFERROR"
+      ],
+      "sheets": [
+        "Earth"
+      ],
+      "example": "=IFERROR((K243-J243)/J243,0)",
+      "algorithm": "ifError",
+      "status": "✅ Implemented",
+      "method": "ifError(value, defaultValue)",
+      "needsUpdate": false
+    },
+    {
+      "patternIndex": 97,
+      "pattern": "=(CELL+CELL)*(NUM-CELL)",
+      "count": 25,
+      "complexity": "Medium",
+      "functions": [],
+      "sheets": [
+        "Mars"
+      ],
+      "example": "=(F25+F19)*(1-F30)",
+      "algorithm": "add",
+      "status": "✅ Implemented",
+      "method": "add(a, b)",
+      "needsUpdate": false
+    },
+    {
+      "patternIndex": 98,
+      "pattern": "=CELL*(NUM+CELL)^(LOG(COLUMN()-COLUMN(CELL)+NUM,NUM))",
+      "count": 25,
+      "complexity": "Medium",
+      "functions": [
+        "LOG",
+        "COLUMN"
+      ],
+      "sheets": [
+        "Mars"
+      ],
+      "example": "=$F44*(1+$B52)^(LOG(COLUMN()-COLUMN($F44)+1,2))",
+      "algorithm": "log",
+      "status": "✅ Implemented",
+      "method": "log(value, base = Math.E)",
+      "needsUpdate": false
+    },
+    {
+      "patternIndex": 99,
+      "pattern": "=RAND()",
+      "count": 17,
+      "complexity": "Medium",
+      "functions": [
+        "AND"
+      ],
+      "sheets": [
+        "Valuation Inputs & Logic"
+      ],
+      "example": "=RAND()",
+      "algorithm": "and",
+      "status": "❌ Not Implemented",
+      "method": "and(...conditions)",
+      "needsUpdate": true,
+      "priority": "P1"
+    },
+    {
+      "patternIndex": 100,
+      "pattern": "=(CELL-CELL)/NUM+CELL",
+      "count": 17,
+      "complexity": "Medium",
+      "functions": [],
+      "sheets": [
+        "Valuation Inputs & Logic"
+      ],
+      "example": "=(E32-D32)/2+D32",
+      "algorithm": "subtract",
+      "status": "✅ Implemented",
+      "method": "subtract(a, b)",
+      "needsUpdate": false
+    },
+    {
+      "patternIndex": 101,
+      "pattern": "=SHEET!CELL",
+      "count": 16,
+      "complexity": "Simple",
+      "functions": [],
+      "sheets": [
+        "Earth",
+        "Mars"
+      ],
+      "example": "='Valuation Inputs & Logic'!I32",
+      "algorithm": "crossSheetReference",
+      "status": "✅ Implemented",
+      "method": "crossSheetReference(sheetName, cellRef)",
+      "needsUpdate": false
+    },
+    {
+      "patternIndex": 102,
+      "pattern": "=IF(CELL=CELL,CELL,IF(NORM.INV(CELL,CELL,(CELL-CELL))<CELL,CELL,IF(NORM.INV(CELL,CELL,(CELL-CELL))>CELL,CELL,NORM.INV(CELL,CELL,(CELL-CELL)))))",
+      "count": 15,
+      "complexity": "Complex",
+      "functions": [
+        "IF"
+      ],
+      "sheets": [
+        "Valuation Inputs & Logic"
+      ],
+      "example": "=IF(H33=E33,H33,IF(NORM.INV(G33,H33,(E33-H33))<C33,C33,IF(NORM.INV(G33,H33,(E33-H33))>F33,F33,NORM.INV(G33,H33,(E33-H33)))))",
+      "algorithm": "ifStatement",
+      "status": "✅ Implemented",
+      "method": "ifStatement(condition, trueValue, falseValue)",
+      "needsUpdate": false,
+      "note": "May need enhanced IF for complex conditions"
+    },
+    {
+      "patternIndex": 103,
+      "pattern": "=QUARTILE(SHEET!CELL:CELL,NUM)/NUM^NUM",
+      "count": 6,
+      "complexity": "Medium",
+      "functions": [
+        "QUARTILE"
+      ],
+      "sheets": [
+        "Valuation Inputs & Logic"
+      ],
+      "example": "=QUARTILE('Valuation Outputs'!$M$7:$M$5006,1)/10^9",
+      "algorithm": "crossSheetReference",
+      "status": "✅ Implemented",
+      "method": "crossSheetReference(sheetName, cellRef)",
+      "needsUpdate": false
+    },
+    {
+      "patternIndex": 104,
+      "pattern": "=RRI(((CELL-CELL)/NUM),CELL,CELL)",
+      "count": 5,
+      "complexity": "Medium",
+      "functions": [
+        "RRI"
+      ],
+      "sheets": [
+        "Valuation Inputs & Logic"
+      ],
+      "example": "=RRI(((D$13-$B$13)/365),$B$15,D15)",
+      "algorithm": "rri",
+      "status": "✅ Implemented",
+      "method": "rri(nper, pv, fv)",
+      "needsUpdate": false
+    },
+    {
+      "patternIndex": 105,
+      "pattern": "=_xlfn.RRI(((CELL-CELL)/NUM),CELL,CELL)",
+      "count": 4,
+      "complexity": "Medium",
+      "functions": [
+        "RRI"
+      ],
+      "sheets": [
+        "Valuation Inputs & Logic"
+      ],
+      "example": "=_xlfn.RRI(((C$8-$B$8)/365),$B$10,C10)",
+      "algorithm": "rri",
+      "status": "✅ Implemented",
+      "method": "rri(nper, pv, fv)",
+      "needsUpdate": false
+    },
+    {
+      "patternIndex": 106,
+      "pattern": "=RRI(NUM,CELL,CELL)",
+      "count": 4,
+      "complexity": "Medium",
+      "functions": [
+        "RRI"
+      ],
+      "sheets": [
+        "Earth"
+      ],
+      "example": "=RRI(6,I66,B66)",
+      "algorithm": "rri",
+      "status": "✅ Implemented",
+      "method": "rri(nper, pv, fv)",
+      "needsUpdate": false
+    },
+    {
+      "patternIndex": 107,
+      "pattern": "=AVERAGE(SHEET!CELL:CELL)/NUM^NUM",
+      "count": 3,
+      "complexity": "Medium",
+      "functions": [
+        "AVERAGE"
+      ],
+      "sheets": [
+        "Valuation Inputs & Logic"
+      ],
+      "example": "=AVERAGE('Valuation Outputs'!$M$7:$M$5006)/10^9",
+      "algorithm": "crossSheetReference",
+      "status": "✅ Implemented",
+      "method": "crossSheetReference(sheetName, cellRef)",
+      "needsUpdate": false
+    },
+    {
+      "patternIndex": 108,
+      "pattern": "=NUM/CELL",
+      "count": 2,
+      "complexity": "Simple",
+      "functions": [],
+      "sheets": [
+        "Earth"
+      ],
+      "example": "=1/$B$28",
+      "algorithm": "arithmetic",
+      "status": "✅ Implemented via basic operations",
+      "method": "add/subtract/multiply/divide",
+      "needsUpdate": false
+    },
+    {
+      "patternIndex": 109,
+      "pattern": "=NUM/NUM",
+      "count": 2,
+      "complexity": "Simple",
+      "functions": [],
+      "sheets": [
+        "Earth",
+        "Mars"
+      ],
+      "example": "=96/575",
+      "algorithm": "arithmetic",
+      "status": "✅ Implemented via basic operations",
+      "method": "add/subtract/multiply/divide",
+      "needsUpdate": false
+    },
+    {
+      "patternIndex": 110,
+      "pattern": "=ROUNDDOWN(MAX(IF(CELL=CELL,CELL,IF(NORM.INV(CELL,CELL,(CELL-CELL))<CELL,CELL,IF(NORM.INV(CELL,CELL,(CELL-CELL))>CELL,CELL,NORM.INV(CELL,CELL,(CELL-CELL))))),CELL),NUM)",
+      "count": 1,
+      "complexity": "Complex",
+      "functions": [
+        "IF",
+        "MAX",
+        "ROUNDDOWN"
+      ],
+      "sheets": [
+        "Valuation Inputs & Logic"
+      ],
+      "example": "=ROUNDDOWN(MAX(IF(H32=D32,H32,IF(NORM.INV(G32,H32,(D32-H32))<C32,C32,IF(NORM.INV(G32,H32,(D32-H32))>F32,F32,NORM.INV(G32,H32,(D32-H32))))),I38),0)",
+      "algorithm": "ifStatement",
+      "status": "✅ Implemented",
+      "method": "ifStatement(condition, trueValue, falseValue)",
+      "needsUpdate": false,
+      "note": "May need enhanced IF for complex conditions"
+    },
+    {
+      "patternIndex": 111,
+      "pattern": "=ROUNDDOWN(IF(CELL=CELL,CELL,IF(NORM.INV(CELL,CELL,(CELL-CELL))<CELL,CELL,IF(NORM.INV(CELL,CELL,(CELL-CELL))>CELL,CELL,NORM.INV(CELL,CELL,(CELL-CELL))))),NUM)",
+      "count": 1,
+      "complexity": "Complex",
+      "functions": [
+        "IF",
+        "ROUNDDOWN"
+      ],
+      "sheets": [
+        "Valuation Inputs & Logic"
+      ],
+      "example": "=ROUNDDOWN(IF(H38=D38,H38,IF(NORM.INV(G38,H38,(D38-H38))<C38,C38,IF(NORM.INV(G38,H38,(D38-H38))>F38,F38,NORM.INV(G38,H38,(D38-H38))))),0)",
+      "algorithm": "ifStatement",
+      "status": "✅ Implemented",
+      "method": "ifStatement(condition, trueValue, falseValue)",
+      "needsUpdate": false,
+      "note": "May need enhanced IF for complex conditions"
+    },
+    {
+      "patternIndex": 112,
+      "pattern": "=CELL/(CELL*CELL)",
+      "count": 1,
+      "complexity": "Medium",
+      "functions": [],
+      "sheets": [
+        "Earth"
+      ],
+      "example": "=I99/(I91*I92)",
+      "algorithm": "multiply",
+      "status": "✅ Implemented",
+      "method": "multiply(a, b)",
+      "needsUpdate": false
+    },
+    {
+      "patternIndex": 113,
+      "pattern": "=CELL*CELL*CELL*NUM",
+      "count": 1,
+      "complexity": "Medium",
+      "functions": [],
+      "sheets": [
+        "Mars"
+      ],
+      "example": "=$B50*$B49*$B47*365",
+      "algorithm": "multiply",
+      "status": "✅ Implemented",
+      "method": "multiply(a, b)",
+      "needsUpdate": false
+    }
+  ],
+  "algorithmCoverage": [
+    {
+      "algorithm": "directReference",
+      "patterns": [
+        "=CELL"
+      ],
+      "totalCount": 2230,
+      "status": "✅ Implemented"
+    },
+    {
+      "algorithm": "multiply",
+      "patterns": [
+        "=CELL*CELL",
+        "=CELL*CELL*CELL",
+        "=(CELL*CELL)",
+        "=(CELL*CELL*CELL)+(CELL*CELL)",
+        "=(CELL-CELL)*CELL*CELL",
+        "=CELL+(CELL*CELL)-(CELL*CELL)",
+        "=(CELL+(CELL*CELL)-(CELL*CELL))",
+        "=(CELL*CELL)+(CELL*CELL)+(CELL*(CELL+CELL+CELL))+(CELL*(CELL+CELL+CELL))",
+        "=CELL/CELL*CELL",
+        "=CELL/(CELL*CELL)",
+        "=CELL*CELL*CELL*NUM"
+      ],
+      "totalCount": 1230,
+      "status": "✅ Implemented"
+    },
+    {
+      "algorithm": "sumRange",
+      "patterns": [
+        "=SUM(CELL:CELL)",
+        "=SUM(CELL:CELL,CELL)",
+        "=IF(CELL=STR,(SUM(CELL,CELL)/CELL)-CELL,CELL-CELL)",
+        "=CELL/SUM(CELL:CELL)",
+        "=SUM(CELL:CELL)-SUM(CELL:CELL)",
+        "=SUM(CELL,CELL)*(NUM+CELL)",
+        "=SUM(CELL:CELL)-OFFSET(CELL,NUM,MAX(-CELL,-(COLUMN()-NUM)))"
+      ],
+      "totalCount": 611,
+      "status": "✅ Implemented"
+    },
+    {
+      "algorithm": "divide",
+      "patterns": [
+        "=CELL/CELL",
+        "=CELL+(CELL/CELL)",
+        "=(CELL/CELL)/(NUM/CELL)"
+      ],
+      "totalCount": 510,
+      "status": "✅ Implemented"
+    },
+    {
+      "algorithm": "crossSheetReference",
+      "patterns": [
+        "SHEET!CELL",
+        "SHEET!CELL)*CELL)",
+        "SHEET!CELL/NUM)",
+        "=SHEET!CELL",
+        "=QUARTILE(SHEET!CELL:CELL,NUM)/NUM^NUM",
+        "=AVERAGE(SHEET!CELL:CELL)/NUM^NUM"
+      ],
+      "totalCount": 445,
+      "status": "✅ Implemented"
+    },
+    {
+      "algorithm": "add",
+      "patterns": [
+        "=CELL+CELL",
+        "=(CELL+CELL)*CELL",
+        "=CELL+CELL+CELL+CELL",
+        "=(CELL+CELL)/CELL",
+        "=CELL+CELL+CELL",
+        "=CELL+((CELL+CELL+CELL)*(NUM/CELL))",
+        "=CELL+CELL+CELL+CELL+CELL+CELL",
+        "=CELL-CELL+CELL",
+        "=CELL+((CELL*(CELL+CELL))+(CELL*(CELL+CELL)))",
+        "=CELL*(CELL+CELL)",
+        "=CELL-CELL+CELL-CELL",
+        "=(CELL+CELL)*(CELL+CELL)",
+        "SHEET!CELL+CELL/CELL",
+        "=CELL+CELL*(NUM-NUM/CELL)",
+        "=(CELL+CELL)*(NUM-CELL)"
+      ],
+      "totalCount": 878,
+      "status": "✅ Implemented"
+    },
+    {
+      "algorithm": "ifStatement",
+      "patterns": [
+        "=IF(CELL=STR,CELL,CELL)",
+        "=IF(CELL=STR,CELL,NUM)",
+        "=IF(CELL=STR,NUM,CELL)",
+        "=IF(CELL=STR,CELL-CELL,NUM)",
+        "=IF(CELL>CELL,STR,STR)",
+        "=IF(CELL>=NUM,MIN(CELL,CELL*(NUM+CELL)),MAX(CELL*(NUM+CELL),CELL))",
+        "=IF(AND(CELL=STR,CELL=STR,CELL=STR),CELL-CELL,NUM)",
+        "=IF(CELL>=CELL,STR,STR)",
+        "=IF(AND(CELL=STR,CELL=STR),CELL+CELL,NUM)",
+        "=IF(AND(CELL=STR,CELL=STR),(CELL/CELL)-CELL,NUM)",
+        "=MAX(-CELL,IF(CELL>CELL,-CELL,-(CELL*CELL)))",
+        "SHEET!CELL))*(IF((CELL*(NUM-CELL))>MAX(SHEET!CELL:CELL),INDEX(SHEET!CELL:CELL, MATCH(NUM999999999999E+NUM,SHEET!CELL:CELL)),INDEX(SHEET!CELL:CELL, MATCH((CELL*(NUM-CELL)), SHEET!CELL:CELL, NUM))\n+ ((CELL*(NUM-CELL)) - INDEX(SHEET!CELL:CELL, MATCH((CELL*(NUM-CELL)), SHEET!CELL:CELL, NUM))) *\n( INDEX(SHEET!CELL:CELL, MATCH((CELL*(NUM-CELL)), SHEET!CELL:CELL, NUM)+NUM) - INDEX(SHEET!CELL:CELL, MATCH((CELL*(NUM-CELL)), SHEET!CELL:CELL, NUM)) ) /\n( INDEX(SHEET!CELL:CELL, MATCH((CELL*(NUM-CELL)), SHEET!CELL:CELL, NUM)+NUM) - INDEX(SHEET!CELL:CELL, MATCH((CELL*(NUM-CELL)), SHEET!CELL:CELL, NUM)) )))",
+        "=IF(CELL>CELL,NUM,((CELL/NUM)*(CELL/CELL)^((LN(NUM-CELL)/LN(NUM))))+(NUM/(NUM*NUM)))",
+        "=IF(CELL>=NUM,MIN(CELL,CELL*(NUM+CELL)),MAX(CELL,CELL*(NUM+CELL)))",
+        "=MIN(NUM,IF(CELL>=NUM,CELL,CELL*(NUM-(CELL/NUM))))",
+        "=-IF(CELL=STR,(CELL+CELL+CELL+CELL)/(CELL*CELL),(CELL+CELL+CELL+CELL)/(CELL*CELL))",
+        "=(IF((CELL+NUM)>MAX(SHEET!CELL:CELL),INDEX(SHEET!CELL:CELL, MATCH(NUM999999999999E+NUM,SHEET!CELL:CELL)),INDEX(SHEET!CELL:CELL, MATCH((CELL+NUM), SHEET!CELL:CELL, NUM))\n+ ((CELL+NUM) - INDEX(SHEET!CELL:CELL, MATCH((CELL+NUM), SHEET!CELL:CELL, NUM))) *\n( INDEX(SHEET!CELL:CELL, MATCH((CELL+NUM), SHEET!CELL:CELL, NUM)+NUM) - INDEX(SHEET!CELL:CELL, MATCH((CELL+NUM), SHEET!CELL:CELL, NUM)) ) /\n( INDEX(SHEET!CELL:CELL, MATCH((CELL+NUM), SHEET!CELL:CELL, NUM)+NUM) - INDEX(SHEET!CELL:CELL, MATCH((CELL+NUM), SHEET!CELL:CELL, NUM)) ))\n\n-IF(CELL>MAX(SHEET!CELL:CELL),INDEX(SHEET!CELL:CELL, MATCH(NUM999999999999E+NUM,SHEET!CELL:CELL)),INDEX(SHEET!CELL:CELL, MATCH(CELL, SHEET!CELL:CELL, NUM))\n+ (CELL - INDEX(SHEET!CELL:CELL, MATCH(CELL, SHEET!CELL:CELL, NUM))) *\n( INDEX(SHEET!CELL:CELL, MATCH(CELL, SHEET!CELL:CELL, NUM)+NUM) - INDEX(SHEET!CELL:CELL, MATCH(CELL, SHEET!CELL:CELL, NUM)) ) /\n( INDEX(SHEET!CELL:CELL, MATCH(CELL, SHEET!CELL:CELL, NUM)+NUM) - INDEX(SHEET!CELL:CELL, MATCH(CELL, SHEET!CELL:CELL, NUM)) )))",
+        "=IF(CELL=STR,STR,IF(CELL=STR,IF(CELL>CELL,STR,STR),STR))",
+        "=IF(CELL=STR,NUM,IF(CELL>=NUM,CELL,NUM))",
+        "=IF(OR(CELL=STR,AND(CELL=STR,CELL=STR)),CELL/CELL,NUM)",
+        "=IF(CELL=STR,IF(AND(CELL=STR, CELL=STR),NUM,CELL/CELL),NUM)",
+        "=IF(CELL=STR,IF(CELL>=NUM,CELL,NUM),NUM)",
+        "=IF(CELL=STR,NUM%,NUM)",
+        "=IF(CELL>=NUM,MIN(NUM,CELL*(NUM+CELL)),MAX(CELL*(NUM+CELL),CELL))",
+        "=IF(CELL=STR,CELL*CELL,NUM)",
+        "=IF(CELL=STR,CELL/CELL,NUM)",
+        "=IF(CELL=STR,NUM,CELL/CELL)",
+        "=IF(CELL=STR,IF(CELL<CELL,(CELL-CELL)*CELL,NUM),IF(CELL<CELL,(CELL-CELL)*CELL,NUM))",
+        "SHEET!CELL,MOD(CELL,NUM)=NUM),STR,STR)",
+        "=IF(CELL<=CELL,SHEET!STR)",
+        "=IF(CELL=NUM,NUM,IF(AND(CELL>NUM,CELL=NUM),CELL,CELL*(NUM-CELL)^LOG(CELL/CELL,NUM)))",
+        "=IF(CELL=CELL,CELL,IF(NORM.INV(CELL,CELL,(CELL-CELL))<CELL,CELL,IF(NORM.INV(CELL,CELL,(CELL-CELL))>CELL,CELL,NORM.INV(CELL,CELL,(CELL-CELL)))))",
+        "=ROUNDDOWN(MAX(IF(CELL=CELL,CELL,IF(NORM.INV(CELL,CELL,(CELL-CELL))<CELL,CELL,IF(NORM.INV(CELL,CELL,(CELL-CELL))>CELL,CELL,NORM.INV(CELL,CELL,(CELL-CELL))))),CELL),NUM)",
+        "=ROUNDDOWN(IF(CELL=CELL,CELL,IF(NORM.INV(CELL,CELL,(CELL-CELL))<CELL,CELL,IF(NORM.INV(CELL,CELL,(CELL-CELL))>CELL,CELL,NORM.INV(CELL,CELL,(CELL-CELL))))),NUM)"
+      ],
+      "totalCount": 1553,
+      "status": "✅ Implemented"
+    },
+    {
+      "algorithm": "subtract",
+      "patterns": [
+        "=CELL-CELL",
+        "=CELL-CELL-CELL",
+        "=CELL*(CELL-CELL)",
+        "=(CELL-CELL)/NUM+CELL"
+      ],
+      "totalCount": 280,
+      "status": "✅ Implemented"
+    },
+    {
+      "algorithm": "ifError",
+      "patterns": [
+        "=IFERROR(CELL*(CELL/CELL),NUM)",
+        "=IFERROR(IRR(CELL:CELL),NUM)",
+        "=IFERROR(CELL/CELL,STR)",
+        "=IFERROR((CELL-CELL)/CELL,NUM)"
+      ],
+      "totalCount": 181,
+      "status": "✅ Implemented"
+    },
+    {
+      "algorithm": "arithmetic",
+      "patterns": [
+        "=NUM-CELL",
+        "=CELL+NUM",
+        "=CELL*(NUM-CELL)",
+        "=CELL/(NUM-CELL)",
+        "=CELL*(NUM+CELL)",
+        "=-CELL",
+        "=CELL/NUM",
+        "=(CELL*(NUM-CELL))",
+        "=CELL*(CELL+NUM)",
+        "=NUM/CELL",
+        "=NUM/NUM"
+      ],
+      "totalCount": 448,
+      "status": "✅ Implemented via basic operations"
+    },
+    {
+      "algorithm": "minRange",
+      "patterns": [
+        "=MIN(CELL,CELL)",
+        "=MIN(((CELL-(NUM/(NUM*NUM)))*CELL)/(CELL-(NUM/(NUM*NUM))),NUM)",
+        "=MIN(CELL,CELL,CELL)",
+        "=ROUNDDOWN(MIN(CELL:CELL)/(CELL+NUM),NUM)*(NUM+CELL)"
+      ],
+      "totalCount": 156,
+      "status": "🟡 Partial - Needs multi-arg support"
+    },
+    {
+      "algorithm": "indexMatch",
+      "patterns": [
+        "=INDEX(CELL:CELL,MATCH(CELL-CELL,CELL:CELL))"
+      ],
+      "totalCount": 78,
+      "status": "❌ Not Implemented"
+    },
+    {
+      "algorithm": "maxRange",
+      "patterns": [
+        "=IFERROR(MAX(CELL,CELL)+(CELL/CELL),MAX(CELL,CELL))",
+        "=MAX(CELL:CELL)*(NUM+CELL)",
+        "=MAX(CELL,CELL)",
+        "=MAX(-CELL,-(CELL*CELL))"
+      ],
+      "totalCount": 157,
+      "status": "🟡 Partial - Needs multi-arg support"
+    },
+    {
+      "algorithm": "log",
+      "patterns": [
+        "=(CELL/NUM)*(CELL/CELL)^((LN(NUM-CELL)/LN(NUM)))+(NUM/NUM)",
+        "=(CELL)*(CELL/CELL)^((LN(NUM+CELL)/LN(NUM)))",
+        "=CELL*(NUM+CELL)^(LOG(COLUMN()-COLUMN(CELL)+NUM,NUM))"
+      ],
+      "totalCount": 77,
+      "status": "✅ Implemented"
+    },
+    {
+      "algorithm": "composite",
+      "patterns": [
+        "=(CELL/(CELL*(NUM-CELL)))*(CELL/(CELL/(CELL*(NUM-CELL))))"
+      ],
+      "totalCount": 26,
+      "status": "✅ Implemented via basic operations"
+    },
+    {
+      "algorithm": "and",
+      "patterns": [
+        "=RAND()"
+      ],
+      "totalCount": 17,
+      "status": "❌ Not Implemented"
+    },
+    {
+      "algorithm": "rri",
+      "patterns": [
+        "=RRI(((CELL-CELL)/NUM),CELL,CELL)",
+        "=_xlfn.RRI(((CELL-CELL)/NUM),CELL,CELL)",
+        "=RRI(NUM,CELL,CELL)"
+      ],
+      "totalCount": 13,
+      "status": "✅ Implemented"
+    }
+  ]
+}
