@@ -10,9 +10,11 @@ class ValuationApp {
         this.currentView = 'dashboard';
         this.currentData = null;
         this.currentModelName = null;
+        this.currentGreeksData = null; // Store current Greeks data for micro AI
         this.autoRunningMonteCarlo = false; // Flag to track auto-runs
         this.pendingMonteCarloRun = null; // Store pending run parameters
         this.currentMonteCarloConfig = null; // Store Monte Carlo config from loaded model
+        this.aiModel = localStorage.getItem('aiModel') || 'claude-opus-4-1-20250805'; // Default AI model
         this.charts = {
             valuation: null,
             cashFlowTimeline: null,
@@ -37,13 +39,21 @@ class ValuationApp {
             utilization: null,
             technologyTransition: null,
             launchCadence: null,
-            bandwidthEconomics: null
+            bandwidthEconomics: null,
+            deltaHeatmap: null,
+            earthGreeks: null,
+            marsGreeks: null,
+            attribution: null
         };
+        // Cache for aiTips - keyed by chartId and data hash
+        this.aiTipCache = {};
         this.init();
     }
 
     async init() {
         this.setupEventListeners();
+        this.setupAttributionListeners();
+        this.initSettingsModal();
         this.loadScenarios();
         
         // Auto-load first model on startup
@@ -75,11 +85,21 @@ class ValuationApp {
         });
 
         // Settings modal
-        document.getElementById('settingsBtn').addEventListener('click', () => {
-            document.getElementById('settingsModal').classList.add('active');
-        });
-        document.getElementById('closeSettingsBtn').addEventListener('click', () => {
-            document.getElementById('settingsModal').classList.remove('active');
+        const settingsBtn = document.getElementById('settingsBtn');
+        if (settingsBtn) {
+            settingsBtn.addEventListener('click', () => {
+                const modal = document.getElementById('settingsModal');
+                if (modal) {
+                    modal.style.display = 'block';
+                    this.updateCurrentModelDisplay();
+                    this.loadMach33LibSettings();
+                    if (window.lucide) window.lucide.createIcons();
+                }
+            });
+        }
+        document.getElementById('closeSettingsBtn')?.addEventListener('click', () => {
+            const modal = document.getElementById('settingsModal');
+            if (modal) modal.style.display = 'none';
         });
 
         // Export
@@ -195,6 +215,11 @@ class ValuationApp {
             this.runCustomStressTest();
         });
 
+        // Greeks calculation button
+        document.getElementById('calculateGreeksBtn')?.addEventListener('click', () => {
+            this.calculateGreeks();
+        });
+
         // Monte Carlo simulation
         document.getElementById('runMonteCarloBtn').addEventListener('click', () => {
             this.runMonteCarloSimulation();
@@ -296,7 +321,8 @@ class ValuationApp {
                 
                 // Add active class to clicked tab and corresponding content
                 tab.classList.add('active');
-                document.getElementById(`helpTab-${tabName}`).classList.add('active');
+                const content = document.getElementById(`helpTab-${tabName}`);
+                if (content) content.classList.add('active');
                 
                 // Refresh icons
                 if (window.lucide) window.lucide.createIcons();
@@ -422,6 +448,16 @@ class ValuationApp {
         // Auto-run sensitivity analysis when switching to sensitivity view
         if (viewName === 'sensitivity') {
             this.autoRunSensitivityAnalysis();
+        }
+
+        // Auto-calculate Greeks when switching to greeks view
+        if (viewName === 'greeks') {
+            this.calculateGreeks();
+        }
+
+        // Load models for attribution when switching to attribution view
+        if (viewName === 'attribution') {
+            this.loadModelsForAttribution();
         }
 
         // Update Earth/Mars/Insights views if data is available
@@ -1146,7 +1182,14 @@ class ValuationApp {
             const result = await response.json();
             
             if (result.success) {
-                this.renderSensitivityChart(result.data, variable);
+                // API returns data directly as array, not nested in data.results
+                const sensitivityData = Array.isArray(result.data) ? result.data : result.data?.results || [];
+                if (sensitivityData.length > 0) {
+                    this.renderSensitivityChart(sensitivityData, variable);
+                } else {
+                    console.error('No sensitivity data returned');
+                    if (!skipButtonUpdate) alert('No sensitivity data returned');
+                }
             } else {
                 if (!skipButtonUpdate) alert('Error: ' + result.error);
             }
@@ -1164,12 +1207,18 @@ class ValuationApp {
 
     renderSensitivityChart(data, variable) {
         const ctx = document.getElementById('sensitivityChart');
-        if (!ctx) return;
+        if (!ctx) {
+            console.warn('Sensitivity chart canvas not found');
+            return;
+        }
         
         if (!data || data.length === 0) {
             console.error('No sensitivity data to render');
+            alert('No sensitivity data available');
             return;
         }
+        
+        console.log('Rendering sensitivity chart with', data.length, 'data points');
 
         // Sort data by variable value to ensure proper ordering
         const sortedData = [...data].sort((a, b) => a.value - b.value);
@@ -3127,6 +3176,8 @@ class ValuationApp {
     }
 
     async displayStressResults(baseInputs, stressInputs, stressData) {
+        console.log('📊 Displaying stress results:', { baseInputs, stressInputs, stressData });
+        
         // Calculate base case
         const baseResponse = await fetch('/api/calculate', {
             method: 'POST',
@@ -3134,10 +3185,26 @@ class ValuationApp {
             body: JSON.stringify(baseInputs)
         }).then(r => r.json());
 
-        if (!baseResponse.success) return;
+        console.log('📊 Base response:', baseResponse);
 
-        const baseValue = baseResponse.data.total.value; // Already in billions
-        const stressValue = stressData.total.value; // Already in billions
+        if (!baseResponse.success) {
+            console.error('Base calculation failed:', baseResponse.error);
+            alert('Failed to calculate base case: ' + (baseResponse.error || 'Unknown error'));
+            return;
+        }
+
+        // Get values from response (already in billions)
+        const baseValue = baseResponse.data?.total?.value || 0;
+        const stressValue = stressData?.total?.value || 0;
+        
+        console.log('📊 Values:', { baseValue, stressValue });
+        
+        if (!baseValue || baseValue === 0) {
+            console.error('Base value is zero or missing');
+            alert('Base calculation returned zero value. Please ensure a model is loaded.');
+            return;
+        }
+        
         const impact = ((stressValue - baseValue) / baseValue) * 100;
 
         // Format values correctly (already in billions)
@@ -3218,19 +3285,32 @@ class ValuationApp {
             this.charts.stress.destroy();
         }
 
-        // Values are already in billions, if >= 1000 convert, otherwise use as-is
-        const formatForChart = (value) => {
-            if (value >= 1000) return value / 1e9;
-            return value;
+        // Values are already in billions, use directly
+        // Format tooltip values
+        const formatTooltipValue = (value) => {
+            if (value >= 1000) {
+                return '$' + (value / 1000).toFixed(2) + 'T';
+            }
+            return '$' + value.toFixed(1) + 'B';
         };
+        
+        // Format Y-axis values
+        const formatYValue = (value) => {
+            if (value >= 1000) {
+                return '$' + (value / 1000).toFixed(1) + 'T';
+            }
+            return '$' + value.toFixed(0) + 'B';
+        };
+
+        console.log('📊 Creating stress chart:', { baseValue, stressValue });
 
         this.charts.stress = new Chart(ctx, {
             type: 'bar',
             data: {
                 labels: ['Base Case', 'Stress Scenario'],
                 datasets: [{
-                    label: 'Enterprise Value ($B)',
-                    data: [formatForChart(baseValue), formatForChart(stressValue)],
+                    label: 'Enterprise Value',
+                    data: [baseValue || 0, stressValue || 0],
                     backgroundColor: ['#0066cc', '#f59e0b']
                 }]
             },
@@ -3242,19 +3322,1032 @@ class ValuationApp {
                     tooltip: {
                         callbacks: {
                             label: function(context) {
-                                return `$${context.parsed.y.toFixed(1)}B`;
+                                return formatTooltipValue(context.parsed.y);
+                            }
+                        }
+                    },
+                    title: {
+                        display: true,
+                        text: 'Stress Test Comparison'
+                    }
+                },
+                scales: {
+                    y: {
+                        title: {
+                            display: true,
+                            text: 'Enterprise Value'
+                        },
+                        beginAtZero: true,
+                        ticks: {
+                            callback: function(value) {
+                                return formatYValue(value);
+                            }
+                        }
+                    }
+                }
+            }
+        });
+        
+        console.log('✅ Stress chart updated successfully');
+    }
+
+    // Financial Greeks
+    async calculateGreeks() {
+        const btn = document.getElementById('calculateGreeksBtn');
+        const originalText = btn ? btn.innerHTML : '';
+        
+        if (btn) {
+            btn.disabled = true;
+            btn.innerHTML = '<i data-lucide="loader"></i> Calculating...';
+            if (window.lucide) window.lucide.createIcons();
+        }
+
+        try {
+            const baseInputs = this.getInputs();
+            const modelId = this.currentModelId || null;
+            
+            const response = await fetch('/api/greeks', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    modelId: modelId,
+                    baseInputs: baseInputs
+                })
+            });
+
+            const result = await response.json();
+            
+            if (result.success) {
+                this.displayGreeks(result.data);
+            } else {
+                alert('Error calculating Greeks: ' + result.error);
+            }
+        } catch (error) {
+            console.error('Greeks calculation error:', error);
+            alert('Failed to calculate Greeks');
+        } finally {
+            if (btn) {
+                btn.disabled = false;
+                btn.innerHTML = originalText;
+                if (window.lucide) window.lucide.createIcons();
+            }
+        }
+    }
+
+    displayGreeks(data) {
+        const { greeks, summary, baseValues, method } = data;
+        
+        // Store data for micro AI
+        this.currentGreeksData = data;
+        
+        // Show dashboard
+        document.getElementById('greeksDashboard').style.display = 'block';
+        
+        // Update summary cards
+        const formatGreek = (value) => {
+            if (Math.abs(value) >= 1000) {
+                return `$${(value / 1000).toFixed(2)}T`;
+            }
+            return `$${value.toFixed(1)}B`;
+        };
+        
+        document.getElementById('totalDelta').textContent = formatGreek(summary.totalDelta);
+        document.getElementById('totalGamma').textContent = formatGreek(summary.totalGamma);
+        document.getElementById('totalVega').textContent = formatGreek(summary.totalVega);
+        document.getElementById('totalTheta').textContent = formatGreek(summary.totalTheta);
+        document.getElementById('totalRho').textContent = formatGreek(summary.totalRho);
+        
+        // Update tables
+        this.updateGreeksTable('earth', greeks.earth);
+        this.updateGreeksTable('mars', greeks.mars);
+        
+        // Update charts
+        this.updateDeltaHeatmap(greeks);
+        this.updateComponentGreeksCharts(greeks);
+        
+        // Log method used for debugging
+        if (method) {
+            console.log(`[Greeks Dashboard] Calculated using: ${method}`);
+            
+            // Update method indicator
+            const methodIndicator = document.getElementById('greeksMethodIndicator');
+            const methodDisplay = document.getElementById('greeksMethodDisplay');
+            if (methodIndicator && methodDisplay) {
+                const methodNames = {
+                    'mach33lib-finite-difference': 'Finite Difference',
+                    'mach33lib-central-difference': 'Central Difference',
+                    'mach33lib-monte-carlo': 'Monte Carlo'
+                };
+                methodDisplay.textContent = methodNames[method] || method;
+                methodIndicator.style.display = 'block';
+            }
+        }
+        
+        // Initialize AI explanation icons
+        if (window.lucide) window.lucide.createIcons();
+        
+        // Note: AI commentary is now triggered via icon click, not auto-generated
+    }
+
+    // Legacy function - kept for compatibility but AI is now triggered via icon
+    async generateGreeksCommentary(data) {
+        // AI commentary is now triggered via the icon click handler
+        // This function is kept for backward compatibility but does nothing
+        return;
+    }
+
+    // Standardized AI Explanation Handler - for individual Greeks
+    async showMicroAI(greekName, event) {
+        if (event) event.stopPropagation();
+        
+        const popup = document.getElementById(`microAI-${greekName}`);
+        const content = document.getElementById(`microAI-${greekName}-content`);
+        
+        if (!popup || !content) return;
+        
+        // Toggle popup visibility
+        const isVisible = popup.style.display !== 'none';
+        
+        // Close all other popups first
+        document.querySelectorAll('.ai-explanation-popup').forEach(p => {
+            p.style.display = 'none';
+        });
+        
+        if (isVisible) {
+            popup.style.display = 'none';
+            return;
+        }
+        
+        // Show popup
+        popup.style.display = 'block';
+        content.innerHTML = '<i data-lucide="loader" class="spinning"></i> Generating explanation...';
+        if (window.lucide) window.lucide.createIcons();
+        
+        // Get current Greeks data
+        const greeksData = this.currentGreeksData;
+        if (!greeksData || !greeksData.summary) {
+            content.innerHTML = '<p style="margin: 0; color: var(--text-secondary);">Please calculate Greeks first.</p>';
+            if (window.lucide) window.lucide.createIcons();
+            return;
+        }
+        
+        try {
+            const greekKey = `total${greekName.charAt(0).toUpperCase() + greekName.slice(1)}`;
+            const greekValue = greeksData.summary[greekKey] || 0;
+            
+            const response = await fetch('/api/ai/greeks/micro', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-AI-Model': this.getAIModel()
+                },
+                body: JSON.stringify({
+                    greek: greekName,
+                    value: greekValue,
+                    greeks: greeksData.greeks
+                })
+            });
+            
+            const result = await response.json();
+            
+            if (result.success && result.data.commentary) {
+                // Format commentary with paragraph breaks
+                const formattedCommentary = result.data.commentary
+                    .split('\n')
+                    .filter(line => line.trim().length > 0)
+                    .map(line => `<p style="margin: 0 0 var(--spacing-sm) 0;">${line.trim()}</p>`)
+                    .join('');
+                content.innerHTML = formattedCommentary || `<p style="margin: 0;">${result.data.commentary}</p>`;
+            } else {
+                content.innerHTML = '<p style="margin: 0; color: var(--text-secondary);">Unable to generate explanation.</p>';
+            }
+        } catch (error) {
+            console.error('Error generating micro AI:', error);
+            content.innerHTML = '<p style="margin: 0; color: var(--text-secondary);">Unable to generate explanation.</p>';
+        } finally {
+            if (window.lucide) window.lucide.createIcons();
+        }
+    }
+
+    // Standardized AI Explanation Handler - for dashboard sections (floating panel)
+    async showAIExplanation(sectionId, event) {
+        if (event) event.stopPropagation();
+        
+        const panel = document.getElementById(`aiExplanation-${sectionId}`);
+        const content = document.getElementById(`aiExplanation-${sectionId}-content`);
+        
+        if (!panel || !content) return;
+        
+        // Toggle panel visibility
+        const isVisible = panel.style.display !== 'none';
+        
+        // Close all other floating panels and popups first
+        document.querySelectorAll('.ai-explanation-floating-panel').forEach(p => {
+            p.style.display = 'none';
+        });
+        document.querySelectorAll('.ai-explanation-popup').forEach(p => {
+            p.style.display = 'none';
+        });
+        
+        // Remove backdrop if closing
+        const backdrop = document.getElementById('aiExplanationBackdrop');
+        if (isVisible) {
+            panel.style.display = 'none';
+            if (backdrop) backdrop.style.display = 'none';
+            return;
+        }
+        
+        // Show backdrop
+        if (!backdrop) {
+            const newBackdrop = document.createElement('div');
+            newBackdrop.id = 'aiExplanationBackdrop';
+            newBackdrop.className = 'ai-explanation-backdrop';
+            newBackdrop.onclick = () => this.closeFloatingAIExplanation(sectionId);
+            document.body.appendChild(newBackdrop);
+        }
+        if (backdrop) backdrop.style.display = 'block';
+        
+        // Show panel
+        panel.style.display = 'flex';
+        content.innerHTML = '<i data-lucide="loader" class="spinning"></i> Generating insights...';
+        if (window.lucide) window.lucide.createIcons();
+        
+        try {
+            let response;
+            
+            if (sectionId === 'greeksDashboard') {
+                // Use existing Greeks commentary endpoint
+                if (!this.currentGreeksData) {
+                    content.innerHTML = '<p style="margin: 0; color: var(--text-secondary);">Please calculate Greeks first.</p>';
+                    if (window.lucide) window.lucide.createIcons();
+                    return;
+                }
+                response = await fetch('/api/ai/greeks/commentary', {
+                    method: 'POST',
+                    headers: { 
+                        'Content-Type': 'application/json',
+                        'X-AI-Model': this.getAIModel()
+                    },
+                    body: JSON.stringify(this.currentGreeksData)
+                });
+            } else if (sectionId === 'attributionResults') {
+                // Use existing Attribution commentary endpoint
+                if (!this.currentAttributionData) {
+                    content.innerHTML = '<p style="margin: 0; color: var(--text-secondary);">Please calculate Attribution first.</p>';
+                    if (window.lucide) window.lucide.createIcons();
+                    return;
+                }
+                response = await fetch('/api/ai/attribution/commentary', {
+                    method: 'POST',
+                    headers: { 
+                        'Content-Type': 'application/json',
+                        'X-AI-Model': this.getAIModel()
+                    },
+                    body: JSON.stringify(this.currentAttributionData)
+                });
+            } else {
+                content.innerHTML = '<p style="margin: 0; color: var(--text-secondary);">AI explanation not available.</p>';
+                if (window.lucide) window.lucide.createIcons();
+                return;
+            }
+            
+            const result = await response.json();
+            
+            if (result.success && result.data.commentary) {
+                // Format commentary with paragraph breaks
+                const formattedCommentary = result.data.commentary
+                    .split('\n')
+                    .filter(line => line.trim().length > 0)
+                    .map(line => `<p style="margin: 0 0 var(--spacing-md) 0;">${line.trim()}</p>`)
+                    .join('');
+                content.innerHTML = formattedCommentary || `<p style="margin: 0;">${result.data.commentary}</p>`;
+            } else {
+                content.innerHTML = '<p style="margin: 0; color: var(--text-secondary);">Unable to generate insights.</p>';
+            }
+        } catch (error) {
+            console.error('Error generating AI explanation:', error);
+            content.innerHTML = '<p style="margin: 0; color: var(--text-secondary);">Unable to generate insights.</p>';
+        } finally {
+            if (window.lucide) window.lucide.createIcons();
+        }
+    }
+
+    // Close floating AI explanation panel
+    closeFloatingAIExplanation(sectionId) {
+        const panel = document.getElementById(`aiExplanation-${sectionId}`);
+        const backdrop = document.getElementById('aiExplanationBackdrop');
+        
+        if (panel) panel.style.display = 'none';
+        if (backdrop) backdrop.style.display = 'none';
+    }
+
+    // Standardized AI Explanation Handler - for charts
+    async showChartAIExplanation(chartId, event) {
+        if (event) event.stopPropagation();
+        
+        const popup = document.getElementById(`aiExplanation-${chartId}`);
+        const content = document.getElementById(`aiExplanation-${chartId}-content`);
+        
+        if (!popup || !content) return;
+        
+        // Toggle popup visibility
+        const isVisible = popup.style.display !== 'none';
+        
+        // Close all other popups first
+        document.querySelectorAll('.ai-explanation-popup').forEach(p => {
+            p.style.display = 'none';
+        });
+        
+        if (isVisible) {
+            popup.style.display = 'none';
+            return;
+        }
+        
+        // Show popup
+        popup.style.display = 'block';
+        content.innerHTML = '<i data-lucide="loader" class="spinning"></i> Generating chart insights...';
+        if (window.lucide) window.lucide.createIcons();
+        
+        // For now, provide a generic explanation
+        // This can be enhanced with specific chart analysis endpoints later
+        setTimeout(() => {
+            const chartExplanations = {
+                deltaHeatmap: 'The Delta Heatmap visualizes first-order sensitivity across all inputs. Darker colors indicate higher sensitivity. Focus risk management on inputs with the highest Delta values.',
+                earthGreeks: 'Earth Greeks show sensitivity metrics for Earth-based operations. Monitor Delta for revenue drivers, Gamma for convexity effects, and Vega for volatility exposure.',
+                marsGreeks: 'Mars Greeks show sensitivity metrics for Mars colonization. Theta indicates time decay, while Delta and Gamma reveal sensitivity to key Mars mission parameters.'
+            };
+            
+            const explanation = chartExplanations[chartId] || 'This chart visualizes key metrics. Use the data to identify trends and patterns.';
+            content.innerHTML = `<p style="margin: 0;">${explanation}</p>`;
+            if (window.lucide) window.lucide.createIcons();
+        }, 500);
+    }
+
+    updateGreeksTable(component, componentGreeks) {
+        const tbody = document.getElementById(`${component}GreeksTableBody`);
+        if (!tbody) return;
+        
+        tbody.innerHTML = '';
+        
+        // Get all inputs that have Delta values (these are the main inputs)
+        const inputs = Object.keys(componentGreeks.delta || {});
+        
+        inputs.forEach(input => {
+            const row = document.createElement('tr');
+            
+            const delta = componentGreeks.delta[input];
+            const gamma = componentGreeks.gamma[input];
+            const vega = componentGreeks.vega[input];
+            const theta = componentGreeks.theta?.[input];
+            const rho = componentGreeks.rho[input];
+            
+            row.innerHTML = `
+                <td><strong>${input}</strong></td>
+                <td>${delta ? `${delta.value.toFixed(1)} ${delta.unit}` : '--'}</td>
+                <td>${gamma ? `${gamma.value.toFixed(1)} ${gamma.unit}` : '--'}</td>
+                <td>${vega ? `${vega.value.toFixed(1)} ${vega.unit}` : '--'}</td>
+                ${component === 'mars' ? `<td>${theta ? `${theta.value.toFixed(1)} ${theta.unit}` : '--'}</td>` : ''}
+                <td>${rho ? `${rho.value.toFixed(1)} ${rho.unit}` : '--'}</td>
+            `;
+            
+            tbody.appendChild(row);
+        });
+        
+        // Add separate rows for Vega, Theta, Rho if they exist but aren't tied to specific inputs
+        const overallVega = componentGreeks.vega?.['Overall Volatility'];
+        const timeDecay = componentGreeks.theta?.['Time Decay'];
+        const discountRate = componentGreeks.rho?.['Discount Rate'];
+        
+        // Add Vega row if it exists and hasn't been added yet
+        if (overallVega && !inputs.includes('Overall Volatility')) {
+            const row = document.createElement('tr');
+            row.style.backgroundColor = 'rgba(0, 102, 204, 0.05)';
+            row.innerHTML = `
+                <td><strong>Overall Volatility</strong></td>
+                <td>--</td>
+                <td>--</td>
+                <td>${overallVega.value.toFixed(1)} ${overallVega.unit}</td>
+                ${component === 'mars' ? '<td>--</td>' : ''}
+                <td>--</td>
+            `;
+            tbody.appendChild(row);
+        }
+        
+        // Add Theta row (only for Mars)
+        if (component === 'mars' && timeDecay && !inputs.includes('Time Decay')) {
+            const row = document.createElement('tr');
+            row.style.backgroundColor = 'rgba(0, 102, 204, 0.05)';
+            row.innerHTML = `
+                <td><strong>Time Decay</strong></td>
+                <td>--</td>
+                <td>--</td>
+                <td>--</td>
+                <td>${timeDecay.value.toFixed(1)} ${timeDecay.unit}</td>
+                <td>--</td>
+            `;
+            tbody.appendChild(row);
+        }
+        
+        // Add Rho row if it exists and hasn't been added yet
+        if (discountRate && !inputs.includes('Discount Rate')) {
+            const row = document.createElement('tr');
+            row.style.backgroundColor = 'rgba(0, 102, 204, 0.05)';
+            row.innerHTML = `
+                <td><strong>Discount Rate</strong></td>
+                <td>--</td>
+                <td>--</td>
+                <td>--</td>
+                ${component === 'mars' ? '<td>--</td>' : ''}
+                <td>${discountRate.value.toFixed(1)} ${discountRate.unit}</td>
+            `;
+            tbody.appendChild(row);
+        }
+    }
+
+    updateDeltaHeatmap(greeks) {
+        const ctx = document.getElementById('deltaHeatmapChart');
+        if (!ctx) return;
+        
+        if (this.charts.deltaHeatmap) {
+            this.charts.deltaHeatmap.destroy();
+        }
+        
+        const inputs = Object.keys(greeks.total.delta);
+        const deltaValues = inputs.map(input => greeks.total.delta[input]?.value || 0);
+        
+        // Create heatmap using bar chart with color gradient
+        const maxAbs = Math.max(...deltaValues.map(Math.abs));
+        const colors = deltaValues.map(val => {
+            const intensity = Math.abs(val) / maxAbs;
+            const hue = val >= 0 ? 200 : 0; // Blue for positive, red for negative
+            return `hsla(${hue}, 70%, 50%, ${0.3 + intensity * 0.7})`;
+        });
+        
+        this.charts.deltaHeatmap = new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: inputs,
+                datasets: [{
+                    label: 'Delta ($B/unit)',
+                    data: deltaValues,
+                    backgroundColor: colors,
+                    borderColor: colors.map(c => c.replace('0.3', '1')),
+                    borderWidth: 1
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                const input = inputs[context.dataIndex];
+                                const unit = greeks.total.delta[input]?.unit || '';
+                                return `Delta: ${context.parsed.y.toFixed(1)} ${unit}`;
                             }
                         }
                     }
                 },
                 scales: {
                     y: {
-                        title: { display: true, text: 'Value ($B)' },
-                        beginAtZero: true
+                        title: {
+                            display: true,
+                            text: 'Delta ($B/unit)'
+                        },
+                        beginAtZero: false
+                    },
+                    x: {
+                        title: {
+                            display: true,
+                            text: 'Input Variable'
+                        }
                     }
                 }
             }
         });
+
+        // Generate aiTips for notable features (highest and lowest delta values)
+        const maxDeltaIndex = deltaValues.indexOf(Math.max(...deltaValues));
+        const minDeltaIndex = deltaValues.indexOf(Math.min(...deltaValues));
+        
+        // Tip for highest delta
+        if (maxDeltaIndex >= 0) {
+            const maxInput = inputs[maxDeltaIndex];
+            const maxValue = deltaValues[maxDeltaIndex];
+            // Store chart reference for positioning
+            this.charts['deltaHeatmap'] = this.charts.deltaHeatmap;
+            setTimeout(() => {
+                this.createAITip(
+                    'deltaHeatmapChart',
+                    'bar',
+                    deltaValues,
+                    `Highest Delta: ${maxInput}`,
+                    { index: maxDeltaIndex, value: maxValue }
+                );
+            }, 1000);
+        }
+        
+        // Tip for lowest delta (if different from highest)
+        if (minDeltaIndex >= 0 && minDeltaIndex !== maxDeltaIndex && Math.abs(deltaValues[minDeltaIndex]) > 10) {
+            const minInput = inputs[minDeltaIndex];
+            const minValue = deltaValues[minDeltaIndex];
+            setTimeout(() => {
+                this.createAITip(
+                    'deltaHeatmapChart',
+                    'bar',
+                    deltaValues,
+                    `Lowest Delta: ${minInput}`,
+                    { index: minDeltaIndex, value: minValue }
+                );
+            }, 1200); // Slightly delayed to avoid race condition
+        }
+    }
+
+    updateComponentGreeksCharts(greeks) {
+        // Earth Greeks chart
+        const earthCtx = document.getElementById('earthGreeksChart');
+        if (earthCtx) {
+            if (this.charts.earthGreeks) {
+                this.charts.earthGreeks.destroy();
+            }
+            
+            const inputs = Object.keys(greeks.earth.delta);
+            const deltas = inputs.map(i => greeks.earth.delta[i]?.value || 0);
+            const gammas = inputs.map(i => greeks.earth.gamma[i]?.value || 0);
+            const vegas = inputs.map(i => greeks.earth.vega[i]?.value || 0);
+            
+            // Add Vega "Overall Volatility" if it exists
+            const overallVega = greeks.earth.vega?.['Overall Volatility'];
+            const overallRho = greeks.earth.rho?.['Discount Rate'];
+            
+            // Add datasets for overall Greeks
+            const datasets = [
+                {
+                    label: 'Delta',
+                    data: deltas,
+                    backgroundColor: 'rgba(0, 102, 204, 0.6)'
+                },
+                {
+                    label: 'Gamma',
+                    data: gammas,
+                    backgroundColor: 'rgba(16, 185, 129, 0.6)'
+                }
+            ];
+            
+            // Add Vega bars (from inputs + overall)
+            if (overallVega) {
+                const vegaData = [...vegas];
+                // Add overall vega as a separate bar if not already in inputs
+                if (!inputs.includes('Overall Volatility')) {
+                    inputs.push('Overall Volatility');
+                    vegaData.push(overallVega.value);
+                    deltas.push(0);
+                    gammas.push(0);
+                }
+                datasets.push({
+                    label: 'Vega',
+                    data: vegaData,
+                    backgroundColor: 'rgba(245, 158, 11, 0.6)'
+                });
+            } else if (vegas.some(v => v !== 0)) {
+                datasets.push({
+                    label: 'Vega',
+                    data: vegas,
+                    backgroundColor: 'rgba(245, 158, 11, 0.6)'
+                });
+            }
+            
+            // Add Rho if it exists
+            if (overallRho) {
+                const rhoData = new Array(inputs.length).fill(0);
+                if (!inputs.includes('Discount Rate')) {
+                    inputs.push('Discount Rate');
+                    deltas.push(0);
+                    gammas.push(0);
+                    if (datasets.length > 2 && datasets[2].label === 'Vega') {
+                        datasets[2].data.push(0);
+                    }
+                    rhoData.push(overallRho.value);
+                } else {
+                    const rhoIndex = inputs.indexOf('Discount Rate');
+                    rhoData[rhoIndex] = overallRho.value;
+                }
+                datasets.push({
+                    label: 'Rho',
+                    data: rhoData,
+                    backgroundColor: 'rgba(139, 92, 246, 0.6)'
+                });
+            }
+            
+            this.charts.earthGreeks = new Chart(earthCtx, {
+                type: 'bar',
+                data: {
+                    labels: inputs,
+                    datasets: datasets
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { position: 'top' }
+                    },
+                    scales: {
+                        y: {
+                            title: { display: true, text: 'Greek Value ($B)' },
+                            beginAtZero: false
+                        }
+                    }
+                }
+            });
+        }
+        
+        // Mars Greeks chart
+        const marsCtx = document.getElementById('marsGreeksChart');
+        if (marsCtx) {
+            if (this.charts.marsGreeks) {
+                this.charts.marsGreeks.destroy();
+            }
+            
+            const inputs = Object.keys(greeks.mars.delta);
+            const deltas = inputs.map(i => greeks.mars.delta[i]?.value || 0);
+            const gammas = inputs.map(i => greeks.mars.gamma[i]?.value || 0);
+            const vegas = inputs.map(i => greeks.mars.vega[i]?.value || 0);
+            const thetas = inputs.map(i => greeks.mars.theta?.[i]?.value || 0);
+            
+            // Add overall Greeks if they exist
+            const overallVega = greeks.mars.vega?.['Overall Volatility'];
+            const timeDecay = greeks.mars.theta?.['Time Decay'];
+            const overallRho = greeks.mars.rho?.['Discount Rate'];
+            
+            // Build datasets array
+            const datasets = [
+                {
+                    label: 'Delta',
+                    data: deltas,
+                    backgroundColor: 'rgba(0, 102, 204, 0.6)'
+                },
+                {
+                    label: 'Gamma',
+                    data: gammas,
+                    backgroundColor: 'rgba(16, 185, 129, 0.6)'
+                }
+            ];
+            
+            // Add Vega (from inputs + overall)
+            if (overallVega) {
+                const vegaData = [...vegas];
+                if (!inputs.includes('Overall Volatility')) {
+                    inputs.push('Overall Volatility');
+                    deltas.push(0);
+                    gammas.push(0);
+                    thetas.push(0);
+                    vegaData.push(overallVega.value);
+                }
+                datasets.push({
+                    label: 'Vega',
+                    data: vegaData,
+                    backgroundColor: 'rgba(245, 158, 11, 0.6)'
+                });
+            } else if (vegas.some(v => v !== 0)) {
+                datasets.push({
+                    label: 'Vega',
+                    data: vegas,
+                    backgroundColor: 'rgba(245, 158, 11, 0.6)'
+                });
+            }
+            
+            // Add Theta (from inputs + overall)
+            if (timeDecay) {
+                const thetaData = [...thetas];
+                if (!inputs.includes('Time Decay')) {
+                    inputs.push('Time Decay');
+                    deltas.push(0);
+                    gammas.push(0);
+                    if (datasets.length > 2 && datasets[2].label === 'Vega') {
+                        datasets[2].data.push(0);
+                    }
+                    thetaData.push(timeDecay.value);
+                }
+                datasets.push({
+                    label: 'Theta',
+                    data: thetaData,
+                    backgroundColor: 'rgba(239, 68, 68, 0.6)'
+                });
+            } else if (thetas.some(t => t !== 0)) {
+                datasets.push({
+                    label: 'Theta',
+                    data: thetas,
+                    backgroundColor: 'rgba(239, 68, 68, 0.6)'
+                });
+            }
+            
+            // Add Rho if it exists
+            if (overallRho) {
+                const rhoData = new Array(inputs.length).fill(0);
+                if (!inputs.includes('Discount Rate')) {
+                    inputs.push('Discount Rate');
+                    deltas.push(0);
+                    gammas.push(0);
+                    if (datasets.length > 2 && datasets[2].label === 'Vega') {
+                        datasets[2].data.push(0);
+                    }
+                    if (datasets.length > 3 && datasets[3].label === 'Theta') {
+                        datasets[3].data.push(0);
+                    }
+                    rhoData.push(overallRho.value);
+                } else {
+                    const rhoIndex = inputs.indexOf('Discount Rate');
+                    rhoData[rhoIndex] = overallRho.value;
+                }
+                datasets.push({
+                    label: 'Rho',
+                    data: rhoData,
+                    backgroundColor: 'rgba(139, 92, 246, 0.6)'
+                });
+            }
+            
+            this.charts.marsGreeks = new Chart(marsCtx, {
+                type: 'bar',
+                data: {
+                    labels: inputs,
+                    datasets: datasets
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { position: 'top' }
+                    },
+                    scales: {
+                        y: {
+                            title: { display: true, text: 'Greek Value ($B)' },
+                            beginAtZero: false
+                        }
+                    }
+                }
+            });
+        }
+    }
+
+    // PnL Attribution - Event listener setup
+    setupAttributionListeners() {
+        document.getElementById('calculateAttributionBtn')?.addEventListener('click', () => {
+            this.calculateAttribution();
+        });
+    }
+
+    // AI Callout Toggle Functions
+    toggleAICallout(calloutId) {
+        const callout = document.getElementById(calloutId);
+        const collapsed = document.getElementById(calloutId + 'Collapsed');
+        
+        if (callout && collapsed) {
+            callout.classList.add('collapsed');
+            callout.style.display = 'none';
+            collapsed.style.display = 'flex';
+            
+            // Update icon
+            const toggleBtn = callout.querySelector('.ai-callout-toggle');
+            if (toggleBtn && window.lucide) {
+                window.lucide.createIcons();
+            }
+        }
+    }
+
+    expandAICallout(calloutId) {
+        const callout = document.getElementById(calloutId);
+        const collapsed = document.getElementById(calloutId + 'Collapsed');
+        
+        if (callout && collapsed) {
+            callout.classList.remove('collapsed');
+            callout.style.display = 'block';
+            collapsed.style.display = 'none';
+            
+            // Update icon
+            const toggleBtn = callout.querySelector('.ai-callout-toggle');
+            if (toggleBtn && window.lucide) {
+                window.lucide.createIcons();
+            }
+        }
+    }
+
+    async loadModelsForAttribution() {
+        try {
+            const response = await fetch('/api/models?limit=20&sortBy=createdAt&sortOrder=desc');
+            const result = await response.json();
+            
+            if (result.success) {
+                const baseSelect = document.getElementById('attributionBaseModel');
+                const compareSelect = document.getElementById('attributionCompareModel');
+                
+                if (baseSelect && compareSelect) {
+                    // Clear existing options (except first)
+                    baseSelect.innerHTML = '<option value="">Current Model</option>';
+                    compareSelect.innerHTML = '<option value="">Select model...</option>';
+                    
+                    result.data.forEach(model => {
+                        const option1 = document.createElement('option');
+                        option1.value = model._id;
+                        option1.textContent = model.name || `Model ${model._id}`;
+                        baseSelect.appendChild(option1);
+                        
+                        const option2 = document.createElement('option');
+                        option2.value = model._id;
+                        option2.textContent = model.name || `Model ${model._id}`;
+                        compareSelect.appendChild(option2);
+                    });
+                }
+            }
+        } catch (error) {
+            console.error('Error loading models for attribution:', error);
+        }
+    }
+
+    async calculateAttribution() {
+        const btn = document.getElementById('calculateAttributionBtn');
+        const originalText = btn ? btn.innerHTML : '';
+        
+        if (btn) {
+            btn.disabled = true;
+            btn.innerHTML = '<i data-lucide="loader"></i> Calculating...';
+            if (window.lucide) window.lucide.createIcons();
+        }
+
+        try {
+            const baseModelId = document.getElementById('attributionBaseModel')?.value;
+            const compareModelId = document.getElementById('attributionCompareModel')?.value;
+            
+            if (!compareModelId) {
+                alert('Please select a comparison model');
+                return;
+            }
+
+            // Get base inputs (current or selected model)
+            const baseInputs = baseModelId ? null : this.getInputs();
+            
+            const response = await fetch('/api/attribution', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    baseModelId: baseModelId || null,
+                    compareModelId: compareModelId,
+                    baseInputs: baseInputs
+                })
+            });
+
+            const result = await response.json();
+            
+            if (result.success) {
+                this.displayAttribution(result.data);
+            } else {
+                alert('Error calculating attribution: ' + result.error);
+            }
+        } catch (error) {
+            console.error('Attribution calculation error:', error);
+            alert('Failed to calculate attribution');
+        } finally {
+            if (btn) {
+                btn.disabled = false;
+                btn.innerHTML = originalText;
+                if (window.lucide) window.lucide.createIcons();
+            }
+        }
+    }
+
+    displayAttribution(data) {
+        const { attribution, totalChange, baseValue, compareValue } = data;
+        
+        // Store data for AI explanation
+        this.currentAttributionData = { attribution, totalChange, baseValue, compareValue };
+        
+        // Show results
+        document.getElementById('attributionResults').style.display = 'block';
+        
+        // Format values
+        const formatValue = (value) => {
+            if (Math.abs(value) >= 1000) {
+                return `$${(value / 1000).toFixed(2)}T`;
+            }
+            return `$${value.toFixed(1)}B`;
+        };
+        
+        // Update summary cards
+        document.getElementById('attributionTotalChange').textContent = formatValue(totalChange);
+        document.getElementById('attributionDeltaPnL').textContent = formatValue(attribution.deltaPnL || 0);
+        document.getElementById('attributionGammaPnL').textContent = formatValue(attribution.gammaPnL || 0);
+        document.getElementById('attributionVegaPnL').textContent = formatValue(attribution.vegaPnL || 0);
+        document.getElementById('attributionThetaPnL').textContent = formatValue(attribution.thetaPnL || 0);
+        document.getElementById('attributionRhoPnL').textContent = formatValue(attribution.rhoPnL || 0);
+        
+        // Update chart
+        this.updateAttributionChart(attribution, totalChange);
+        
+        // Update table
+        this.updateAttributionTable(attribution, totalChange);
+        
+        // Initialize AI explanation icons
+        if (window.lucide) window.lucide.createIcons();
+        
+        // Note: AI commentary is now triggered via icon click, not auto-generated
+    }
+
+    // Legacy function - kept for compatibility but AI is now triggered via icon
+    async generateAttributionCommentary(data) {
+        // AI commentary is now triggered via the icon click handler
+        // This function is kept for backward compatibility but does nothing
+        return;
+    }
+
+    updateAttributionChart(attribution, totalChange) {
+        const ctx = document.getElementById('attributionChart');
+        if (!ctx) return;
+        
+        if (this.charts.attribution) {
+            this.charts.attribution.destroy();
+        }
+        
+        const categories = ['Delta', 'Gamma', 'Vega', 'Theta', 'Rho'];
+        const values = [
+            attribution.deltaPnL || 0,
+            attribution.gammaPnL || 0,
+            attribution.vegaPnL || 0,
+            attribution.thetaPnL || 0,
+            attribution.rhoPnL || 0
+        ];
+        
+        // Color positive green, negative red
+        const colors = values.map(v => v >= 0 ? 'rgba(16, 185, 129, 0.6)' : 'rgba(239, 68, 68, 0.6)');
+        
+        this.charts.attribution = new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: categories,
+                datasets: [{
+                    label: 'PnL Attribution ($B)',
+                    data: values,
+                    backgroundColor: colors,
+                    borderColor: colors.map(c => c.replace('0.6', '1')),
+                    borderWidth: 1
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                const value = context.parsed.y;
+                                const pct = totalChange !== 0 ? ((value / totalChange) * 100).toFixed(1) : 0;
+                                return `${value >= 0 ? '+' : ''}${value.toFixed(1)}B (${pct >= 0 ? '+' : ''}${pct}%)`;
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    y: {
+                        title: {
+                            display: true,
+                            text: 'PnL Contribution ($B)'
+                        },
+                        beginAtZero: false
+                    }
+                }
+            }
+        });
+    }
+
+    updateAttributionTable(attribution, totalChange) {
+        const tbody = document.getElementById('attributionTableBody');
+        if (!tbody) return;
+        
+        tbody.innerHTML = '';
+        
+        if (attribution.details && attribution.details.length > 0) {
+            attribution.details.forEach(detail => {
+                const row = document.createElement('tr');
+                const pct = totalChange !== 0 ? ((detail.totalContribution / totalChange) * 100).toFixed(1) : 0;
+                
+                row.innerHTML = `
+                    <td><strong>${detail.input}</strong></td>
+                    <td>${detail.change || '--'}</td>
+                    <td>${detail.deltaPnL ? detail.deltaPnL.toFixed(1) : '--'}</td>
+                    <td>${detail.gammaPnL ? detail.gammaPnL.toFixed(1) : '--'}</td>
+                    <td>${detail.vegaPnL ? detail.vegaPnL.toFixed(1) : '--'}</td>
+                    <td><strong>${detail.totalContribution.toFixed(1)}</strong></td>
+                    <td>${pct >= 0 ? '+' : ''}${pct}%</td>
+                `;
+                
+                tbody.appendChild(row);
+            });
+        }
     }
 
     // Helper calculation methods (matching backend logic)
@@ -4584,9 +5677,9 @@ class ValuationApp {
             '2040-earth-mars': { bg: 'rgba(239, 68, 68, 0.6)', border: '#ef4444', label: '2040 EV (Earth & Mars)' }
         };
 
-        // Find common x-axis range
-        let minX = Infinity;
-        let maxX = -Infinity;
+        // Find common x-axis range - show full range from 0 to 30T to see both curves
+        let minX = 0;
+        let maxX = 30;
         let hasValidData = false;
         
         Object.values(scenarioResults).forEach((result, idx) => {
@@ -4596,13 +5689,15 @@ class ValuationApp {
             }
             const dist = result.statistics.distribution;
             if (dist.min !== undefined && dist.max !== undefined) {
-                minX = Math.min(minX, dist.min);
-                maxX = Math.max(maxX, dist.max);
                 hasValidData = true;
             }
         });
 
-        if (!hasValidData || minX === Infinity || maxX === -Infinity) {
+        // Use full range 0-30T to show both distributions properly
+        minX = 0;
+        maxX = 30;
+
+        if (!hasValidData) {
             console.error('❌ Invalid data range:', { minX, maxX, hasValidData });
             alert('Invalid data range. Please check the simulation results.');
             return;
@@ -4638,31 +5733,49 @@ class ValuationApp {
             // Histogram is already in probability density percentage from API
             const probabilityDensity = dist.histogram;
 
-            // Map to common x-axis bins
+            // Map to common x-axis bins - use interpolation for smoother curves
             const mappedHistogram = new Array(bins).fill(0);
             dist.binCenters.forEach((center, idx) => {
-                const binIndex = Math.min(Math.floor((center - minX) / binSize), bins - 1);
-                if (binIndex >= 0 && binIndex < bins) {
-                    mappedHistogram[binIndex] += probabilityDensity[idx];
+                // Find which bin(s) this center falls into
+                const binIndex = (center - minX) / binSize;
+                const lowerBin = Math.floor(binIndex);
+                const upperBin = Math.ceil(binIndex);
+                const fraction = binIndex - lowerBin;
+                
+                // Distribute value across bins for smoother interpolation
+                if (lowerBin >= 0 && lowerBin < bins) {
+                    mappedHistogram[lowerBin] += probabilityDensity[idx] * (1 - fraction);
+                }
+                if (upperBin >= 0 && upperBin < bins && upperBin !== lowerBin) {
+                    mappedHistogram[upperBin] += probabilityDensity[idx] * fraction;
                 }
             });
 
-            console.log(`✅ Added dataset for ${scenario}:`, {
-                dataPoints: mappedHistogram.length,
-                maxValue: Math.max(...mappedHistogram),
-                nonZeroBins: mappedHistogram.filter(v => v > 0).length
-            });
 
-            datasets.push({
-                label: color.label,
-                data: mappedHistogram,
-                backgroundColor: color.bg,
-                borderColor: color.border,
-                borderWidth: 2,
-                fill: true,
-                tension: 0.4, // Smooth curve
-                pointRadius: 0
-            });
+            // Only add if there's actual data
+            const maxValue = Math.max(...mappedHistogram);
+            if (maxValue > 0) {
+                datasets.push({
+                    label: color.label,
+                    data: mappedHistogram,
+                    backgroundColor: color.bg,
+                    borderColor: color.border,
+                    borderWidth: 2,
+                    fill: true,
+                    tension: 0.4, // Smooth curve
+                    pointRadius: 0,
+                    yAxisID: 'y' // Use same y-axis
+                });
+                
+                console.log(`✅ Added dataset for ${scenario}:`, {
+                    label: color.label,
+                    maxValue: maxValue,
+                    nonZeroBins: mappedHistogram.filter(v => v > 0).length,
+                    color: color.border
+                });
+            } else {
+                console.warn(`⚠️ Skipping ${scenario}: no data points above zero`);
+            }
         });
 
         if (datasets.length === 0) {
@@ -4706,12 +5819,30 @@ class ValuationApp {
                                 display: true,
                                 text: 'Probability Density (%)'
                             },
-                            beginAtZero: true
+                            beginAtZero: true,
+                            max: 20,
+                            ticks: {
+                                stepSize: 5,
+                                callback: function(value) {
+                                    return value + '%';
+                                }
+                            },
+                            grid: {
+                                color: 'rgba(255, 255, 255, 0.1)'
+                            }
                         },
                         x: {
                             title: {
                                 display: true,
                                 text: 'Enterprise Value ($T)'
+                            },
+                            min: 0,
+                            max: 30, // Show 0-30T range to see full 2040 tail
+                            ticks: {
+                                stepSize: 5,
+                                callback: function(value) {
+                                    return '$' + value.toFixed(1) + 'T';
+                                }
                             }
                         }
                     }
@@ -5742,6 +6873,707 @@ class ValuationApp {
             });
         } catch (error) {
             console.error('Bandwidth economics chart error:', error);
+        }
+    }
+
+    // Initialize Settings Modal
+    initSettingsModal() {
+        // Settings tab switching
+        document.querySelectorAll('#settingsModal .help-tabs button[data-tab]').forEach(tab => {
+            tab.addEventListener('click', () => {
+                const tabName = tab.dataset.tab;
+                
+                // Update active tab
+                tab.closest('.help-tabs').querySelectorAll('.help-tab').forEach(t => t.classList.remove('active'));
+                tab.classList.add('active');
+                
+                // Update active content
+                document.querySelectorAll('#settingsModal .help-tab-content').forEach(content => {
+                    content.classList.remove('active');
+                });
+                const content = document.getElementById(`settingsTab-${tabName}`);
+                if (content) content.classList.add('active');
+            });
+        });
+        
+        // Load current AI model setting
+        const modelSelect = document.getElementById('aiModelSelect');
+        if (modelSelect) {
+            modelSelect.value = this.aiModel;
+            this.updateCurrentModelDisplay();
+        }
+        
+        // Mach33Lib dropdown change handler - update display immediately
+        const greeksLibrarySelect = document.getElementById('greeksLibrarySelect');
+        if (greeksLibrarySelect) {
+            greeksLibrarySelect.addEventListener('change', () => {
+                this.updateMach33LibDisplay();
+            });
+        }
+        
+        // Load Mach33Lib settings when modal opens
+        this.loadMach33LibSettings();
+    }
+
+    // Update current model display
+    updateCurrentModelDisplay() {
+        const currentDisplay = document.getElementById('currentModelDisplay');
+        if (currentDisplay) {
+            const modelNames = {
+                'claude-opus-4-1-20250805': 'Claude Opus 4.1',
+                'claude-3-opus-20240229': 'Claude 3 Opus',
+                'claude-3-5-sonnet-20241022': 'Claude 3.5 Sonnet',
+                'claude-3-5-haiku-20241022': 'Claude 3.5 Haiku',
+                'claude-3-sonnet-20240229': 'Claude 3 Sonnet',
+                'openai:gpt-4o': 'GPT-4o',
+                'openai:gpt-4-turbo': 'GPT-4 Turbo',
+                'openai:gpt-4': 'GPT-4',
+                'openai:gpt-3.5-turbo': 'GPT-3.5 Turbo',
+                'grok:grok-2': 'Grok-2',
+                'grok:grok-beta': 'Grok Beta'
+            };
+            currentDisplay.textContent = modelNames[this.aiModel] || this.aiModel;
+        }
+    }
+
+    // Save AI Model Settings
+    saveAIModelSettings() {
+        const modelSelect = document.getElementById('aiModelSelect');
+        if (modelSelect) {
+            this.aiModel = modelSelect.value;
+            localStorage.setItem('aiModel', this.aiModel);
+            this.updateCurrentModelDisplay();
+            
+            // Show success message
+            const btn = event.target;
+            const originalText = btn.innerHTML;
+            btn.innerHTML = '<i data-lucide="check"></i> Saved!';
+            btn.disabled = true;
+            if (window.lucide) window.lucide.createIcons();
+            
+            setTimeout(() => {
+                btn.innerHTML = originalText;
+                btn.disabled = false;
+                if (window.lucide) window.lucide.createIcons();
+            }, 2000);
+        }
+    }
+
+    // Update Mach33Lib display (helper function)
+    updateMach33LibDisplay() {
+        const librarySelect = document.getElementById('greeksLibrarySelect');
+        const currentDisplay = document.getElementById('currentLibraryDisplay');
+        
+        if (librarySelect && currentDisplay) {
+            const libraryNames = {
+                'mach33lib-finite-difference': 'Finite Difference',
+                'mach33lib-central-difference': 'Central Difference',
+                'mach33lib-monte-carlo': 'Monte Carlo Based',
+                'custom': 'Custom Library'
+            };
+            const selectedValue = librarySelect.value;
+            currentDisplay.textContent = libraryNames[selectedValue] || 'Finite Difference';
+        }
+    }
+
+    // Load Mach33Lib settings
+    async loadMach33LibSettings() {
+        try {
+            const response = await fetch('/api/settings/mach33lib');
+            if (!response.ok) {
+                console.warn('Mach33Lib settings endpoint not available, using defaults');
+                this.updateMach33LibDisplay(); // Update with defaults
+                return;
+            }
+            const result = await response.json();
+            if (result.success && result.settings) {
+                const settings = result.settings;
+                
+                // Update UI
+                const librarySelect = document.getElementById('greeksLibrarySelect');
+                if (librarySelect) {
+                    librarySelect.value = settings.library || 'mach33lib-finite-difference';
+                }
+                
+                const bumpPercentage = document.getElementById('bumpPercentage');
+                const bumpAbsolute = document.getElementById('bumpAbsolute');
+                const bumpTime = document.getElementById('bumpTime');
+                const bumpVolatility = document.getElementById('bumpVolatility');
+                const bumpRate = document.getElementById('bumpRate');
+                
+                if (bumpPercentage) bumpPercentage.value = settings.bumpSizes?.percentage || 0.01;
+                if (bumpAbsolute) bumpAbsolute.value = settings.bumpSizes?.absolute || 1;
+                if (bumpTime) bumpTime.value = settings.bumpSizes?.time || 1;
+                if (bumpVolatility) bumpVolatility.value = settings.bumpSizes?.volatility || 0.01;
+                if (bumpRate) bumpRate.value = settings.bumpSizes?.rate || 0.001;
+                
+                // Update display
+                this.updateMach33LibDisplay();
+            }
+        } catch (error) {
+            console.error('Error loading Mach33Lib settings:', error);
+            // Update with defaults even on error
+            this.updateMach33LibDisplay();
+        }
+    }
+
+    // Save Mach33Lib settings (CREATE/UPDATE)
+    async saveMach33LibSettings(event) {
+        try {
+            const library = document.getElementById('greeksLibrarySelect').value;
+            const bumpPercentage = parseFloat(document.getElementById('bumpPercentage').value);
+            const bumpAbsolute = parseFloat(document.getElementById('bumpAbsolute').value);
+            const bumpTime = parseFloat(document.getElementById('bumpTime').value);
+            const bumpVolatility = parseFloat(document.getElementById('bumpVolatility').value);
+            const bumpRate = parseFloat(document.getElementById('bumpRate').value);
+            
+            const response = await fetch('/api/settings/mach33lib', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    library,
+                    bumpPercentage,
+                    bumpAbsolute,
+                    bumpTime,
+                    bumpVolatility,
+                    bumpRate
+                })
+            });
+            
+            const result = await response.json();
+            if (result.success) {
+                // Show success message - find button by ID or use event target
+                const btn = event?.target || document.getElementById('saveMach33LibBtn');
+                if (btn) {
+                    const originalText = btn.innerHTML;
+                    btn.innerHTML = '<i data-lucide="check"></i> Saved!';
+                    btn.disabled = true;
+                    if (window.lucide) window.lucide.createIcons();
+                    
+                    setTimeout(() => {
+                        btn.innerHTML = originalText;
+                        btn.disabled = false;
+                        if (window.lucide) window.lucide.createIcons();
+                    }, 2000);
+                }
+                
+                // Update display
+                this.updateMach33LibDisplay();
+                
+                // Show notification that Greeks need to be recalculated
+                const greeksDashboard = document.getElementById('greeksDashboard');
+                if (greeksDashboard && greeksDashboard.style.display !== 'none') {
+                    // Dashboard is visible - show notification
+                    const notification = document.createElement('div');
+                    notification.style.cssText = 'position: fixed; top: 20px; right: 20px; background: #f59e0b; color: white; padding: 12px 20px; border-radius: 4px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); z-index: 10000; font-size: 14px; max-width: 300px;';
+                    notification.innerHTML = '<strong>⚠️ Settings Changed</strong><br>Click "Calculate Greeks" to see updated values';
+                    document.body.appendChild(notification);
+                    
+                    setTimeout(() => {
+                        notification.style.opacity = '0';
+                        notification.style.transition = 'opacity 0.3s';
+                        setTimeout(() => notification.remove(), 300);
+                    }, 5000);
+                }
+            } else {
+                alert('Failed to save settings: ' + (result.error || 'Unknown error'));
+            }
+        } catch (error) {
+            console.error('Error saving Mach33Lib settings:', error);
+            alert('Failed to save settings: ' + error.message);
+        }
+    }
+
+    // Reset Mach33Lib settings to defaults (DELETE)
+    async resetMach33LibSettings(event) {
+        if (!confirm('Reset Mach33Lib settings to default values?')) {
+            return;
+        }
+        
+        try {
+            const response = await fetch('/api/settings/mach33lib', {
+                method: 'DELETE'
+            });
+            
+            const result = await response.json();
+            if (result.success) {
+                // Reload settings to update UI
+                await this.loadMach33LibSettings();
+                
+                // Show success message - find button by ID or use event target
+                const btn = event?.target || document.getElementById('resetMach33LibBtn');
+                if (btn) {
+                    const originalText = btn.innerHTML;
+                    btn.innerHTML = '<i data-lucide="check"></i> Reset!';
+                    btn.disabled = true;
+                    if (window.lucide) window.lucide.createIcons();
+                    
+                    setTimeout(() => {
+                        btn.innerHTML = originalText;
+                        btn.disabled = false;
+                        if (window.lucide) window.lucide.createIcons();
+                    }, 2000);
+                }
+            } else {
+                alert('Failed to reset settings: ' + (result.error || 'Unknown error'));
+            }
+        } catch (error) {
+            console.error('Error resetting Mach33Lib settings:', error);
+            alert('Failed to reset settings: ' + error.message);
+        }
+    }
+
+    // Get AI Model for API calls
+    getAIModel() {
+        return this.aiModel || 'claude-opus-4-1-20250805';
+    }
+
+    // Toggle Info Panel (floating panel)
+    toggleInfoPanel(panelId) {
+        const panel = document.getElementById(`infoPanel-${panelId}`);
+        if (!panel) return;
+        
+        // Find the button that triggered this
+        const button = event?.target?.closest('.info-icon-button') || 
+                      event?.target?.parentElement?.closest('.info-icon-button');
+        
+        const isVisible = panel.style.display !== 'none';
+        
+        // Close all floating panels and popups first
+        document.querySelectorAll('.ai-explanation-floating-panel').forEach(p => {
+            p.style.display = 'none';
+        });
+        document.querySelectorAll('.ai-explanation-popup').forEach(p => {
+            p.style.display = 'none';
+        });
+        
+        // Remove backdrop if closing
+        const backdrop = document.getElementById('aiExplanationBackdrop');
+        if (isVisible) {
+            panel.style.display = 'none';
+            if (backdrop) backdrop.style.display = 'none';
+            if (button) button.classList.remove('active');
+            return;
+        }
+        
+        // Show backdrop
+        if (!backdrop) {
+            const newBackdrop = document.createElement('div');
+            newBackdrop.id = 'aiExplanationBackdrop';
+            newBackdrop.className = 'ai-explanation-backdrop';
+            newBackdrop.onclick = () => this.closeInfoPanel(panelId);
+            document.body.appendChild(newBackdrop);
+        }
+        if (backdrop) backdrop.style.display = 'block';
+        
+        // Show panel
+        panel.style.display = 'flex';
+        if (button) button.classList.add('active');
+        
+        // Update icons
+        if (window.lucide) window.lucide.createIcons();
+    }
+
+    // Close Info Panel
+    closeInfoPanel(panelId) {
+        const panel = document.getElementById(`infoPanel-${panelId}`);
+        const backdrop = document.getElementById('aiExplanationBackdrop');
+        const button = document.querySelector(`[onclick*="toggleInfoPanel('${panelId}')"]`);
+        
+        if (panel) panel.style.display = 'none';
+        if (backdrop) backdrop.style.display = 'none';
+        if (button) button.classList.remove('active');
+        
+        if (window.lucide) window.lucide.createIcons();
+    }
+
+    // Generate data hash for caching aiTips
+    generateDataHash(data) {
+        const str = JSON.stringify(data);
+        let hash = 0;
+        for (let i = 0; i < str.length; i++) {
+            const char = str.charCodeAt(i);
+            hash = ((hash << 5) - hash) + char;
+            hash = hash & hash; // Convert to 32bit integer
+        }
+        return hash.toString();
+    }
+
+    // Generate aiTip for a chart feature
+    async generateAITip(chartId, chartType, chartData, feature, position) {
+        // Check cache first
+        const dataHash = this.generateDataHash(chartData);
+        const cacheKey = `${chartId}_${feature}_${dataHash}`;
+        
+        if (this.aiTipCache[cacheKey]) {
+            return this.aiTipCache[cacheKey];
+        }
+
+        try {
+            const response = await fetch('/api/ai/chart-tip', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-AI-Model': this.getAIModel()
+                },
+                body: JSON.stringify({
+                    chartId,
+                    chartType,
+                    chartData,
+                    feature,
+                    position
+                })
+            });
+
+            const result = await response.json();
+            if (result.success && result.data) {
+                // Cache the tip
+                this.aiTipCache[cacheKey] = result.data;
+                return result.data;
+            }
+        } catch (error) {
+            console.error('Error generating aiTip:', error);
+        }
+
+        // Fallback tip
+        return {
+            tip: 'This chart feature shows important trends in the valuation model.',
+            chartId,
+            feature,
+            position
+        };
+    }
+
+    // Create and position aiTip overlay on chart
+    async createAITip(chartId, chartType, chartData, feature, position = null, pointerDirection = null) {
+        const chartContainer = document.querySelector(`#${chartId}`)?.closest('.chart-container, .chart-container-half');
+        if (!chartContainer) return;
+
+        // Remove existing tip and arrow for this feature
+        const existingTip = chartContainer.querySelector(`.ai-tip[data-feature="${feature}"]`);
+        if (existingTip) {
+            const arrowId = existingTip.getAttribute('data-arrow-svg');
+            if (arrowId) {
+                const arrow = document.getElementById(arrowId) || chartContainer.querySelector(`svg[data-tip="${feature}"]`);
+                if (arrow) arrow.remove();
+            }
+            existingTip.remove();
+        }
+
+        // Generate tip
+        const tipData = await this.generateAITip(chartId, chartType, chartData, feature, position);
+
+        // Clean up tip content - aggressively remove all labels and formatting
+        let cleanTip = tipData.tip || '';
+        
+        // Remove all label patterns (Context, Insight, Analysis, Note, etc.)
+        cleanTip = cleanTip.replace(/(Context|Insight|Analysis|Note|Summary|Explanation):\s*/gi, '');
+        
+        // Remove any markdown-style formatting
+        cleanTip = cleanTip.replace(/\*\*/g, '');
+        cleanTip = cleanTip.replace(/\*/g, '');
+        
+        // Split by newlines and take first meaningful line
+        const lines = cleanTip.split(/\n+/).map(l => l.trim()).filter(l => l.length > 0);
+        if (lines.length > 0) {
+            cleanTip = lines[0];
+        }
+        
+        // Remove any remaining label patterns that might be in the middle
+        cleanTip = cleanTip.replace(/^(Context|Insight|Analysis|Note|Summary|Explanation):\s*/gi, '');
+        
+        // Clean up extra whitespace
+        cleanTip = cleanTip.replace(/\s+/g, ' ').trim();
+        
+        // Limit to one sentence (take first sentence only)
+        const sentences = cleanTip.split(/[.!?]+/).filter(s => s.trim().length > 10);
+        if (sentences.length > 0) {
+            cleanTip = sentences[0].trim();
+            if (!cleanTip.match(/[.!?]$/)) {
+                cleanTip += '.';
+            }
+        }
+        
+        // If still too long, truncate
+        if (cleanTip.length > 150) {
+            cleanTip = cleanTip.substring(0, 147) + '...';
+        }
+
+        // Create tip element with AI icon
+        const tip = document.createElement('div');
+        tip.setAttribute('data-feature', feature);
+        tip.setAttribute('data-chart-id', chartId);
+        tip.innerHTML = `
+            <i data-lucide="sparkles" class="ai-tip-icon"></i>
+            <div class="ai-tip-content">${cleanTip}</div>
+        `;
+
+        // Smart positioning: find the chart element and position tip relative to it
+        const canvas = document.getElementById(chartId);
+        // Try different chart key formats
+        let chart = this.charts[chartId];
+        if (!chart) {
+            const chartKey = chartId.replace('Chart', '').replace('chart', '');
+            chart = this.charts[chartKey] || this.charts[chartKey.toLowerCase()];
+        }
+        
+        if (canvas && chart) {
+            const containerRect = chartContainer.getBoundingClientRect();
+            const canvasRect = canvas.getBoundingClientRect();
+            
+            // Try to find the element position using Chart.js
+            // For bar charts, find the bar with the highest value
+            let elementX = null;
+            let elementY = null;
+            let pointerDirection = 'right'; // Default: point right (tip on left)
+            
+            try {
+                if (chartType === 'bar' && chart.data && chart.data.datasets && chart.data.datasets[0]) {
+                    // Find the index - use position.index if provided, otherwise search labels
+                    const labels = chart.data.labels || [];
+                    let featureIndex = -1;
+                    
+                    if (position && typeof position === 'object' && position.index !== undefined) {
+                        featureIndex = position.index;
+                    } else {
+                        featureIndex = labels.findIndex(label => 
+                            feature.toLowerCase().includes(label.toLowerCase()) || 
+                            label.toLowerCase().includes(feature.toLowerCase().split(':')[0].trim())
+                        );
+                    }
+                    
+                    if (featureIndex >= 0 && featureIndex < labels.length) {
+                        // Get the bar element position using Chart.js
+                        const meta = chart.getDatasetMeta(0);
+                        if (meta && meta.data[featureIndex]) {
+                            const barElement = meta.data[featureIndex];
+                            elementX = barElement.x;
+                            elementY = barElement.y;
+                            
+                            // Position tip CLOSE to bar but NOT overlapping - to the LEFT of bars
+                            const tipWidth = 180;
+                            const tipHeight = 60;
+                            const spacing = 35; // Space for arrow line
+                            
+                            const barHeight = Math.abs(barElement.height || 40);
+                            const barTop = elementY - (barHeight / 2);
+                            const barBottom = elementY + (barHeight / 2);
+                            
+                            // Position tip to LEFT of bar (bars are on right side)
+                            let tipX = elementX - tipWidth - spacing;
+                            let tipY = elementY - (tipHeight / 2); // Vertically centered on bar
+                            
+                            // If tip would go off left edge, put it on right side
+                            if (tipX < 10) {
+                                tipX = elementX + spacing;
+                                pointerDirection = 'left';
+                            } else {
+                                pointerDirection = 'right';
+                            }
+                            
+                            // Adjust Y to avoid overlapping bar vertically
+                            if (tipY + tipHeight > barBottom + 5) {
+                                tipY = barBottom + 5;
+                            }
+                            if (tipY < barTop - 5) {
+                                tipY = barTop - tipHeight - 5;
+                            }
+                            
+                            // Ensure within bounds
+                            if (tipY < 10) tipY = 10;
+                            if (tipY + tipHeight > canvasRect.height - 10) {
+                                tipY = canvasRect.height - tipHeight - 10;
+                            }
+                            
+                            // Check for overlap with other tips and adjust
+                            const existingTips = chartContainer.querySelectorAll('.ai-tip');
+                            let adjustedY = tipY;
+                            for (const existingTip of existingTips) {
+                                const existingRect = existingTip.getBoundingClientRect();
+                                const containerRect = chartContainer.getBoundingClientRect();
+                                const existingY = existingRect.top - containerRect.top;
+                                const existingHeight = existingRect.height;
+                                
+                                if (Math.abs(tipX - (existingRect.left - containerRect.left)) < tipWidth + 30) {
+                                    if (adjustedY >= existingY && adjustedY < existingY + existingHeight + 10) {
+                                        adjustedY = existingY + existingHeight + 15;
+                                    } else if (adjustedY + tipHeight > existingY && adjustedY < existingY) {
+                                        adjustedY = existingY - tipHeight - 15;
+                                    }
+                                }
+                            }
+                            tipY = adjustedY;
+                            
+                            tip.style.position = 'absolute';
+                            tip.style.left = `${tipX}px`;
+                            tip.style.top = `${tipY}px`;
+                            tip.style.right = 'auto';
+                            tip.style.bottom = 'auto';
+                            tip.style.maxWidth = '180px';
+                            tip.className = `ai-tip`;
+                            
+                            // Create SVG arrow line from tip edge to bar edge
+                            const tipCenterY = tipY + tipHeight / 2;
+                            const barCenterY = elementY;
+                            
+                            // Arrow start/end points
+                            let arrowStartX, arrowStartY, arrowEndX, arrowEndY;
+                            
+                            if (pointerDirection === 'right') {
+                                // Tip on left, arrow extends right to bar
+                                arrowStartX = tipX + tipWidth;
+                                arrowStartY = tipCenterY;
+                                arrowEndX = elementX - 3; // Stop just before bar
+                                arrowEndY = barCenterY;
+                            } else {
+                                // Tip on right, arrow extends left to bar
+                                arrowStartX = tipX;
+                                arrowStartY = tipCenterY;
+                                arrowEndX = elementX + 3; // Stop just before bar
+                                arrowEndY = barCenterY;
+                            }
+                            
+                            // Create SVG container for arrow
+                            let svg = chartContainer.querySelector(`svg.ai-tip-arrow-container`);
+                            if (!svg) {
+                                svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+                                svg.className = 'ai-tip-arrow-container';
+                                svg.style.position = 'absolute';
+                                svg.style.left = '0';
+                                svg.style.top = '0';
+                                svg.style.width = '100%';
+                                svg.style.height = '100%';
+                                svg.style.pointerEvents = 'none';
+                                svg.style.zIndex = '999';
+                                svg.setAttribute('viewBox', `0 0 ${canvasRect.width} ${canvasRect.height}`);
+                                chartContainer.appendChild(svg);
+                            }
+                            
+                            // Create arrow line
+                            const lineId = `arrow-${chartId}-${featureIndex}`;
+                            const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+                            line.setAttribute('id', lineId);
+                            line.setAttribute('x1', arrowStartX);
+                            line.setAttribute('y1', arrowStartY);
+                            line.setAttribute('x2', arrowEndX);
+                            line.setAttribute('y2', arrowEndY);
+                            line.setAttribute('stroke', 'var(--primary-color)');
+                            line.setAttribute('stroke-width', '1.5');
+                            line.setAttribute('opacity', '0.6');
+                            line.setAttribute('marker-end', `url(#arrowhead-${chartId})`);
+                            
+                            // Create arrowhead marker if it doesn't exist
+                            let defs = svg.querySelector('defs');
+                            if (!defs) {
+                                defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+                                svg.appendChild(defs);
+                            }
+                            
+                            let marker = defs.querySelector(`#arrowhead-${chartId}`);
+                            if (!marker) {
+                                marker = document.createElementNS('http://www.w3.org/2000/svg', 'marker');
+                                marker.setAttribute('id', `arrowhead-${chartId}`);
+                                marker.setAttribute('markerWidth', '8');
+                                marker.setAttribute('markerHeight', '8');
+                                marker.setAttribute('refX', '7');
+                                marker.setAttribute('refY', '3');
+                                marker.setAttribute('orient', 'auto');
+                                
+                                const polygon = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+                                polygon.setAttribute('points', '0 0, 8 3, 0 6');
+                                polygon.setAttribute('fill', 'var(--primary-color)');
+                                polygon.setAttribute('opacity', '0.8');
+                                
+                                marker.appendChild(polygon);
+                                defs.appendChild(marker);
+                            }
+                            
+                            svg.appendChild(line);
+                            tip.setAttribute('data-arrow-line', lineId);
+                        }
+                    }
+                }
+            } catch (e) {
+                console.log('Could not calculate precise position:', e);
+            }
+            
+            // Fallback: if we couldn't calculate position, use left side of chart
+            if (tip.style.left === '' && tip.style.top === '') {
+                tip.style.position = 'absolute';
+                tip.style.left = '10px';
+                tip.style.top = '50%';
+                tip.style.transform = 'translateY(-50%)';
+                tip.style.right = 'auto';
+                tip.style.bottom = 'auto';
+                tip.style.maxWidth = '180px';
+                tip.className = `ai-tip pointer-right`; // Point right toward chart
+            }
+        } else {
+            // Fallback positioning - left side
+            tip.style.position = 'absolute';
+            tip.style.left = '10px';
+            tip.style.top = '50%';
+            tip.style.transform = 'translateY(-50%)';
+            tip.style.right = 'auto';
+            tip.style.bottom = 'auto';
+            tip.style.maxWidth = '180px';
+            tip.className = `ai-tip pointer-right`;
+        }
+
+        chartContainer.appendChild(tip);
+
+        // Initialize Lucide icons for the sparkles icon
+        if (window.lucide) {
+            window.lucide.createIcons();
+        }
+
+        // Show tip with animation
+        setTimeout(() => {
+            tip.classList.add('visible');
+        }, 100);
+    }
+
+    // Remove aiTip
+    removeAITip(chartId, feature) {
+        const chartContainer = document.querySelector(`#${chartId}`)?.closest('.chart-container, .chart-container-half');
+        if (!chartContainer) return;
+
+        const tip = chartContainer.querySelector(`.ai-tip[data-feature="${feature}"]`);
+        if (tip) {
+            // Remove associated arrow line
+            const arrowLineId = tip.getAttribute('data-arrow-line');
+            if (arrowLineId) {
+                const arrowLine = document.getElementById(arrowLineId);
+                if (arrowLine) arrowLine.remove();
+            }
+            
+            tip.classList.remove('visible');
+            setTimeout(() => tip.remove(), 200);
+        }
+    }
+
+    // Clear all aiTips for a chart
+    clearAITips(chartId) {
+        const chartContainer = document.querySelector(`#${chartId}`)?.closest('.chart-container, .chart-container-half');
+        if (!chartContainer) return;
+
+        const tips = chartContainer.querySelectorAll('.ai-tip');
+        tips.forEach(tip => {
+            // Remove associated arrow line
+            const arrowLineId = tip.getAttribute('data-arrow-line');
+            if (arrowLineId) {
+                const arrowLine = document.getElementById(arrowLineId);
+                if (arrowLine) arrowLine.remove();
+            }
+            
+            tip.classList.remove('visible');
+            setTimeout(() => tip.remove(), 200);
+        });
+        
+        // Remove SVG container if empty
+        const svg = chartContainer.querySelector('svg.ai-tip-arrow-container');
+        if (svg && svg.querySelectorAll('line').length === 0) {
+            svg.remove();
         }
     }
 }

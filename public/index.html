@@ -40,6 +40,7 @@
         <!-- Sidebar Navigation -->
         <aside class="sidebar">
             <nav class="nav-menu">
+                <!-- Main Views Group -->
                 <a href="#dashboard" class="nav-item active" data-view="dashboard">
                     <i data-lucide="layout-dashboard"></i>
                     <span>Dashboard</span>
@@ -52,10 +53,11 @@
                     <i data-lucide="bar-chart-2"></i>
                     <span>Charts</span>
                 </a>
-                <a href="#inputs" class="nav-item" data-view="inputs">
-                    <i data-lucide="sliders-horizontal"></i>
-                    <span>Inputs & Logic</span>
-                </a>
+                
+                <!-- Divider -->
+                <div class="nav-divider"></div>
+                
+                <!-- Operations Group -->
                 <a href="#earth" class="nav-item" data-view="earth">
                     <i data-lucide="globe"></i>
                     <span>Earth Operations</span>
@@ -64,13 +66,18 @@
                     <i data-lucide="globe"></i>
                     <span>Mars Operations</span>
                 </a>
+                
+                <!-- Divider -->
+                <div class="nav-divider"></div>
+                
+                <!-- Risk Group -->
                 <a href="#scenarios" class="nav-item" data-view="scenarios">
                     <i data-lucide="layers"></i>
                     <span>Scenarios</span>
                 </a>
                 <a href="#sensitivity" class="nav-item" data-view="sensitivity">
                     <i data-lucide="trending-up"></i>
-                    <span>Sensitivity Analysis</span>
+                    <span>Sensitivity Curves</span>
                 </a>
                 <a href="#stress" class="nav-item" data-view="stress">
                     <i data-lucide="alert-triangle"></i>
@@ -79,6 +86,23 @@
                 <a href="#monte-carlo" class="nav-item" data-view="monte-carlo">
                     <i data-lucide="dice-6"></i>
                     <span>Monte Carlo</span>
+                </a>
+                <a href="#greeks" class="nav-item" data-view="greeks">
+                    <i data-lucide="sigma"></i>
+                    <span>Financial Greeks</span>
+                </a>
+                <a href="#attribution" class="nav-item" data-view="attribution">
+                    <i data-lucide="pie-chart"></i>
+                    <span>PnL Attribution</span>
+                </a>
+                
+                <!-- Divider -->
+                <div class="nav-divider"></div>
+                
+                <!-- Data Management Group -->
+                <a href="#inputs" class="nav-item" data-view="inputs">
+                    <i data-lucide="sliders-horizontal"></i>
+                    <span>Inputs & Logic</span>
                 </a>
                 <a href="#models" class="nav-item" data-view="models">
                     <i data-lucide="database"></i>
@@ -600,12 +624,34 @@
             <!-- Sensitivity View -->
             <div id="sensitivity" class="view">
                 <div class="view-header">
-                    <h2>Sensitivity Analysis</h2>
-                    <button class="btn btn-secondary btn-sm" id="runSensitivityBtn">
-                        <i data-lucide="refresh-cw"></i>
-                        Recalculate
-                    </button>
+                    <h2>Sensitivity Curves</h2>
+                    <div style="display: flex; gap: var(--spacing-sm); align-items: center;">
+                        <a href="#greeks" class="btn btn-secondary btn-sm" onclick="app.showView('greeks')" style="text-decoration: none;">
+                            <i data-lucide="sigma"></i>
+                            View Greeks
+                        </a>
+                        <button class="btn btn-secondary btn-sm" id="runSensitivityBtn">
+                            <i data-lucide="refresh-cw"></i>
+                            Recalculate
+                        </button>
+                    </div>
                 </div>
+                
+                <div class="section collapsible-section" style="background: rgba(0, 102, 204, 0.05); border-left: 3px solid var(--primary-color); margin-bottom: var(--spacing-md);">
+                    <h3 style="margin-top: 0; cursor: pointer; display: flex; align-items: center; gap: var(--spacing-sm);" onclick="this.parentElement.classList.toggle('collapsed')">
+                        <i data-lucide="chevron-down" class="collapse-icon"></i>
+                        <i data-lucide="info"></i> Sensitivity Curves vs. Financial Greeks
+                    </h3>
+                    <div class="collapsible-content">
+                        <p class="info-text" style="margin-bottom: 0;">
+                            <strong>Sensitivity Curves</strong> show how valuation changes across a full range of input values (e.g., "What happens if Starlink penetration goes from 10% to 20%?"). 
+                            <strong>Financial Greeks</strong> measure the instantaneous rate of change at the current point (e.g., "How sensitive is valuation to a 1% change right now?"). 
+                            Together, they provide both the full picture and point-in-time sensitivity. 
+                            <a href="#greeks" onclick="app.showView('greeks')" style="color: var(--primary-color); text-decoration: underline;">View Financial Greeks →</a>
+                        </p>
+                    </div>
+                </div>
+                
                 <div class="section" style="margin-bottom: var(--spacing-md);">
                     <div style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--spacing-md); margin-bottom: var(--spacing-md);">
                         <div class="form-group">
@@ -1126,6 +1172,355 @@
                 </div>
             </div>
 
+            <!-- Financial Greeks View -->
+            <div id="greeks" class="view">
+                <div class="view-header">
+                    <h2>Financial Greeks</h2>
+                    <div style="display: flex; gap: var(--spacing-sm); align-items: center;">
+                        <a href="#sensitivity" class="btn btn-secondary btn-sm" onclick="app.showView('sensitivity')" style="text-decoration: none;">
+                            <i data-lucide="trending-up"></i>
+                            View Sensitivity Curves
+                        </a>
+                        <button class="btn btn-primary" id="calculateGreeksBtn">
+                            <i data-lucide="sigma"></i>
+                            Calculate Greeks
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Greeks Dashboard -->
+                <div class="section" id="greeksDashboard" style="display: none; position: relative;">
+                    <div id="greeksMethodIndicator" style="position: absolute; top: 10px; right: 50px; font-size: 11px; color: var(--text-secondary); background: rgba(0,0,0,0.05); padding: 4px 8px; border-radius: 4px; display: none;">
+                        Method: <span id="greeksMethodDisplay">-</span>
+                    </div>
+                    <button class="ai-explanation-icon" onclick="app.showAIExplanation('greeksDashboard', event)" title="AI Analysis">
+                        <i data-lucide="sparkles"></i>
+                    </button>
+                    <h3 style="display: flex; align-items: center; gap: var(--spacing-sm);">
+                        <i data-lucide="bar-chart-3"></i> Greeks Dashboard
+                        <button class="info-icon-button" onclick="app.toggleInfoPanel('greeksOverview')" title="Financial Greeks Overview">
+                            <i data-lucide="info"></i>
+                        </button>
+                    </h3>
+                    
+                    <!-- Summary Cards -->
+                    <div class="metrics-grid" style="margin-bottom: var(--spacing-lg);">
+                        <div class="metric-card-small" style="position: relative;">
+                            <button class="ai-explanation-icon" onclick="app.showMicroAI('delta', event)" title="AI Explanation">
+                                <i data-lucide="sparkles"></i>
+                            </button>
+                            <div class="metric-label-small" style="display: flex; align-items: center; gap: 8px;">
+                                <span style="font-size: 1.8em; font-weight: 600; line-height: 1; position: relative; color: var(--primary-color);">
+                                    Δ<sub style="font-size: 0.5em; position: absolute; bottom: -2px; right: -6px;">f</sub>
+                                </span>
+                                <span>Total Delta</span>
+                            </div>
+                            <div class="metric-value-small" id="totalDelta">--</div>
+                            <div class="ai-explanation-popup" id="microAI-delta" style="display: none;">
+                                <div class="ai-explanation-popup-content" id="microAI-delta-content">
+                                    <i data-lucide="loader" class="spinning"></i> Loading...
+                                </div>
+                            </div>
+                        </div>
+                        <div class="metric-card-small" style="position: relative;">
+                            <button class="ai-explanation-icon" onclick="app.showMicroAI('gamma', event)" title="AI Explanation">
+                                <i data-lucide="sparkles"></i>
+                            </button>
+                            <div class="metric-label-small" style="display: flex; align-items: center; gap: 8px;">
+                                <span style="font-size: 1.8em; font-weight: 600; line-height: 1; position: relative; color: var(--primary-color);">
+                                    Γ<sub style="font-size: 0.5em; position: absolute; bottom: -2px; right: -6px;">f</sub>
+                                </span>
+                                <span>Total Gamma</span>
+                            </div>
+                            <div class="metric-value-small" id="totalGamma">--</div>
+                            <div class="ai-explanation-popup" id="microAI-gamma" style="display: none;">
+                                <div class="ai-explanation-popup-content" id="microAI-gamma-content">
+                                    <i data-lucide="loader" class="spinning"></i> Loading...
+                                </div>
+                            </div>
+                        </div>
+                        <div class="metric-card-small" style="position: relative;">
+                            <button class="ai-explanation-icon" onclick="app.showMicroAI('vega', event)" title="AI Explanation">
+                                <i data-lucide="sparkles"></i>
+                            </button>
+                            <div class="metric-label-small" style="display: flex; align-items: center; gap: 8px;">
+                                <span style="font-size: 1.8em; font-weight: 600; line-height: 1; position: relative; color: var(--primary-color);">
+                                    ν<sub style="font-size: 0.5em; position: absolute; bottom: -2px; right: -6px;">f</sub>
+                                </span>
+                                <span>Total Vega</span>
+                            </div>
+                            <div class="metric-value-small" id="totalVega">--</div>
+                            <div class="ai-explanation-popup" id="microAI-vega" style="display: none;">
+                                <div class="ai-explanation-popup-content" id="microAI-vega-content">
+                                    <i data-lucide="loader" class="spinning"></i> Loading...
+                                </div>
+                            </div>
+                        </div>
+                        <div class="metric-card-small" style="position: relative;">
+                            <button class="ai-explanation-icon" onclick="app.showMicroAI('theta', event)" title="AI Explanation">
+                                <i data-lucide="sparkles"></i>
+                            </button>
+                            <div class="metric-label-small" style="display: flex; align-items: center; gap: 8px;">
+                                <span style="font-size: 1.8em; font-weight: 600; line-height: 1; position: relative; color: var(--primary-color);">
+                                    Θ<sub style="font-size: 0.5em; position: absolute; bottom: -2px; right: -6px;">f</sub>
+                                </span>
+                                <span>Total Theta</span>
+                            </div>
+                            <div class="metric-value-small" id="totalTheta">--</div>
+                            <div class="ai-explanation-popup" id="microAI-theta" style="display: none;">
+                                <div class="ai-explanation-popup-content" id="microAI-theta-content">
+                                    <i data-lucide="loader" class="spinning"></i> Loading...
+                                </div>
+                            </div>
+                        </div>
+                        <div class="metric-card-small" style="position: relative;">
+                            <button class="ai-explanation-icon" onclick="app.showMicroAI('rho', event)" title="AI Explanation">
+                                <i data-lucide="sparkles"></i>
+                            </button>
+                            <div class="metric-label-small" style="display: flex; align-items: center; gap: 8px;">
+                                <span style="font-size: 1.8em; font-weight: 600; line-height: 1; position: relative; color: var(--primary-color);">
+                                    ρ<sub style="font-size: 0.5em; position: absolute; bottom: -2px; right: -6px;">f</sub>
+                                </span>
+                                <span>Total Rho</span>
+                            </div>
+                            <div class="metric-value-small" id="totalRho">--</div>
+                            <div class="ai-explanation-popup" id="microAI-rho" style="display: none;">
+                                <div class="ai-explanation-popup-content" id="microAI-rho-content">
+                                    <i data-lucide="loader" class="spinning"></i> Loading...
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Delta Heatmap -->
+                    <div class="chart-container-half" style="position: relative;">
+                        <button class="ai-explanation-icon" onclick="app.showChartAIExplanation('deltaHeatmap', event)" title="AI Explanation">
+                            <i data-lucide="sparkles"></i>
+                        </button>
+                        <h3>Delta Heatmap</h3>
+                        <canvas id="deltaHeatmapChart"></canvas>
+                        <div class="ai-explanation-popup" id="aiExplanation-deltaHeatmap" style="display: none;">
+                            <div class="ai-explanation-popup-content" id="aiExplanation-deltaHeatmap-content">
+                                <i data-lucide="loader" class="spinning"></i> Loading...
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Component Breakdown -->
+                    <div class="charts-row" style="margin-top: var(--spacing-lg);">
+                        <div class="chart-container-half" style="position: relative;">
+                            <button class="ai-explanation-icon" onclick="app.showChartAIExplanation('earthGreeks', event)" title="AI Explanation">
+                                <i data-lucide="sparkles"></i>
+                            </button>
+                            <h3>Earth Greeks</h3>
+                            <canvas id="earthGreeksChart"></canvas>
+                            <div class="ai-explanation-popup" id="aiExplanation-earthGreeks" style="display: none;">
+                                <div class="ai-explanation-popup-content" id="aiExplanation-earthGreeks-content">
+                                    <i data-lucide="loader" class="spinning"></i> Loading...
+                                </div>
+                            </div>
+                        </div>
+                        <div class="chart-container-half" style="position: relative;">
+                            <button class="ai-explanation-icon" onclick="app.showChartAIExplanation('marsGreeks', event)" title="AI Explanation">
+                                <i data-lucide="sparkles"></i>
+                            </button>
+                            <h3>Mars Greeks</h3>
+                            <canvas id="marsGreeksChart"></canvas>
+                            <div class="ai-explanation-popup" id="aiExplanation-marsGreeks" style="display: none;">
+                                <div class="ai-explanation-popup-content" id="aiExplanation-marsGreeks-content">
+                                    <i data-lucide="loader" class="spinning"></i> Loading...
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Detailed Tables -->
+                    <div class="section" style="margin-top: var(--spacing-lg);">
+                        <h3><i data-lucide="table"></i> Detailed Greeks Values</h3>
+                        
+                        <div class="charts-row">
+                            <div class="section" style="margin: 0;">
+                                <h4>Earth Component</h4>
+                                <div class="table-container">
+                                    <table class="data-table" id="earthGreeksTable">
+                                        <thead>
+                                            <tr>
+                                                <th>Input</th>
+                                                <th>Delta ($B/unit)</th>
+                                                <th>Gamma</th>
+                                                <th>Vega</th>
+                                                <th>Rho</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="earthGreeksTableBody">
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                            
+                            <div class="section" style="margin: 0;">
+                                <h4>Mars Component</h4>
+                                <div class="table-container">
+                                    <table class="data-table" id="marsGreeksTable">
+                                        <thead>
+                                            <tr>
+                                                <th>Input</th>
+                                                <th>Delta ($B/unit)</th>
+                                                <th>Gamma</th>
+                                                <th>Vega</th>
+                                                <th>Theta</th>
+                                                <th>Rho</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="marsGreeksTableBody">
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- PnL Attribution View -->
+            <div id="attribution" class="view">
+                <div class="view-header">
+                    <h2>PnL Attribution</h2>
+                    <div style="display: flex; gap: var(--spacing-sm); align-items: center;">
+                        <a href="#greeks" class="btn btn-secondary btn-sm" onclick="app.showView('greeks')" style="text-decoration: none;">
+                            <i data-lucide="sigma"></i>
+                            View Greeks
+                        </a>
+                        <button class="btn btn-primary" id="calculateAttributionBtn">
+                            <i data-lucide="pie-chart"></i>
+                            Calculate Attribution
+                        </button>
+                    </div>
+                </div>
+
+                <div class="section collapsible-section" style="background: rgba(0, 102, 204, 0.05); border-left: 3px solid var(--primary-color); margin-bottom: var(--spacing-md);">
+                    <h3 style="margin-top: 0; cursor: pointer; display: flex; align-items: center; gap: var(--spacing-sm);" onclick="this.parentElement.classList.toggle('collapsed')">
+                        <i data-lucide="chevron-down" class="collapse-icon"></i>
+                        <i data-lucide="info"></i> PnL Attribution Explained
+                    </h3>
+                    <div class="collapsible-content">
+                        <p class="info-text" style="margin-bottom: var(--spacing-md);">
+                            <strong>PnL Attribution</strong> uses Financial Greeks to explain <em>why</em> valuation changed. It decomposes valuation movements into contributions from each input:
+                        </p>
+                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: var(--spacing-md); margin-top: var(--spacing-md);">
+                            <div>
+                                <strong>Delta Attribution</strong>: ΔValue = Delta × ΔInput<br>
+                                <em>Example:</em> If Starlink penetration increases by 2% and Delta = $45B/%, then Delta PnL = $90B
+                            </div>
+                            <div>
+                                <strong>Gamma Attribution</strong>: ΔValue = 0.5 × Gamma × (ΔInput)²<br>
+                                <em>Example:</em> Captures non-linear/convexity effects when inputs change significantly
+                            </div>
+                            <div>
+                                <strong>Vega Attribution</strong>: ΔValue = Vega × ΔVolatility<br>
+                                <em>Example:</em> If uncertainty increases by 5% and Vega = $200B/%, then Vega PnL = $1T
+                            </div>
+                            <div>
+                                <strong>Theta Attribution</strong>: ΔValue = Theta × ΔTime<br>
+                                <em>Example:</em> Time decay for Mars option as colony date approaches
+                            </div>
+                            <div>
+                                <strong>Rho Attribution</strong>: ΔValue = Rho × ΔDiscountRate<br>
+                                <em>Example:</em> If discount rate increases by 1% and Rho = -$35B/%, then Rho PnL = -$35B
+                            </div>
+                        </div>
+                        <p class="info-text" style="margin-top: var(--spacing-md); margin-bottom: 0;">
+                            <strong>Total PnL</strong> = Sum of all Greek contributions. This allows you to answer: "Why did valuation change from $4.5T to $4.8T?" by attributing the $300B change to specific input movements.
+                        </p>
+                    </div>
+                </div>
+
+                <!-- Attribution Comparison -->
+                <div class="section">
+                    <h3><i data-lucide="git-compare"></i> Compare Scenarios</h3>
+                    <p class="info-text">Select two models or scenarios to see how valuation changes are attributed to each input.</p>
+                    
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--spacing-lg); margin-top: var(--spacing-md);">
+                        <div class="form-group">
+                            <label>Base Scenario</label>
+                            <select id="attributionBaseModel" class="select-input">
+                                <option value="">Current Model</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Comparison Scenario</label>
+                            <select id="attributionCompareModel" class="select-input">
+                                <option value="">Select model...</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Attribution Results -->
+                <div class="section" id="attributionResults" style="display: none; position: relative;">
+                    <button class="ai-explanation-icon" onclick="app.showAIExplanation('attributionResults', event)" title="AI Analysis">
+                        <i data-lucide="sparkles"></i>
+                    </button>
+                    <h3><i data-lucide="bar-chart-3"></i> Attribution Breakdown</h3>
+                    
+                    <!-- Summary Cards -->
+                    <div class="metrics-grid" style="margin-bottom: var(--spacing-lg);">
+                        <div class="metric-card-small">
+                            <div class="metric-label-small">Total Change</div>
+                            <div class="metric-value-small" id="attributionTotalChange">--</div>
+                        </div>
+                        <div class="metric-card-small">
+                            <div class="metric-label-small">Delta PnL</div>
+                            <div class="metric-value-small" id="attributionDeltaPnL">--</div>
+                        </div>
+                        <div class="metric-card-small">
+                            <div class="metric-label-small">Gamma PnL</div>
+                            <div class="metric-value-small" id="attributionGammaPnL">--</div>
+                        </div>
+                        <div class="metric-card-small">
+                            <div class="metric-label-small">Vega PnL</div>
+                            <div class="metric-value-small" id="attributionVegaPnL">--</div>
+                        </div>
+                        <div class="metric-card-small">
+                            <div class="metric-label-small">Theta PnL</div>
+                            <div class="metric-value-small" id="attributionThetaPnL">--</div>
+                        </div>
+                        <div class="metric-card-small">
+                            <div class="metric-label-small">Rho PnL</div>
+                            <div class="metric-value-small" id="attributionRhoPnL">--</div>
+                        </div>
+                    </div>
+
+                    <!-- Attribution Chart -->
+                    <div class="chart-container-half">
+                        <h3>Attribution Breakdown</h3>
+                        <canvas id="attributionChart"></canvas>
+                    </div>
+
+                    <!-- Detailed Attribution Table -->
+                    <div class="section" style="margin-top: var(--spacing-lg);">
+                        <h3><i data-lucide="table"></i> Detailed Attribution</h3>
+                        <div class="table-container">
+                            <table class="data-table" id="attributionTable">
+                                <thead>
+                                    <tr>
+                                        <th>Input</th>
+                                        <th>Change</th>
+                                        <th>Delta PnL</th>
+                                        <th>Gamma PnL</th>
+                                        <th>Vega PnL</th>
+                                        <th>Total Contribution</th>
+                                        <th>% of Total</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="attributionTableBody">
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <!-- Models Management View -->
             <div id="models" class="view">
                 <div class="view-header">
@@ -1512,15 +1907,263 @@
 
     <!-- Settings Modal -->
     <div id="settingsModal" class="modal">
-        <div class="modal-content">
+        <div class="modal-content modal-large">
             <div class="modal-header">
-                <h3>Settings</h3>
+                <h2><i data-lucide="settings"></i> Settings</h2>
                 <button class="modal-close" id="closeSettingsBtn">
                     <i data-lucide="x"></i>
                 </button>
             </div>
-            <div class="modal-body">
-                <p>Settings panel coming soon...</p>
+            <!-- Settings Tabs -->
+            <div class="help-tabs">
+                <button class="help-tab active" data-tab="ai">AI Model</button>
+                <button class="help-tab" data-tab="mach33lib">Mach33Lib</button>
+                <button class="help-tab" data-tab="general">General</button>
+            </div>
+            <div class="modal-body" style="max-height: calc(80vh - 140px); overflow-y: auto;">
+                <!-- AI Model Tab -->
+                <div id="settingsTab-ai" class="help-tab-content active">
+                    <div class="help-section">
+                        <h3>AI Model Configuration</h3>
+                        <p>Select the AI model used for generating insights and explanations. Faster models provide quicker responses, while more powerful models offer deeper analysis.</p>
+                        
+                        <div class="form-group" style="margin-top: var(--spacing-lg);">
+                            <label for="aiModelSelect" style="display: block; margin-bottom: var(--spacing-sm); font-weight: 600;">
+                                <i data-lucide="sparkles"></i> AI Model
+                            </label>
+                            <select id="aiModelSelect" class="select-input" style="width: 100%; max-width: 500px;">
+                                <optgroup label="Anthropic Claude">
+                                    <option value="claude-opus-4-1-20250805">Claude Opus 4.1 (Latest, Most Powerful)</option>
+                                    <option value="claude-3-opus-20240229">Claude 3 Opus (Balanced)</option>
+                                    <option value="claude-3-5-sonnet-20241022">Claude 3.5 Sonnet (Fast & Capable)</option>
+                                    <option value="claude-3-5-haiku-20241022">Claude 3.5 Haiku (Fastest)</option>
+                                    <option value="claude-3-sonnet-20240229">Claude 3 Sonnet (Legacy)</option>
+                                </optgroup>
+                                <optgroup label="OpenAI">
+                                    <option value="openai:gpt-4o">GPT-4o (Latest, Most Capable)</option>
+                                    <option value="openai:gpt-4-turbo">GPT-4 Turbo</option>
+                                    <option value="openai:gpt-4">GPT-4</option>
+                                    <option value="openai:gpt-3.5-turbo">GPT-3.5 Turbo (Fast)</option>
+                                </optgroup>
+                                <optgroup label="xAI Grok">
+                                    <option value="grok:grok-2">Grok-2 (Latest)</option>
+                                    <option value="grok:grok-beta">Grok Beta</option>
+                                </optgroup>
+                            </select>
+                            <p style="margin-top: var(--spacing-sm); font-size: 13px; color: var(--text-secondary);">
+                                <strong>Current:</strong> <span id="currentModelDisplay">Loading...</span>
+                            </p>
+                        </div>
+                        
+                        <div style="margin-top: var(--spacing-lg); padding: var(--spacing-md); background: rgba(0, 102, 204, 0.05); border-radius: var(--radius); border-left: 3px solid var(--primary-color);">
+                            <h4 style="margin-top: 0; margin-bottom: var(--spacing-sm);">
+                                <i data-lucide="info"></i> Model Comparison
+                            </h4>
+                            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: var(--spacing-md); font-size: 13px;">
+                                <div>
+                                    <strong>Claude Opus 4.1</strong><br>
+                                    Best quality, slower<br>
+                                    <em>Best for: Deep analysis</em>
+                                </div>
+                                <div>
+                                    <strong>Claude Sonnet/Haiku</strong><br>
+                                    Good quality, fast<br>
+                                    <em>Best for: Quick insights</em>
+                                </div>
+                                <div>
+                                    <strong>GPT-4o</strong><br>
+                                    Excellent quality, fast<br>
+                                    <em>Best for: Balanced use</em>
+                                </div>
+                                <div>
+                                    <strong>Grok-2</strong><br>
+                                    Good quality, real-time data<br>
+                                    <em>Best for: Current insights</em>
+                                </div>
+                            </div>
+                            
+                            <div style="margin-top: var(--spacing-md); padding: var(--spacing-sm); background: rgba(245, 158, 11, 0.1); border-radius: var(--radius); font-size: 12px; color: var(--text-secondary);">
+                                <strong>Note:</strong> OpenAI and Grok require API keys configured in your environment variables (OPENAI_API_KEY, XAI_API_KEY).
+                            </div>
+                        </div>
+                        
+                        <button class="btn btn-primary" onclick="app.saveAIModelSettings()" style="margin-top: var(--spacing-lg);">
+                            <i data-lucide="save"></i> Save Settings
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- Mach33Lib Tab -->
+                <div id="settingsTab-mach33lib" class="help-tab-content">
+                    <div class="help-section">
+                        <h3>Mach33Lib Configuration</h3>
+                        <p>Configure the financial Greeks calculation library. Mach33Lib uses finite difference methods by default, with support for alternative libraries.</p>
+                        
+                        <div class="form-group" style="margin-top: var(--spacing-lg);">
+                            <label for="greeksLibrarySelect" style="display: block; margin-bottom: var(--spacing-sm); font-weight: 600;">
+                                <i data-lucide="calculator"></i> Greeks Calculation Library
+                            </label>
+                            <select id="greeksLibrarySelect" class="select-input" style="width: 100%; max-width: 500px;">
+                                <option value="mach33lib-finite-difference">Mach33Lib - Finite Difference (Default)</option>
+                                <option value="mach33lib-central-difference">Mach33Lib - Central Difference (More Accurate)</option>
+                                <option value="mach33lib-monte-carlo">Mach33Lib - Monte Carlo Based (Most Accurate)</option>
+                                <option value="custom">Custom Library (Future)</option>
+                            </select>
+                            <p style="margin-top: var(--spacing-sm); font-size: 13px; color: var(--text-secondary);">
+                                <strong>Current:</strong> <span id="currentLibraryDisplay">Loading...</span>
+                            </p>
+                        </div>
+                        
+                        <div class="form-group" style="margin-top: var(--spacing-lg);">
+                            <label style="display: block; margin-bottom: var(--spacing-sm); font-weight: 600;">
+                                <i data-lucide="sliders"></i> Bump Sizes
+                            </label>
+                            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: var(--spacing-md);">
+                                <div>
+                                    <label style="font-size: 13px; color: var(--text-secondary);">Percentage Inputs (%)</label>
+                                    <input type="number" id="bumpPercentage" class="input-field" step="0.001" min="0.001" max="0.1" value="0.01" style="width: 100%;">
+                                    <small style="color: var(--text-secondary);">Default: 1%</small>
+                                </div>
+                                <div>
+                                    <label style="font-size: 13px; color: var(--text-secondary);">Absolute Inputs (units)</label>
+                                    <input type="number" id="bumpAbsolute" class="input-field" step="1" min="1" max="100" value="1" style="width: 100%;">
+                                    <small style="color: var(--text-secondary);">Default: 1 unit</small>
+                                </div>
+                                <div>
+                                    <label style="font-size: 13px; color: var(--text-secondary);">Time Inputs (years)</label>
+                                    <input type="number" id="bumpTime" class="input-field" step="0.1" min="0.1" max="10" value="1" style="width: 100%;">
+                                    <small style="color: var(--text-secondary);">Default: 1 year</small>
+                                </div>
+                                <div>
+                                    <label style="font-size: 13px; color: var(--text-secondary);">Volatility (%)</label>
+                                    <input type="number" id="bumpVolatility" class="input-field" step="0.001" min="0.001" max="0.1" value="0.01" style="width: 100%;">
+                                    <small style="color: var(--text-secondary);">Default: 1%</small>
+                                </div>
+                                <div>
+                                    <label style="font-size: 13px; color: var(--text-secondary);">Discount Rate (%)</label>
+                                    <input type="number" id="bumpRate" class="input-field" step="0.0001" min="0.0001" max="0.01" value="0.001" style="width: 100%;">
+                                    <small style="color: var(--text-secondary);">Default: 0.1%</small>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div style="margin-top: var(--spacing-lg); padding: var(--spacing-md); background: rgba(0, 102, 204, 0.05); border-radius: var(--radius); border-left: 3px solid var(--primary-color);">
+                            <h4 style="margin-top: 0; margin-bottom: var(--spacing-sm);">
+                                <i data-lucide="info"></i> Method Comparison
+                            </h4>
+                            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: var(--spacing-md); font-size: 13px;">
+                                <div>
+                                    <strong>Finite Difference</strong><br>
+                                    Fast, good accuracy<br>
+                                    <em>Best for: Real-time calculations</em>
+                                </div>
+                                <div>
+                                    <strong>Central Difference</strong><br>
+                                    More accurate, slightly slower<br>
+                                    <em>Best for: Higher precision</em>
+                                </div>
+                                <div>
+                                    <strong>Monte Carlo Based</strong><br>
+                                    Most accurate, slower<br>
+                                    <em>Best for: Detailed analysis</em>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div style="display: flex; gap: var(--spacing-md); margin-top: var(--spacing-lg);">
+                            <button class="btn btn-primary" id="saveMach33LibBtn" onclick="app.saveMach33LibSettings(event)">
+                                <i data-lucide="save"></i> Save Settings
+                            </button>
+                            <button class="btn btn-secondary" id="resetMach33LibBtn" onclick="app.resetMach33LibSettings(event)" title="Reset to default values">
+                                <i data-lucide="refresh-cw"></i> Reset to Defaults
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- General Tab -->
+                <div id="settingsTab-general" class="help-tab-content">
+                    <div class="help-section">
+                        <h3>General Settings</h3>
+                        <p>General application settings and preferences.</p>
+                        <p style="color: var(--text-secondary); font-style: italic;">More settings coming soon...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Floating AI Explanation Panel -->
+    <div class="ai-explanation-floating-panel" id="aiExplanation-greeksDashboard" style="display: none;">
+        <div class="ai-explanation-floating-panel-header">
+            <i data-lucide="sparkles"></i>
+            <span>AI Analysis - Greeks Dashboard</span>
+            <button class="ai-explanation-floating-panel-close" onclick="app.closeFloatingAIExplanation('greeksDashboard')" title="Close">
+                <i data-lucide="x"></i>
+            </button>
+        </div>
+        <div class="ai-explanation-floating-panel-content" id="aiExplanation-greeksDashboard-content">
+            <i data-lucide="loader" class="spinning"></i> Generating insights...
+        </div>
+    </div>
+
+    <!-- Floating AI Explanation Panel for Attribution -->
+    <div class="ai-explanation-floating-panel" id="aiExplanation-attributionResults" style="display: none;">
+        <div class="ai-explanation-floating-panel-header">
+            <i data-lucide="sparkles"></i>
+            <span>AI Analysis - PnL Attribution</span>
+            <button class="ai-explanation-floating-panel-close" onclick="app.closeFloatingAIExplanation('attributionResults')" title="Close">
+                <i data-lucide="x"></i>
+            </button>
+        </div>
+        <div class="ai-explanation-floating-panel-content" id="aiExplanation-attributionResults-content">
+            <i data-lucide="loader" class="spinning"></i> Generating insights...
+        </div>
+    </div>
+
+    <!-- Floating Info Panel for Greeks Overview -->
+    <div class="ai-explanation-floating-panel" id="infoPanel-greeksOverview" style="display: none;">
+        <div class="ai-explanation-floating-panel-header">
+            <i data-lucide="info"></i>
+            <span>Financial Greeks Overview</span>
+            <button class="ai-explanation-floating-panel-close" onclick="app.closeInfoPanel('greeksOverview')" title="Close">
+                <i data-lucide="x"></i>
+            </button>
+        </div>
+        <div class="ai-explanation-floating-panel-content">
+            <h4 style="margin-top: 0; margin-bottom: var(--spacing-md);">Financial Greeks vs. Sensitivity Curves</h4>
+            <p style="margin-bottom: var(--spacing-md);">
+                <strong>Financial Greeks</strong> measure the instantaneous rate of change (derivative) at the current point - answering "How sensitive is valuation to a small change right now?"
+            </p>
+            <p style="margin-bottom: var(--spacing-md);">
+                <strong>Sensitivity Curves</strong> show the full relationship across a range - answering "What happens if the input changes from A to B?"
+            </p>
+            <p style="margin-bottom: var(--spacing-md);">
+                Greeks are the mathematical derivatives of sensitivity curves: <strong>Delta = slope at current point</strong>, <strong>Gamma = curvature</strong>.
+            </p>
+            <div style="margin-top: var(--spacing-md); margin-bottom: var(--spacing-lg);">
+                <a href="#sensitivity" onclick="app.showView('sensitivity'); app.closeInfoPanel('greeksOverview');" style="color: var(--primary-color); text-decoration: underline;">
+                    <strong>View Sensitivity Curves →</strong>
+                </a>
+            </div>
+            
+            <h4 style="margin-top: var(--spacing-lg); margin-bottom: var(--spacing-md);">Overview</h4>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: var(--spacing-md);">
+                <div>
+                    <strong>Delta (Δ)</strong>: First-order sensitivity - how valuation changes per unit change in input ($B per 1% change).
+                </div>
+                <div>
+                    <strong>Gamma (Γ)</strong>: Convexity/second-order effects - how Delta changes as input changes.
+                </div>
+                <div>
+                    <strong>Vega (ν)</strong>: Volatility sensitivity - how uncertainty affects valuation.
+                </div>
+                <div>
+                    <strong>Theta (Θ)</strong>: Time decay - how valuation changes over time (especially for Mars option).
+                </div>
+                <div>
+                    <strong>Rho (ρ)</strong>: Discount rate sensitivity - how interest rate changes affect valuation.
+                </div>
             </div>
         </div>
     </div>
@@ -1681,7 +2324,7 @@
 
                         <h4>4. Advanced Analysis Tools</h4>
                         
-                        <h5>Sensitivity Analysis</h5>
+                        <h5>Sensitivity Curves</h5>
                         <p>Test the impact of individual variables on valuation:</p>
                         <ul>
                             <li>Select a variable (e.g., Starlink penetration, discount rate)</li>
@@ -1739,7 +2382,7 @@
                         <ol>
                             <li><strong>Start with base inputs</strong> - Use default values or your best estimates</li>
                             <li><strong>Calculate base valuation</strong> - Get your point estimate</li>
-                            <li><strong>Run sensitivity analysis</strong> - Identify which variables matter most</li>
+                            <li><strong>Run sensitivity curves</strong> - See how valuation changes across input ranges</li>
                             <li><strong>Run Monte Carlo simulation</strong> - Understand the distribution of outcomes</li>
                             <li><strong>Run stress tests</strong> - Evaluate downside scenarios</li>
                             <li><strong>Compare scenarios</strong> - See how different horizons affect results</li>
@@ -1927,6 +2570,41 @@
     <script>
         // Initialize Lucide icons
         lucide.createIcons();
+        
+        // Update collapse icons when sections are toggled
+        document.querySelectorAll('.collapsible-section').forEach(section => {
+            section.addEventListener('click', function(e) {
+                if (e.target.closest('h3')) {
+                    const icon = this.querySelector('.collapse-icon');
+                    if (icon) {
+                        setTimeout(() => {
+                            lucide.createIcons();
+                        }, 100);
+                    }
+                }
+            });
+        });
+        
+        // Close AI explanation popups when clicking outside
+        document.addEventListener('click', function(e) {
+            if (!e.target.closest('.ai-explanation-icon') && !e.target.closest('.ai-explanation-popup') && !e.target.closest('.ai-explanation-floating-panel')) {
+                document.querySelectorAll('.ai-explanation-popup').forEach(popup => {
+                    popup.style.display = 'none';
+                });
+            }
+        });
+        
+        // Close floating panels with Escape key
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape') {
+                document.querySelectorAll('.ai-explanation-floating-panel').forEach(panel => {
+                    if (panel.style.display !== 'none') {
+                        const panelId = panel.id.replace('aiExplanation-', '');
+                        app.closeFloatingAIExplanation(panelId);
+                    }
+                });
+            }
+        });
     </script>
 </body>
 </html>

@@ -13,6 +13,7 @@
     "cors": "^2.8.5",
     "dotenv": "^16.6.1",
     "express": "^4.18.2",
+    "formulajs": "^1.0.8",
     "mongoose": "^8.21.0",
     "node-fetch": "^2.7.0",
     "xlsx": "^0.18.5"
