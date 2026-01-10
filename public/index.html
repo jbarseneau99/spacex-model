@@ -1,0 +1,1933 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SpaceX Valuation Platform | 33fg.com</title>
+    <link rel="stylesheet" href="/css/main.css">
+    <script src="https://unpkg.com/lucide@latest"></script>
+</head>
+<body>
+    <!-- Header -->
+    <header class="app-header">
+        <div class="header-content">
+            <div class="logo-section">
+                <img src="/33fg_logo.png" alt="33fg Logo" class="logo-icon">
+                <div class="logo-text">
+                    <h1>SpaceX Valuation Platform</h1>
+                    <span class="branding">33fg.com</span>
+                </div>
+            </div>
+            <div class="header-actions">
+                <button class="icon-button" id="helpBtn" title="Help & Methodology">
+                    <i data-lucide="help-circle"></i>
+                </button>
+                <button class="icon-button" id="aiInsightsBtn" title="AI Insights">
+                    <i data-lucide="sparkles"></i>
+                </button>
+                <button class="icon-button" id="settingsBtn" title="Settings">
+                    <i data-lucide="settings"></i>
+                </button>
+                <button class="icon-button" id="exportBtn" title="Export">
+                    <i data-lucide="download"></i>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="main-container">
+        <!-- Sidebar Navigation -->
+        <aside class="sidebar">
+            <nav class="nav-menu">
+                <a href="#dashboard" class="nav-item active" data-view="dashboard">
+                    <i data-lucide="layout-dashboard"></i>
+                    <span>Dashboard</span>
+                </a>
+                <a href="#insights" class="nav-item" data-view="insights">
+                    <i data-lucide="lightbulb"></i>
+                    <span>Insights</span>
+                </a>
+                <a href="#charts" class="nav-item" data-view="charts">
+                    <i data-lucide="bar-chart-2"></i>
+                    <span>Charts</span>
+                </a>
+                <a href="#inputs" class="nav-item" data-view="inputs">
+                    <i data-lucide="sliders-horizontal"></i>
+                    <span>Inputs & Logic</span>
+                </a>
+                <a href="#earth" class="nav-item" data-view="earth">
+                    <i data-lucide="globe"></i>
+                    <span>Earth Operations</span>
+                </a>
+                <a href="#mars" class="nav-item" data-view="mars">
+                    <i data-lucide="globe"></i>
+                    <span>Mars Operations</span>
+                </a>
+                <a href="#scenarios" class="nav-item" data-view="scenarios">
+                    <i data-lucide="layers"></i>
+                    <span>Scenarios</span>
+                </a>
+                <a href="#sensitivity" class="nav-item" data-view="sensitivity">
+                    <i data-lucide="trending-up"></i>
+                    <span>Sensitivity Analysis</span>
+                </a>
+                <a href="#stress" class="nav-item" data-view="stress">
+                    <i data-lucide="alert-triangle"></i>
+                    <span>Stress Testing</span>
+                </a>
+                <a href="#monte-carlo" class="nav-item" data-view="monte-carlo">
+                    <i data-lucide="dice-6"></i>
+                    <span>Monte Carlo</span>
+                </a>
+                <a href="#models" class="nav-item" data-view="models">
+                    <i data-lucide="database"></i>
+                    <span>Saved Models</span>
+                </a>
+            </nav>
+        </aside>
+
+        <!-- Content Area -->
+        <div class="content-area">
+            <!-- Dashboard View -->
+            <div id="dashboard" class="view active">
+                <div class="view-header">
+                    <h2>Valuation Dashboard</h2>
+                    <button class="btn btn-primary" id="calculateBtn">
+                        <i data-lucide="calculator"></i>
+                        Calculate Valuation
+                    </button>
+                </div>
+
+                <!-- Key Metrics -->
+                <div class="metrics-grid">
+                    <div class="metric-card">
+                        <div class="metric-header">
+                            <span class="metric-label">Total Enterprise Value</span>
+                            <i data-lucide="dollar-sign" class="metric-icon"></i>
+                        </div>
+                        <div class="metric-value" id="totalValue">$0.0B</div>
+                        <div class="metric-change" id="totalChange">--</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-header">
+                            <span class="metric-label">Earth Operations</span>
+                            <i data-lucide="globe" class="metric-icon"></i>
+                        </div>
+                        <div class="metric-value" id="earthValue">$0.0B</div>
+                        <div class="metric-percent" id="earthPercent">--%</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-header">
+                            <span class="metric-label">Mars Operations</span>
+                            <i data-lucide="globe" class="metric-icon"></i>
+                        </div>
+                        <div class="metric-value" id="marsValue">$0.0B</div>
+                        <div class="metric-percent" id="marsPercent">--%</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-header">
+                            <span class="metric-label">Mars Option Value</span>
+                            <i data-lucide="zap" class="metric-icon"></i>
+                        </div>
+                        <div class="metric-value" id="marsOptionValue">$0.0B</div>
+                        <div class="metric-subtitle">Real Options</div>
+                    </div>
+                </div>
+
+                <!-- Charts Side by Side -->
+                <div class="section">
+                    <div class="charts-row">
+                        <div class="chart-container-half">
+                            <h3>Valuation Breakdown</h3>
+                            <canvas id="valuationChart"></canvas>
+                        </div>
+                        <div class="chart-container-half">
+                            <h3>Cash Flow Timeline</h3>
+                            <canvas id="cashFlowTimelineChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- AI Insights Panel -->
+                <div class="section" id="aiInsightsSection" style="display: none;">
+                    <div class="section-header">
+                        <h3><i data-lucide="sparkles"></i> AI Analysis & Insights</h3>
+                        <button class="btn btn-secondary btn-sm" id="refreshInsightsBtn">
+                            <i data-lucide="refresh-cw"></i>
+                            Refresh
+                        </button>
+                    </div>
+                    <div id="aiInsightsContent" class="ai-content">
+                        <div class="loading-state">Generating insights...</div>
+                    </div>
+                </div>
+
+                <!-- Revenue Breakdown -->
+                <div class="section" id="revenueBreakdownSection" style="display: none;">
+                    <h3><i data-lucide="pie-chart"></i> Revenue Breakdown</h3>
+                    <div class="chart-container">
+                        <canvas id="revenueBreakdownChart"></canvas>
+                    </div>
+                </div>
+
+                <!-- Detailed Metrics -->
+                <div class="section" id="detailedMetricsSection" style="display: none;">
+                    <h3><i data-lucide="bar-chart-3"></i> Detailed Metrics</h3>
+                    <div class="metrics-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 16px; margin-bottom: 24px;">
+                        <div class="metric-card-small">
+                            <div class="metric-label">Active Satellites</div>
+                            <div class="metric-value-small" id="activeSatellites">--</div>
+                        </div>
+                        <div class="metric-card-small">
+                            <div class="metric-label">Bandwidth Capacity</div>
+                            <div class="metric-value-small" id="bandwidthCapacity">--</div>
+                        </div>
+                        <div class="metric-card-small">
+                            <div class="metric-label">Rockets Available</div>
+                            <div class="metric-value-small" id="rocketsAvailable">--</div>
+                        </div>
+                        <div class="metric-card-small">
+                            <div class="metric-label">Annual Capex</div>
+                            <div class="metric-value-small" id="annualCapex">--</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Cash Flow Projection -->
+                <div class="section">
+                    <h3>Earth Cash Flow Projection</h3>
+                    <div class="table-container">
+                        <table id="cashFlowTable" class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>Year</th>
+                                    <th>Revenue</th>
+                                    <th>Costs</th>
+                                    <th>Capex</th>
+                                    <th>Cash Flow</th>
+                                    <th>PV</th>
+                                    <th>Cumulative PV</th>
+                                </tr>
+                            </thead>
+                            <tbody id="cashFlowBody">
+                                <tr><td colspan="7" class="empty-state">Run calculation to see projections</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Inputs View -->
+            <div id="inputs" class="view">
+                <div class="view-header">
+                    <h2>Valuation Inputs & Logic</h2>
+                </div>
+
+                <div class="inputs-grid">
+                    <!-- Earth Inputs -->
+                    <div class="input-section">
+                        <h3><i data-lucide="globe"></i> Earth Operations</h3>
+                        <div class="form-group">
+                            <label>Starlink Penetration Rate</label>
+                            <input type="number" id="starlinkPenetration" value="0.15" step="0.01" min="0" max="1">
+                            <span class="input-hint">Annual growth rate for Starlink capacity</span>
+                        </div>
+                        <div class="form-group">
+                            <label>Bandwidth Price Decline</label>
+                            <input type="number" id="bandwidthPriceDecline" value="0.10" step="0.01" min="0" max="1">
+                            <span class="input-hint">Annual price decline rate</span>
+                        </div>
+                        <div class="form-group">
+                            <label>Launch Volume (Base)</label>
+                            <input type="number" id="launchVolume" value="100" step="1" min="0">
+                            <span class="input-hint">Annual launches</span>
+                        </div>
+                        <div class="form-group">
+                            <label>Launch Price Decline</label>
+                            <input type="number" id="launchPriceDecline" value="0.05" step="0.01" min="0" max="1">
+                            <span class="input-hint">Annual price decline rate</span>
+                        </div>
+                    </div>
+
+                    <!-- Mars Inputs -->
+                    <div class="input-section">
+                        <h3><i data-lucide="globe"></i> Mars Operations</h3>
+                        <div class="form-group">
+                            <label>First Colony Year</label>
+                            <input type="number" id="firstColonyYear" value="2030" step="1" min="2025" max="2050">
+                            <span class="input-hint">Year of first permanent settlement</span>
+                        </div>
+                        <div class="form-group">
+                            <label>Transport Cost Decline</label>
+                            <input type="number" id="transportCostDecline" value="0.20" step="0.01" min="0" max="1">
+                            <span class="input-hint">Annual cost reduction rate</span>
+                        </div>
+                        <div class="form-group">
+                            <label>Population Growth Rate</label>
+                            <input type="number" id="populationGrowth" value="0.50" step="0.01" min="0" max="2">
+                            <span class="input-hint">Annual population growth</span>
+                        </div>
+                        <div class="form-group">
+                            <label>
+                                <input type="checkbox" id="industrialBootstrap" checked>
+                                Industrial Bootstrapping
+                            </label>
+                            <span class="input-hint">Self-sustaining industrial base</span>
+                        </div>
+                    </div>
+
+                    <!-- Financial Inputs -->
+                    <div class="input-section">
+                        <h3><i data-lucide="dollar-sign"></i> Financial Parameters</h3>
+                        <div class="form-group">
+                            <label>Discount Rate</label>
+                            <input type="number" id="discountRate" value="0.12" step="0.01" min="0" max="1">
+                            <span class="input-hint">WACC / required return</span>
+                        </div>
+                        <div class="form-group">
+                            <label>Dilution Factor</label>
+                            <input type="number" id="dilutionFactor" value="0.15" step="0.01" min="0" max="1">
+                            <span class="input-hint">Expected future dilution</span>
+                        </div>
+                        <div class="form-group">
+                            <label>Terminal Growth Rate</label>
+                            <input type="number" id="terminalGrowth" value="0.03" step="0.01" min="0" max="0.1">
+                            <span class="input-hint">Perpetual growth rate</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="actions-bar">
+                    <button class="btn btn-primary" id="saveInputsBtn">
+                        <i data-lucide="save"></i>
+                        Save Inputs
+                    </button>
+                    <button class="btn btn-secondary" id="resetInputsBtn">
+                        <i data-lucide="rotate-ccw"></i>
+                        Reset to Defaults
+                    </button>
+                </div>
+            </div>
+
+            <!-- Earth View -->
+            <div id="earth" class="view">
+                <div class="view-header">
+                    <h2>Earth Operations Analysis</h2>
+                </div>
+
+                <!-- Starlink Analysis -->
+                <div class="section" style="margin-bottom: var(--spacing-md);">
+                    <h3 style="margin: 0 0 12px 0; font-size: 16px;"><i data-lucide="satellite"></i> Starlink Operations</h3>
+                    <div class="metrics-grid-small">
+                        <div class="metric-card-small">
+                            <span class="metric-label-small">Bandwidth Capacity</span>
+                            <span class="metric-value-small" id="starlinkCapacity">--</span>
+                        </div>
+                        <div class="metric-card-small">
+                            <span class="metric-label-small">Bandwidth Price</span>
+                            <span class="metric-value-small" id="starlinkPrice">--</span>
+                        </div>
+                        <div class="metric-card-small">
+                            <span class="metric-label-small">Starlink Revenue</span>
+                            <span class="metric-value-small" id="starlinkRevenue">--</span>
+                        </div>
+                        <div class="metric-card-small">
+                            <span class="metric-label-small">Starshield Revenue</span>
+                            <span class="metric-value-small" id="starshieldRevenue">--</span>
+                        </div>
+                    </div>
+                    <div class="chart-container" style="background: #1a1a1a; border-radius: var(--radius); padding: var(--spacing-md);">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                            <h4 style="margin: 0; color: white; font-size: 14px; font-weight: 600;">Starlink Network Scaling Curve Projection</h4>
+                            <div style="display: flex; gap: 8px;">
+                                <button class="scenario-btn" data-scenario="bear" style="background: #2a2a2a; color: #888; border: 1px solid #444; padding: 4px 12px; border-radius: 4px; font-size: 12px; cursor: pointer;">Bear</button>
+                                <button class="scenario-btn active" data-scenario="base" style="background: white; color: #0066cc; border: 1px solid #0066cc; padding: 4px 12px; border-radius: 4px; font-size: 12px; cursor: pointer; font-weight: 500;">Base</button>
+                                <button class="scenario-btn" data-scenario="bull" style="background: #2a2a2a; color: #888; border: 1px solid #444; padding: 4px 12px; border-radius: 4px; font-size: 12px; cursor: pointer;">Bull</button>
+                            </div>
+                        </div>
+                        <canvas id="starlinkChart"></canvas>
+                        <div style="display: flex; align-items: center; gap: 8px; margin-top: 12px; padding-left: 12px;">
+                            <div style="width: 12px; height: 12px; border-radius: 50%; background: #10b981;"></div>
+                            <span style="color: #888; font-size: 12px;">Bandwidth</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Launch Services -->
+                <div class="section" style="margin-bottom: var(--spacing-md);">
+                    <h3 style="margin: 0 0 12px 0; font-size: 16px;"><i data-lucide="rocket"></i> Launch Services</h3>
+                    <div class="metrics-grid-small">
+                        <div class="metric-card-small">
+                            <span class="metric-label-small">Annual Launches</span>
+                            <span class="metric-value-small" id="launchVolumeDisplay">--</span>
+                        </div>
+                        <div class="metric-card-small">
+                            <span class="metric-label-small">Price per Launch</span>
+                            <span class="metric-value-small" id="launchPriceDisplay">--</span>
+                        </div>
+                        <div class="metric-card-small">
+                            <span class="metric-label-small">Total Launch Revenue</span>
+                            <span class="metric-value-small" id="launchRevenue">--</span>
+                        </div>
+                        <div class="metric-card-small">
+                            <span class="metric-label-small">Starship Revenue</span>
+                            <span class="metric-value-small" id="starshipRevenue">--</span>
+                        </div>
+                        <div class="metric-card-small">
+                            <span class="metric-label-small">Falcon 9 Revenue</span>
+                            <span class="metric-value-small" id="falcon9Revenue">--</span>
+                        </div>
+                    </div>
+                    <div class="chart-container">
+                        <canvas id="launchChart"></canvas>
+                    </div>
+                </div>
+
+                <!-- Utilization Metrics -->
+                <div class="section" style="margin-bottom: var(--spacing-md);">
+                    <h3 style="margin: 0 0 12px 0; font-size: 16px;"><i data-lucide="activity"></i> Utilization Metrics</h3>
+                    <div class="metrics-grid-small">
+                        <div class="metric-card-small">
+                            <span class="metric-label-small">Rocket Utilization</span>
+                            <span class="metric-value-small" id="rocketUtilization">--</span>
+                        </div>
+                        <div class="metric-card-small">
+                            <span class="metric-label-small">Capacity Utilization</span>
+                            <span class="metric-value-small" id="capacityUtilization">--</span>
+                        </div>
+                        <div class="metric-card-small">
+                            <span class="metric-label-small">Falcon 9 Utilization</span>
+                            <span class="metric-value-small" id="falcon9Utilization">--</span>
+                        </div>
+                        <div class="metric-card-small">
+                            <span class="metric-label-small">Starship Utilization</span>
+                            <span class="metric-value-small" id="starshipUtilization">--</span>
+                        </div>
+                    </div>
+                    <div class="chart-container" style="height: 300px;">
+                        <canvas id="utilizationChart"></canvas>
+                    </div>
+                </div>
+
+                <!-- Technology Transition -->
+                <div class="section" style="margin-bottom: var(--spacing-md);">
+                    <h3 style="margin: 0 0 12px 0; font-size: 16px;"><i data-lucide="refresh-cw"></i> Technology Transition</h3>
+                    <p style="color: var(--text-secondary); font-size: 14px; margin-bottom: var(--spacing-md); line-height: 1.6;">
+                        Evolution from Starlink v2 to v3 satellites increases bandwidth capacity per satellite and improves cost efficiency.
+                    </p>
+                    <div class="chart-container" style="height: 300px;">
+                        <canvas id="technologyTransitionChart"></canvas>
+                    </div>
+                </div>
+
+                <!-- Launch Cadence -->
+                <div class="section" style="margin-bottom: var(--spacing-md);">
+                    <h3 style="margin: 0 0 12px 0; font-size: 16px;"><i data-lucide="rocket"></i> Launch Cadence</h3>
+                    <p style="color: var(--text-secondary); font-size: 14px; margin-bottom: var(--spacing-md); line-height: 1.6;">
+                        Launches per rocket per year shows fleet utilization efficiency. Higher utilization indicates better capital efficiency and faster payback.
+                    </p>
+                    <div class="chart-container" style="height: 300px;">
+                        <canvas id="launchCadenceChart"></canvas>
+                    </div>
+                </div>
+
+                <!-- Bandwidth Economics -->
+                <div class="section" style="margin-bottom: var(--spacing-md);">
+                    <h3 style="margin: 0 0 12px 0; font-size: 16px;"><i data-lucide="signal"></i> Bandwidth Economics</h3>
+                    <div class="metrics-grid-small">
+                        <div class="metric-card-small">
+                            <span class="metric-label-small">Revenue per Gbps</span>
+                            <span class="metric-value-small" id="revenuePerGbps">--</span>
+                        </div>
+                        <div class="metric-card-small">
+                            <span class="metric-label-small">Bandwidth Utilization</span>
+                            <span class="metric-value-small" id="bandwidthUtilization">--</span>
+                        </div>
+                    </div>
+                    <div class="chart-container" style="height: 300px;">
+                        <canvas id="bandwidthEconomicsChart"></canvas>
+                    </div>
+                </div>
+
+                <!-- Cash Flow Details -->
+                <div class="section" style="margin-bottom: var(--spacing-md);">
+                    <h3 style="margin: 0 0 12px 0; font-size: 16px;"><i data-lucide="trending-up"></i> Cash Flow Projection</h3>
+                    <div class="table-container">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>Year</th>
+                                    <th>Starlink Revenue</th>
+                                    <th>Launch Revenue</th>
+                                    <th>Total Revenue</th>
+                                    <th>Costs</th>
+                                    <th>Cash Flow</th>
+                                    <th>PV</th>
+                                </tr>
+                            </thead>
+                            <tbody id="earthCashFlowBody">
+                                <tr><td colspan="7" class="empty-state">Run calculation to see projections</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Mars View -->
+            <div id="mars" class="view">
+                <div class="view-header">
+                    <h2>Mars Operations Analysis</h2>
+                </div>
+
+                <!-- Top Row: Metrics + Scenario Analysis -->
+                <div class="section" style="margin-bottom: var(--spacing-md);">
+                    <div class="mars-top-row">
+                        <div class="mars-metric-box">
+                            <div class="mars-metric-header">
+                                <i data-lucide="zap" style="width: 16px; height: 16px;"></i>
+                                <span>Option Value</span>
+                            </div>
+                            <div class="mars-metric-value" id="marsOptionValueDetail">$0.0B</div>
+                            <div class="mars-metric-subtitle">Black-Scholes Call Option</div>
+                        </div>
+                        <div class="mars-metric-box">
+                            <div class="mars-metric-header">
+                                <i data-lucide="target" style="width: 16px; height: 16px;"></i>
+                                <span>Expected Value</span>
+                            </div>
+                            <div class="mars-metric-value" id="marsExpectedValue">$0.0B</div>
+                            <div class="mars-metric-subtitle">Probability-Weighted</div>
+                        </div>
+                        <div class="mars-scenario-box">
+                            <div class="mars-metric-header">
+                                <i data-lucide="layers" style="width: 16px; height: 16px;"></i>
+                                <span>Scenario Analysis</span>
+                            </div>
+                            <div class="scenarios-grid-compact" id="marsScenariosGrid" style="gap: var(--spacing-xs);">
+                                <!-- Scenarios will be populated dynamically -->
+                            </div>
+                        </div>
+                    </div>
+                    <div class="mars-secondary-metrics">
+                        <div class="mars-secondary-item">
+                            <span class="mars-secondary-label">Underlying Value</span>
+                            <span class="mars-secondary-value" id="marsUnderlyingValue">$0.0B</span>
+                        </div>
+                        <div class="mars-secondary-item">
+                            <span class="mars-secondary-label">Years to Colony</span>
+                            <span class="mars-secondary-value" id="marsYearsToColony">--</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Charts Row - Directly Below -->
+                <div class="section" style="margin-bottom: var(--spacing-md);">
+                    <div class="charts-row" style="gap: var(--spacing-md);">
+                        <div class="chart-container-half">
+                            <h3 style="margin: 0 0 12px 0; font-size: 16px;"><i data-lucide="chart-line"></i> Option Payoff Structure</h3>
+                            <canvas id="marsOptionChart"></canvas>
+                        </div>
+                        <div class="chart-container-half">
+                            <h3 style="margin: 0 0 12px 0; font-size: 16px;"><i data-lucide="users"></i> Population Projection</h3>
+                            <canvas id="marsPopulationChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Mars Launch Scaling Chart -->
+                <div class="section" style="margin-bottom: var(--spacing-md);">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                        <h3 style="margin: 0; font-size: 16px;"><i data-lucide="rocket"></i> Mars Launch Scaling — When Cash Meets Conviction</h3>
+                        <div style="display: flex; gap: 8px;">
+                            <button class="mars-scaling-scenario-btn" data-scenario="bear" style="background: #2a2a2a; color: #888; border: 1px solid #444; padding: 4px 12px; border-radius: 4px; font-size: 12px; cursor: pointer;">Bear</button>
+                            <button class="mars-scaling-scenario-btn active" data-scenario="base" style="background: white; color: #0066cc; border: 1px solid #0066cc; padding: 4px 12px; border-radius: 4px; font-size: 12px; cursor: pointer; font-weight: 500;">Base</button>
+                            <button class="mars-scaling-scenario-btn" data-scenario="bull" style="background: #2a2a2a; color: #888; border: 1px solid #444; padding: 4px 12px; border-radius: 4px; font-size: 12px; cursor: pointer;">Bull</button>
+                        </div>
+                    </div>
+                    <p style="color: var(--text-secondary); font-size: 14px; margin-bottom: var(--spacing-md); line-height: 1.6;">
+                        Falling transport costs coincide with sharp ~2-year spikes in Starship flights, illustrating the cost-to-cadence feedback loop.
+                    </p>
+                    <div class="chart-container" style="height: 400px;">
+                        <canvas id="marsLaunchScalingChart"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Scenarios View -->
+            <div id="scenarios" class="view">
+                <div class="view-header">
+                    <h2>Scenario Analysis</h2>
+                    <button class="btn btn-secondary btn-sm" id="runScenariosBtn">
+                        <i data-lucide="refresh-cw"></i>
+                        Recalculate
+                    </button>
+                </div>
+
+                <!-- Multiple Scenario Comparison -->
+                <div class="section" style="margin-bottom: var(--spacing-md);">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                        <h3 style="margin: 0;"><i data-lucide="layers"></i> Scenario Comparison</h3>
+                    </div>
+                    <div class="scenarios-comparison-grid" id="scenariosComparisonGrid">
+                        <!-- Will be populated dynamically -->
+                    </div>
+                </div>
+
+                <!-- Scenario Distribution Comparison -->
+                <div class="section">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                        <h3 style="margin: 0;"><i data-lucide="trending-up"></i> Distribution Comparison</h3>
+                        <button class="btn btn-secondary btn-sm" id="runScenarioMonteCarloBtn">
+                            <i data-lucide="refresh-cw"></i>
+                            Recalculate
+                        </button>
+                    </div>
+                    <div class="chart-container" style="height: 400px;">
+                        <canvas id="scenarioDistributionChart"></canvas>
+                    </div>
+                </div>
+
+                <!-- Preset Scenarios -->
+                <div class="section">
+                    <h3><i data-lucide="bookmark"></i> Preset Scenarios</h3>
+                    <div class="scenarios-grid" id="scenariosGrid">
+                        <!-- Scenarios will be loaded dynamically -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- Sensitivity View -->
+            <div id="sensitivity" class="view">
+                <div class="view-header">
+                    <h2>Sensitivity Analysis</h2>
+                    <button class="btn btn-secondary btn-sm" id="runSensitivityBtn">
+                        <i data-lucide="refresh-cw"></i>
+                        Recalculate
+                    </button>
+                </div>
+                <div class="section" style="margin-bottom: var(--spacing-md);">
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--spacing-md); margin-bottom: var(--spacing-md);">
+                        <div class="form-group">
+                            <label>Variable to Analyze</label>
+                            <select id="sensitivityVariable" class="select-input">
+                                <option value="earth.starlinkPenetration">Starlink Penetration</option>
+                                <option value="earth.bandwidthPriceDecline">Bandwidth Price Decline</option>
+                                <option value="earth.launchVolume">Launch Volume</option>
+                                <option value="earth.launchPriceDecline">Launch Price Decline</option>
+                                <option value="mars.firstColonyYear">First Colony Year</option>
+                                <option value="mars.transportCostDecline">Transport Cost Decline</option>
+                                <option value="mars.populationGrowth">Mars Population Growth</option>
+                                <option value="financial.discountRate">Discount Rate</option>
+                                <option value="financial.dilutionFactor">Dilution Factor</option>
+                                <option value="financial.terminalGrowth">Terminal Growth Rate</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Range</label>
+                            <div class="range-inputs">
+                                <input type="number" id="sensitivityMin" placeholder="Min" step="0.01">
+                                <input type="number" id="sensitivityMax" placeholder="Max" step="0.01">
+                                <input type="number" id="sensitivitySteps" placeholder="Steps" value="20" step="1">
+                            </div>
+                        </div>
+                    </div>
+                    <div class="chart-container" style="height: 400px;">
+                        <canvas id="sensitivityChart"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Monte Carlo Simulation View -->
+            <div id="monte-carlo" class="view">
+                <div class="view-header">
+                    <h2>Monte Carlo Simulation</h2>
+                    <button class="btn btn-primary" id="runMonteCarloBtn">
+                        <i data-lucide="dice-6"></i>
+                        Run Simulation
+                    </button>
+                </div>
+
+                <div class="section">
+                    <h3><i data-lucide="info"></i> Overview</h3>
+                    <p class="info-text">Run thousands of simulations with random variations to generate statistical distributions and probability ranges for valuation outcomes.</p>
+                </div>
+
+                <!-- Configuration Section (Consolidated) -->
+                <div class="section" id="monteCarloConfigSection">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                        <h3><i data-lucide="settings"></i> Configuration</h3>
+                        <button class="btn btn-secondary btn-sm" id="editMonteCarloConfigBtn">
+                            <i data-lucide="edit"></i> Edit
+                        </button>
+                    </div>
+                    <div id="monteCarloConfigDisplay" class="config-display">
+                        <div class="config-info">
+                            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: var(--spacing-md); margin-bottom: 16px;">
+                                <div>
+                                    <strong>Number of Runs:</strong> <span id="configRuns">5,000</span>
+                                </div>
+                                <div>
+                                    <strong>Distribution Type:</strong> <span id="configDistributionType">Default</span>
+                                </div>
+                            </div>
+                            <p id="configSource" style="color: var(--text-secondary); font-size: 14px; margin-top: 8px;">
+                                <i data-lucide="info"></i> Using default configuration
+                            </p>
+                        </div>
+                        
+                        <div class="config-parameters" id="monteCarloParametersDisplay">
+                            <h4 style="margin-top: 16px; margin-bottom: 12px;">Distribution Parameters</h4>
+                            <div class="parameters-grid">
+                                <div class="parameter-group">
+                                    <h5>Earth Parameters</h5>
+                                    <div class="parameter-item">
+                                        <span class="param-label">Starlink Penetration:</span>
+                                        <span class="param-value">StdDev: <span id="paramEarthPenetrationStdDev">--</span>, Range: <span id="paramEarthPenetrationRange">--</span></span>
+                                    </div>
+                                    <div class="parameter-item">
+                                        <span class="param-label">Launch Volume:</span>
+                                        <span class="param-value">StdDev: <span id="paramEarthLaunchStdDev">--</span>, Range: <span id="paramEarthLaunchRange">--</span></span>
+                                    </div>
+                                    <div class="parameter-item">
+                                        <span class="param-label">Bandwidth Price Decline:</span>
+                                        <span class="param-value">StdDev: <span id="paramEarthBandwidthStdDev">--</span>, Range: <span id="paramEarthBandwidthRange">--</span></span>
+                                    </div>
+                                </div>
+                                <div class="parameter-group">
+                                    <h5>Mars Parameters</h5>
+                                    <div class="parameter-item">
+                                        <span class="param-label">First Colony Year:</span>
+                                        <span class="param-value">StdDev: <span id="paramMarsColonyStdDev">--</span>, Range: <span id="paramMarsColonyRange">--</span></span>
+                                    </div>
+                                    <div class="parameter-item">
+                                        <span class="param-label">Population Growth:</span>
+                                        <span class="param-value">StdDev: <span id="paramMarsPopStdDev">--</span>, Range: <span id="paramMarsPopRange">--</span></span>
+                                    </div>
+                                </div>
+                                <div class="parameter-group">
+                                    <h5>Financial Parameters</h5>
+                                    <div class="parameter-item">
+                                        <span class="param-label">Discount Rate:</span>
+                                        <span class="param-value">StdDev: <span id="paramFinancialDiscountStdDev">--</span>, Range: <span id="paramFinancialDiscountRange">--</span></span>
+                                    </div>
+                                    <div class="parameter-item">
+                                        <span class="param-label">Dilution Factor:</span>
+                                        <span class="param-value">StdDev: <span id="paramFinancialDilutionStdDev">--</span>, Range: <span id="paramFinancialDilutionRange">--</span></span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Results Section -->
+                <div class="section" id="monteCarloResultsSection" style="display: none;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                        <h3><i data-lucide="bar-chart"></i> Statistical Summary</h3>
+                        <button class="btn btn-secondary" id="saveMonteCarloBtn" onclick="app.saveMonteCarloSimulation()">
+                            <i data-lucide="save"></i> Save Simulation
+                        </button>
+                    </div>
+                    
+                    <div class="statistics-grid">
+                        <div class="stat-card">
+                            <h4>Total Enterprise Value</h4>
+                            <div class="stat-row">
+                                <span>Mean:</span>
+                                <span id="mcMean">--</span>
+                            </div>
+                            <div class="stat-row">
+                                <span>Median:</span>
+                                <span id="mcMedian">--</span>
+                            </div>
+                            <div class="stat-row">
+                                <span>Std Dev:</span>
+                                <span id="mcStdDev">--</span>
+                            </div>
+                            <div class="stat-row">
+                                <span>Min:</span>
+                                <span id="mcMin">--</span>
+                            </div>
+                            <div class="stat-row">
+                                <span>Max:</span>
+                                <span id="mcMax">--</span>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <h4>Percentiles</h4>
+                            <div class="stat-row">
+                                <span>10th:</span>
+                                <span id="mcP10">--</span>
+                            </div>
+                            <div class="stat-row">
+                                <span>25th (Q1):</span>
+                                <span id="mcQ1">--</span>
+                            </div>
+                            <div class="stat-row">
+                                <span>75th (Q3):</span>
+                                <span id="mcQ3">--</span>
+                            </div>
+                            <div class="stat-row">
+                                <span>90th:</span>
+                                <span id="mcP90">--</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="chart-container">
+                        <canvas id="monteCarloDistributionChart"></canvas>
+                    </div>
+
+                    <div class="chart-container">
+                        <canvas id="monteCarloComparisonChart"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Stress Testing View -->
+            <div id="stress" class="view">
+                <div class="view-header">
+                    <h2>Stress Testing & Failure Modes</h2>
+                </div>
+
+                <div class="section">
+                    <h3><i data-lucide="alert-triangle"></i> Overview</h3>
+                    <p class="info-text">Test valuation under adverse conditions and failure modes. This analysis helps identify key risk factors and their impact on enterprise value.</p>
+                </div>
+
+                <!-- Predefined Stress Scenarios -->
+                <div class="section">
+                    <h3><i data-lucide="wind"></i> Predefined Stress Scenarios</h3>
+                    <div class="stress-scenarios-grid" id="stressScenariosGrid">
+                        <div class="stress-scenario-card" data-scenario="mars-delay">
+                            <div class="stress-header">
+                                <i data-lucide="clock"></i>
+                                <h4>Mars Delay (30 years)</h4>
+                            </div>
+                            <p>First colony delayed to 2060</p>
+                            <button class="btn btn-secondary btn-sm" onclick="app.runStressScenario('mars-delay')">
+                                Run Test
+                            </button>
+                        </div>
+                        <div class="stress-scenario-card" data-scenario="competition">
+                            <div class="stress-header">
+                                <i data-lucide="users"></i>
+                                <h4>Increased Competition</h4>
+                            </div>
+                            <p>Starlink penetration reduced by 50%</p>
+                            <button class="btn btn-secondary btn-sm" onclick="app.runStressScenario('competition')">
+                                Run Test
+                            </button>
+                        </div>
+                        <div class="stress-scenario-card" data-scenario="mars-failure">
+                            <div class="stress-header">
+                                <i data-lucide="x-circle"></i>
+                                <h4>Mars Failure</h4>
+                            </div>
+                            <p>Mars operations fail completely</p>
+                            <button class="btn btn-secondary btn-sm" onclick="app.runStressScenario('mars-failure')">
+                                Run Test
+                            </button>
+                        </div>
+                        <div class="stress-scenario-card" data-scenario="high-discount">
+                            <div class="stress-header">
+                                <i data-lucide="trending-down"></i>
+                                <h4>High Discount Rate</h4>
+                            </div>
+                            <p>Discount rate increased to 20%</p>
+                            <button class="btn btn-secondary btn-sm" onclick="app.runStressScenario('high-discount')">
+                                Run Test
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Stress Test Results -->
+                <div class="section" id="stressResultsSection" style="display: none;">
+                    <h3><i data-lucide="bar-chart"></i> Stress Test Results</h3>
+                    <div class="stress-comparison">
+                        <div class="comparison-card">
+                            <h4>Base Case</h4>
+                            <div class="comparison-value" id="stressBaseValue">$0.0B</div>
+                        </div>
+                        <div class="comparison-card stress">
+                            <h4>Stress Scenario</h4>
+                            <div class="comparison-value" id="stressScenarioValue">$0.0B</div>
+                        </div>
+                        <div class="comparison-card">
+                            <h4>Impact</h4>
+                            <div class="comparison-value" id="stressImpact">--</div>
+                        </div>
+                    </div>
+                    <div class="chart-container">
+                        <canvas id="stressChart"></canvas>
+                    </div>
+                </div>
+
+                <!-- Custom Stress Test -->
+                <div class="section">
+                    <h3><i data-lucide="sliders"></i> Custom Stress Test</h3>
+                    <div class="form-group">
+                        <label>Scenario Name</label>
+                        <input type="text" id="customStressName" placeholder="e.g., Regulatory Risk" class="input-full">
+                    </div>
+                    <div class="stress-inputs-grid">
+                        <div class="input-section-small">
+                            <h4>Earth Modifications</h4>
+                            <div class="form-group">
+                                <label>Starlink Penetration Multiplier</label>
+                                <input type="number" id="stressStarlinkMult" value="1.0" step="0.1" min="0">
+                            </div>
+                            <div class="form-group">
+                                <label>Launch Volume Multiplier</label>
+                                <input type="number" id="stressLaunchMult" value="1.0" step="0.1" min="0">
+                            </div>
+                        </div>
+                        <div class="input-section-small">
+                            <h4>Mars Modifications</h4>
+                            <div class="form-group">
+                                <label>Colony Year Offset</label>
+                                <input type="number" id="stressColonyOffset" value="0" step="1">
+                            </div>
+                            <div class="form-group">
+                                <label>Population Growth Multiplier</label>
+                                <input type="number" id="stressPopGrowthMult" value="1.0" step="0.1" min="0">
+                            </div>
+                        </div>
+                        <div class="input-section-small">
+                            <h4>Financial Modifications</h4>
+                            <div class="form-group">
+                                <label>Discount Rate Adjustment</label>
+                                <input type="number" id="stressDiscountAdj" value="0" step="0.01">
+                            </div>
+                            <div class="form-group">
+                                <label>Dilution Adjustment</label>
+                                <input type="number" id="stressDilutionAdj" value="0" step="0.01">
+                            </div>
+                        </div>
+                    </div>
+                    <button class="btn btn-primary" id="runCustomStressBtn">
+                        <i data-lucide="play"></i>
+                        Run Custom Stress Test
+                    </button>
+                </div>
+            </div>
+
+            <!-- Insights View -->
+            <div id="insights" class="view">
+                <div class="view-header">
+                    <div>
+                        <h2>Strategic Insights</h2>
+                        <div style="font-size: 14px; color: var(--text-secondary); margin-top: 4px;" id="insightsModelName">
+                            <span id="insightsCurrentModel">No model loaded</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Insights Tabs -->
+                <div class="insights-tabs" style="display: flex; gap: 8px; padding: 0 var(--spacing-lg); margin-bottom: var(--spacing-md); border-bottom: 1px solid var(--border-color);">
+                    <button class="insights-tab active" data-tab="insights">
+                        <i data-lucide="sparkles"></i>
+                        <span>Key Insights</span>
+                    </button>
+                    <button class="insights-tab" data-tab="drivers">
+                        <i data-lucide="trending-up"></i>
+                        <span>Value Drivers</span>
+                    </button>
+                    <button class="insights-tab" data-tab="risks">
+                        <i data-lucide="alert-triangle"></i>
+                        <span>Risk Assessment</span>
+                    </button>
+                </div>
+
+                <!-- Tab Content -->
+                <div class="insights-tab-content active" id="insightsTab-insights">
+                    <div class="section" style="margin-bottom: var(--spacing-md);">
+                        <div id="keyInsightsContent" style="display: grid; gap: var(--spacing-md);">
+                            <!-- Will be populated dynamically -->
+                        </div>
+                    </div>
+                </div>
+
+                <div class="insights-tab-content" id="insightsTab-drivers">
+                    <div class="section" style="margin-bottom: var(--spacing-md);">
+                        <div id="valueDriversContent" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: var(--spacing-md);">
+                            <!-- Will be populated dynamically -->
+                        </div>
+                    </div>
+                </div>
+
+                <div class="insights-tab-content" id="insightsTab-risks">
+                    <div class="section" style="margin-bottom: var(--spacing-md);">
+                        <div id="riskAssessmentContent">
+                            <!-- Will be populated dynamically -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Charts View -->
+            <div id="charts" class="view">
+                <div class="view-header">
+                    <div>
+                        <h2>Canonical Charts</h2>
+                        <div style="font-size: 14px; color: var(--text-secondary); margin-top: 4px;" id="chartsModelName">
+                            <span id="chartsCurrentModel">No model loaded</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Charts Tabs -->
+                <div class="insights-tabs" style="display: flex; gap: 8px; padding: 0 var(--spacing-lg); margin-bottom: var(--spacing-md); border-bottom: 1px solid var(--border-color);">
+                    <button class="insights-tab active" data-tab="cashFlywheel">
+                        <i data-lucide="trending-up"></i>
+                        <span>Cash Flywheel</span>
+                    </button>
+                    <button class="insights-tab" data-tab="marsCapital">
+                        <i data-lucide="layers"></i>
+                        <span>Mars Capital</span>
+                    </button>
+                    <button class="insights-tab" data-tab="enterpriseValue">
+                        <i data-lucide="chart-bar"></i>
+                        <span>Value Evolution</span>
+                    </button>
+                    <button class="insights-tab" data-tab="starshipCost">
+                        <i data-lucide="dollar-sign"></i>
+                        <span>Starship Economics</span>
+                    </button>
+                    <button class="insights-tab" data-tab="orbitalPower">
+                        <i data-lucide="zap"></i>
+                        <span>Orbital Power</span>
+                    </button>
+                    <button class="insights-tab" data-tab="marginEvolution">
+                        <i data-lucide="percent"></i>
+                        <span>Margin Evolution</span>
+                    </button>
+                    <button class="insights-tab" data-tab="unitEconomics">
+                        <i data-lucide="target"></i>
+                        <span>Unit Economics</span>
+                    </button>
+                    <button class="insights-tab" data-tab="capexEfficiency">
+                        <i data-lucide="trending-down"></i>
+                        <span>Capex Efficiency</span>
+                    </button>
+                </div>
+
+                <!-- Chart Tab Content -->
+                <div class="insights-tab-content active" id="insightsTab-cashFlywheel">
+                    <div class="section" style="margin-bottom: var(--spacing-md);">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                            <h3 style="margin: 0; font-size: 16px;"><i data-lucide="trending-up"></i> Starlink Cash Flywheel</h3>
+                            <div style="display: flex; gap: 8px;">
+                                <button class="insight-scenario-btn" data-chart="cashFlywheel" data-scenario="bear" style="background: #2a2a2a; color: #888; border: 1px solid #444; padding: 4px 12px; border-radius: 4px; font-size: 12px; cursor: pointer;">Bear</button>
+                                <button class="insight-scenario-btn active" data-chart="cashFlywheel" data-scenario="base" style="background: white; color: #0066cc; border: 1px solid #0066cc; padding: 4px 12px; border-radius: 4px; font-size: 12px; cursor: pointer; font-weight: 500;">Base</button>
+                                <button class="insight-scenario-btn" data-chart="cashFlywheel" data-scenario="bull" style="background: #2a2a2a; color: #888; border: 1px solid #444; padding: 4px 12px; border-radius: 4px; font-size: 12px; cursor: pointer;">Bull</button>
+                            </div>
+                        </div>
+                        <p style="color: var(--text-secondary); font-size: 14px; margin-bottom: var(--spacing-md); line-height: 1.6;">
+                            Projected Starlink revenue and free cash flow rise exponentially through the decade while cost lines stay comparatively flat, widening profit margins year after year.
+                        </p>
+                        <div class="chart-container" style="height: 400px;">
+                            <canvas id="cashFlywheelChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="insights-tab-content" id="insightsTab-marsCapital">
+                    <div class="section" style="margin-bottom: var(--spacing-md);">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                            <h3 style="margin: 0; font-size: 16px;"><i data-lucide="layers"></i> Mars Capital Accumulation</h3>
+                            <div style="display: flex; gap: 8px;">
+                                <button class="insight-scenario-btn" data-chart="marsCapital" data-scenario="bear" style="background: #2a2a2a; color: #888; border: 1px solid #444; padding: 4px 12px; border-radius: 4px; font-size: 12px; cursor: pointer;">Bear</button>
+                                <button class="insight-scenario-btn active" data-chart="marsCapital" data-scenario="base" style="background: white; color: #0066cc; border: 1px solid #0066cc; padding: 4px 12px; border-radius: 4px; font-size: 12px; cursor: pointer; font-weight: 500;">Base</button>
+                                <button class="insight-scenario-btn" data-chart="marsCapital" data-scenario="bull" style="background: #2a2a2a; color: #888; border: 1px solid #444; padding: 4px 12px; border-radius: 4px; font-size: 12px; cursor: pointer;">Bull</button>
+                            </div>
+                        </div>
+                        <p style="color: var(--text-secondary); font-size: 14px; margin-bottom: var(--spacing-md); line-height: 1.6;">
+                            Mars Accumulated Book Value represents the running total of value built up on Mars through cargo and Optimus robot deployments. The Optimus Fleet curve shows the cumulative number of productive units on Mars.
+                        </p>
+                        <div class="chart-container" style="height: 400px;">
+                            <canvas id="marsCapitalChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="insights-tab-content" id="insightsTab-enterpriseValue">
+                    <div class="section" style="margin-bottom: var(--spacing-md);">
+                        <h3 style="margin: 0 0 12px 0; font-size: 16px;"><i data-lucide="chart-bar"></i> Enterprise Value Evolution</h3>
+                        <p style="color: var(--text-secondary); font-size: 14px; margin-bottom: var(--spacing-md); line-height: 1.6;">
+                            The Monte Carlo output shows a narrow low-trillion peak for 2030 and a much wider, high-upside tail for 2040, reflecting the transition from Earth cash-flow dominance to Mars optionality.
+                        </p>
+                        <div class="chart-container" style="height: 400px;">
+                            <canvas id="enterpriseValueEvolutionChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="insights-tab-content" id="insightsTab-starshipCost">
+                    <div class="section" style="margin-bottom: var(--spacing-md);">
+                        <h3 style="margin: 0 0 12px 0; font-size: 16px;"><i data-lucide="dollar-sign"></i> Starship $/kg at Industrial Scale</h3>
+                        <p style="color: var(--text-secondary); font-size: 14px; margin-bottom: var(--spacing-md); line-height: 1.6;">
+                            Cost per kilogram declines dramatically with production scale and reuse, showing how Starship shifts from an exotic rocket into foundational logistics infrastructure. Wright's Law models cost decline as production scales.
+                        </p>
+                        <div class="chart-container" style="height: 400px;">
+                            <canvas id="starshipCostChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="insights-tab-content" id="insightsTab-orbitalPower">
+                    <div class="section" style="margin-bottom: var(--spacing-md);">
+                        <h3 style="margin: 0 0 12px 0; font-size: 16px;"><i data-lucide="zap"></i> $/W in Orbit vs. HEO $/kg</h3>
+                        <p style="color: var(--text-secondary); font-size: 14px; margin-bottom: var(--spacing-md); line-height: 1.6;">
+                            As launch costs decrease, orbital power generation becomes increasingly competitive with terrestrial solar. The chart shows crossover points where HEO technologies become cost-effective alternatives to ground-based power systems.
+                        </p>
+                        <div class="chart-container" style="height: 400px;">
+                            <canvas id="orbitalPowerChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="insights-tab-content" id="insightsTab-marginEvolution">
+                    <div class="section" style="margin-bottom: var(--spacing-md);">
+                        <h3 style="margin: 0 0 12px 0; font-size: 16px;"><i data-lucide="percent"></i> Margin Evolution</h3>
+                        <p style="color: var(--text-secondary); font-size: 14px; margin-bottom: var(--spacing-md); line-height: 1.6;">
+                            Operating leverage drives margin expansion as revenue scales faster than costs. EBITDA margin and Free Cash Flow margin show the progression from capital-intensive growth to cash-generating operations.
+                        </p>
+                        <div class="chart-container" style="height: 400px;">
+                            <canvas id="marginEvolutionChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="insights-tab-content" id="insightsTab-unitEconomics">
+                    <div class="section" style="margin-bottom: var(--spacing-md);">
+                        <h3 style="margin: 0 0 12px 0; font-size: 16px;"><i data-lucide="target"></i> Unit Economics</h3>
+                        <p style="color: var(--text-secondary); font-size: 14px; margin-bottom: var(--spacing-md); line-height: 1.6;">
+                            Unit economics reveal operational efficiency trends. Revenue per satellite, revenue per Gbps, and cost per launch demonstrate how scale drives profitability improvements.
+                        </p>
+                        <div class="chart-container" style="height: 400px;">
+                            <canvas id="unitEconomicsChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="insights-tab-content" id="insightsTab-capexEfficiency">
+                    <div class="section" style="margin-bottom: var(--spacing-md);">
+                        <h3 style="margin: 0 0 12px 0; font-size: 16px;"><i data-lucide="trending-down"></i> Capex Efficiency</h3>
+                        <p style="color: var(--text-secondary); font-size: 14px; margin-bottom: var(--spacing-md); line-height: 1.6;">
+                            Capital efficiency improves as infrastructure matures. Capex as a percentage of revenue declines while reinvestment rates stabilize, indicating transition from growth to cash generation phase.
+                        </p>
+                        <div class="chart-container" style="height: 400px;">
+                            <canvas id="capexEfficiencyChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Models Management View -->
+            <div id="models" class="view">
+                <div class="view-header">
+                    <h2>Saved Valuation Models</h2>
+                    <button class="btn btn-primary" id="saveCurrentModelBtn">
+                        <i data-lucide="save"></i>
+                        Save Current Model
+                    </button>
+                </div>
+
+                <!-- Model List -->
+                <div class="section">
+                    <div class="models-toolbar">
+                        <input type="text" id="modelSearch" placeholder="Search models..." class="search-input">
+                        <select id="modelSort" class="select-input">
+                            <option value="createdAt-desc">Newest First</option>
+                            <option value="createdAt-asc">Oldest First</option>
+                            <option value="name-asc">Name A-Z</option>
+                            <option value="name-desc">Name Z-A</option>
+                        </select>
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="showFavoritesOnly">
+                            Favorites Only
+                        </label>
+                    </div>
+
+                    <div class="models-grid" id="modelsGrid">
+                        <!-- Models will be loaded dynamically -->
+                    </div>
+
+                    <div class="pagination" id="modelsPagination">
+                        <!-- Pagination will be added dynamically -->
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- Monte Carlo Confirmation Modal -->
+    <div id="monteCarloConfirmModal" class="modal">
+        <div class="modal-content modal-small">
+            <div class="modal-header">
+                <h2><i data-lucide="alert-triangle"></i> Parameters Have Changed</h2>
+            </div>
+            <div class="modal-body" style="text-align: center; padding: 32px;">
+                <div style="margin-bottom: 24px;">
+                    <i data-lucide="info" style="width: 48px; height: 48px; color: var(--warning-color);"></i>
+                </div>
+                <h3 style="margin-bottom: 16px; color: var(--text-primary);">Outdated Simulations Detected</h3>
+                <p id="monteCarloConfirmMessage" style="color: var(--text-secondary); margin-bottom: 24px; line-height: 1.6;">
+                    <!-- Message will be populated dynamically -->
+                </p>
+                <div class="actions-bar" style="justify-content: center; gap: 12px;">
+                    <button class="btn btn-primary" id="confirmRerunSimulationBtn">
+                        <i data-lucide="play"></i> Run New Simulations
+                    </button>
+                    <button class="btn btn-secondary" id="cancelRerunSimulationBtn">
+                        Cancel
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Monte Carlo Progress Modal -->
+    <div id="monteCarloProgressModal" class="modal">
+        <div class="modal-content modal-small">
+            <div class="modal-header">
+                <h2><i data-lucide="dice-6"></i> Running Monte Carlo Simulation</h2>
+            </div>
+            <div class="modal-body" style="text-align: center; padding: 32px;">
+                <div style="margin-bottom: 24px;">
+                    <i data-lucide="loader-2" style="width: 48px; height: 48px; animation: spin 1s linear infinite;"></i>
+                </div>
+                <h3 style="margin-bottom: 16px; color: var(--text-primary);">Parameters Have Changed</h3>
+                <p style="color: var(--text-secondary); margin-bottom: 24px; line-height: 1.6;">
+                    Monte Carlo is calculating new simulations based on the updated parameters.<br>
+                    This may take a few moments...
+                </p>
+                <div class="progress-bar-container" style="width: 100%; background: var(--background); border-radius: 8px; height: 8px; overflow: hidden;">
+                    <div id="monteCarloProgressBar" class="progress-bar" style="width: 0%; height: 100%; background: var(--primary-color); transition: width 0.3s;"></div>
+                </div>
+                <p id="monteCarloProgressText" style="margin-top: 16px; color: var(--text-secondary); font-size: 14px;">
+                    Initializing simulation...
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Notification Modal (for success/error messages) -->
+    <div id="notificationModal" class="modal">
+        <div class="modal-content modal-small">
+            <div class="modal-header">
+                <h2 id="notificationTitle"><i data-lucide="info"></i> Notification</h2>
+                <button class="modal-close" id="closeNotificationBtn">
+                    <i data-lucide="x"></i>
+                </button>
+            </div>
+            <div class="modal-body" style="text-align: center; padding: 32px;">
+                <div style="margin-bottom: 24px;">
+                    <i id="notificationIcon" data-lucide="check-circle" style="width: 48px; height: 48px; color: var(--success-color);"></i>
+                </div>
+                <p id="notificationMessage" style="color: var(--text-secondary); line-height: 1.6;">
+                    <!-- Message will be populated dynamically -->
+                </p>
+                <div class="actions-bar" style="justify-content: center; margin-top: 24px;">
+                    <button class="btn btn-primary" id="confirmNotificationBtn">
+                        OK
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Edit Monte Carlo Config Modal -->
+    <div id="editMonteCarloConfigModal" class="modal">
+        <div class="modal-content modal-large">
+            <div class="modal-header">
+                <h2><i data-lucide="settings"></i> Edit Monte Carlo Configuration</h2>
+                <button class="modal-close" id="closeEditMonteCarloConfigBtn">
+                    <i data-lucide="x"></i>
+                </button>
+            </div>
+            <div class="modal-body" style="max-height: calc(80vh - 140px); overflow-y: auto;">
+                <div class="form-group">
+                    <label>Number of Runs</label>
+                    <select id="editMonteCarloRuns" class="select-input">
+                        <option value="1000">1,000 runs (Fast)</option>
+                        <option value="5000" selected>5,000 runs (Recommended)</option>
+                        <option value="10000">10,000 runs (Slow, High Precision)</option>
+                    </select>
+                </div>
+                
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" id="editUseCustomDistributions">
+                        Use Custom Distribution Parameters
+                    </label>
+                </div>
+
+                <div id="customDistributionsSection" style="display: none; margin-top: 24px;">
+                    <h3 style="margin-bottom: 16px;">Distribution Parameters</h3>
+                    
+                    <!-- Earth Parameters -->
+                    <div class="parameter-edit-group">
+                        <h4>Earth Parameters</h4>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>Starlink Penetration - StdDev</label>
+                                <input type="number" id="editEarthPenetrationStdDev" step="0.01" min="0" max="1" class="input-full">
+                            </div>
+                            <div class="form-group">
+                                <label>Min</label>
+                                <input type="number" id="editEarthPenetrationMin" step="0.01" min="0" max="1" class="input-full">
+                            </div>
+                            <div class="form-group">
+                                <label>Max</label>
+                                <input type="number" id="editEarthPenetrationMax" step="0.01" min="0" max="1" class="input-full">
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>Launch Volume - StdDev</label>
+                                <input type="number" id="editEarthLaunchStdDev" step="1" min="0" class="input-full">
+                            </div>
+                            <div class="form-group">
+                                <label>Min</label>
+                                <input type="number" id="editEarthLaunchMin" step="1" min="0" class="input-full">
+                            </div>
+                            <div class="form-group">
+                                <label>Max</label>
+                                <input type="number" id="editEarthLaunchMax" step="1" min="0" class="input-full">
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>Bandwidth Price Decline - StdDev</label>
+                                <input type="number" id="editEarthBandwidthStdDev" step="0.01" min="0" max="1" class="input-full">
+                            </div>
+                            <div class="form-group">
+                                <label>Min</label>
+                                <input type="number" id="editEarthBandwidthMin" step="0.01" min="0" max="1" class="input-full">
+                            </div>
+                            <div class="form-group">
+                                <label>Max</label>
+                                <input type="number" id="editEarthBandwidthMax" step="0.01" min="0" max="1" class="input-full">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Mars Parameters -->
+                    <div class="parameter-edit-group">
+                        <h4>Mars Parameters</h4>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>First Colony Year - StdDev</label>
+                                <input type="number" id="editMarsColonyStdDev" step="1" min="0" class="input-full">
+                            </div>
+                            <div class="form-group">
+                                <label>Min</label>
+                                <input type="number" id="editMarsColonyMin" step="1" min="2020" max="2100" class="input-full">
+                            </div>
+                            <div class="form-group">
+                                <label>Max</label>
+                                <input type="number" id="editMarsColonyMax" step="1" min="2020" max="2100" class="input-full">
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>Population Growth - StdDev</label>
+                                <input type="number" id="editMarsPopStdDev" step="0.01" min="0" max="1" class="input-full">
+                            </div>
+                            <div class="form-group">
+                                <label>Min</label>
+                                <input type="number" id="editMarsPopMin" step="0.01" min="0" max="1" class="input-full">
+                            </div>
+                            <div class="form-group">
+                                <label>Max</label>
+                                <input type="number" id="editMarsPopMax" step="0.01" min="0" max="1" class="input-full">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Financial Parameters -->
+                    <div class="parameter-edit-group">
+                        <h4>Financial Parameters</h4>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>Discount Rate - StdDev</label>
+                                <input type="number" id="editFinancialDiscountStdDev" step="0.01" min="0" max="1" class="input-full">
+                            </div>
+                            <div class="form-group">
+                                <label>Min</label>
+                                <input type="number" id="editFinancialDiscountMin" step="0.01" min="0" max="1" class="input-full">
+                            </div>
+                            <div class="form-group">
+                                <label>Max</label>
+                                <input type="number" id="editFinancialDiscountMax" step="0.01" min="0" max="1" class="input-full">
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>Dilution Factor - StdDev</label>
+                                <input type="number" id="editFinancialDilutionStdDev" step="0.01" min="0" max="1" class="input-full">
+                            </div>
+                            <div class="form-group">
+                                <label>Min</label>
+                                <input type="number" id="editFinancialDilutionMin" step="0.01" min="0" max="1" class="input-full">
+                            </div>
+                            <div class="form-group">
+                                <label>Max</label>
+                                <input type="number" id="editFinancialDilutionMax" step="0.01" min="0" max="1" class="input-full">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="actions-bar" style="margin-top: 24px;">
+                    <button class="btn btn-primary" id="saveMonteCarloConfigBtn">
+                        <i data-lucide="save"></i> Save Configuration
+                    </button>
+                    <button class="btn btn-secondary" id="cancelEditMonteCarloConfigBtn">
+                        Cancel
+                    </button>
+                    <button class="btn btn-secondary" id="resetMonteCarloConfigBtn">
+                        <i data-lucide="rotate-ccw"></i> Reset to Defaults
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Save Simulation Modal -->
+    <div id="saveSimulationModal" class="modal">
+        <div class="modal-content modal-small">
+            <div class="modal-header">
+                <h2><i data-lucide="save"></i> Save Monte Carlo Simulation</h2>
+                <button class="modal-close" id="closeSaveSimulationBtn">
+                    <i data-lucide="x"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>Simulation Name *</label>
+                    <input type="text" id="saveSimulationName" class="input-full" placeholder="e.g., Monte Carlo - Base Model">
+                </div>
+                <div class="form-group">
+                    <label>Description</label>
+                    <textarea id="saveSimulationDescription" class="input-full" rows="3" placeholder="Optional description"></textarea>
+                </div>
+                <div class="actions-bar">
+                    <button class="btn btn-primary" id="confirmSaveSimulationBtn">
+                        <i data-lucide="save"></i> Save
+                    </button>
+                    <button class="btn btn-secondary" id="cancelSaveSimulationBtn">
+                        Cancel
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Save Model Modal -->
+    <div id="saveModelModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Save Valuation Model</h3>
+                <button class="modal-close" id="closeSaveModelBtn">
+                    <i data-lucide="x"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>Model Name *</label>
+                    <input type="text" id="saveModelName" class="input-full" placeholder="e.g., Base Case 2025">
+                </div>
+                <div class="form-group">
+                    <label>Description</label>
+                    <textarea id="saveModelDescription" class="input-full" rows="3" placeholder="Optional description"></textarea>
+                </div>
+                <div class="form-group">
+                    <label>Tags (comma-separated)</label>
+                    <input type="text" id="saveModelTags" class="input-full" placeholder="e.g., base-case, 2025, starlink">
+                </div>
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" id="saveModelFavorite">
+                        Mark as Favorite
+                    </label>
+                </div>
+                <div class="actions-bar">
+                    <button class="btn btn-primary" id="confirmSaveModelBtn">
+                        <i data-lucide="save"></i>
+                        Save Model
+                    </button>
+                    <button class="btn btn-secondary" id="cancelSaveModelBtn">
+                        Cancel
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Save Model Modal -->
+    <div id="saveModelModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Save Valuation Model</h3>
+                <button class="modal-close" id="closeSaveModelBtn">
+                    <i data-lucide="x"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>Model Name *</label>
+                    <input type="text" id="saveModelName" class="input-full" placeholder="e.g., Base Case 2025">
+                </div>
+                <div class="form-group">
+                    <label>Description</label>
+                    <textarea id="saveModelDescription" class="input-full" rows="3" placeholder="Optional description"></textarea>
+                </div>
+                <div class="form-group">
+                    <label>Tags (comma-separated)</label>
+                    <input type="text" id="saveModelTags" class="input-full" placeholder="e.g., base-case, 2025, starlink">
+                </div>
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" id="saveModelFavorite">
+                        Mark as Favorite
+                    </label>
+                </div>
+                <div class="actions-bar">
+                    <button class="btn btn-primary" id="confirmSaveModelBtn">
+                        <i data-lucide="save"></i>
+                        Save Model
+                    </button>
+                    <button class="btn btn-secondary" id="cancelSaveModelBtn">
+                        Cancel
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Settings Modal -->
+    <div id="settingsModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Settings</h3>
+                <button class="modal-close" id="closeSettingsBtn">
+                    <i data-lucide="x"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <p>Settings panel coming soon...</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Help Modal -->
+    <div id="helpModal" class="modal">
+        <div class="modal-content modal-large">
+            <div class="modal-header">
+                <h2><i data-lucide="help-circle"></i> Help & Methodology</h2>
+                <button class="modal-close" id="closeHelpModal">
+                    <i data-lucide="x"></i>
+                </button>
+            </div>
+            <!-- Help Tabs -->
+            <div class="help-tabs">
+                <button class="help-tab active" data-tab="principles">Principles</button>
+                <button class="help-tab" data-tab="method">Method</button>
+                <button class="help-tab" data-tab="process">Process</button>
+                <button class="help-tab" data-tab="stress">Stress Testing</button>
+            </div>
+            <div class="modal-body" style="max-height: calc(80vh - 140px); overflow-y: auto;">
+
+                <!-- Principles Tab -->
+                <div id="helpTab-principles" class="help-tab-content active">
+                        <div class="help-section">
+                        <h3>Core Principles</h3>
+                        <p>This application implements the <strong>ARK × Mach33 SpaceX Valuation Model</strong>, a scenario-weighted, option-embedded, long-horizon enterprise valuation framework.</p>
+                        
+                        <h4>1. Dual-Planet Infrastructure</h4>
+                        <p>SpaceX is modeled as a dual-planet infrastructure company with:</p>
+                        <ul>
+                            <li><strong>Earth Operations:</strong> Cash-flow constrained, following traditional infrastructure economics</li>
+                            <li><strong>Mars Operations:</strong> Physics-constrained, following real-options theory</li>
+                        </ul>
+                        <p>This separation is structurally essential because they obey different time constants, risk regimes, and discounting logic.</p>
+
+                        <h4>2. Bandwidth as Primitive Economic Unit</h4>
+                        <p>Starlink value is anchored on <strong>delivered bandwidth capacity</strong>, not subscriber counts or ARPU alone. This aligns with physical reality:</p>
+                        <ul>
+                            <li>Satellites → Capacity</li>
+                            <li>Capacity → Throughput</li>
+                            <li>Throughput → Economic utility</li>
+                        </ul>
+                        <p>Bandwidth is the conserved quantity, similar to energy in utilities or ton-miles in logistics.</p>
+
+                        <h4>3. Capacity-Driven TAM Expansion</h4>
+                        <p>Rather than asking "What % of telecom does SpaceX capture?", the model asks:</p>
+                        <p><strong>"How large does the market become once this capacity exists?"</strong></p>
+                        <p>Starlink does not compete inside a fixed market—it creates markets that cannot exist without it. This avoids the classic mistake of applying terrestrial telecom TAM logic to orbital infrastructure.</p>
+
+                        <h4>4. Real-Options Logic</h4>
+                        <p>Mars is treated as a <strong>call option</strong> with:</p>
+                        <ul>
+                            <li>Asymmetric payoff (high upside, limited downside)</li>
+                            <li>High uncertainty</li>
+                            <li>Long maturity</li>
+                            <li>Enormous convexity</li>
+                        </ul>
+                        <p>Critically, failure does not zero Earth value, while success dominates the terminal value distribution. This is mathematically correct for SpaceX—a conventional WACC-based DCF would systematically misprice this structure.</p>
+
+                        <h4>5. Time Horizon Philosophy</h4>
+                        <p>The model uses <strong>2030 and 2040 anchor points</strong>, which are:</p>
+                        <ul>
+                            <li>Aggressive by financial standards</li>
+                            <li>Conservative by civilizational infrastructure standards</li>
+                        </ul>
+                        <p>This framing assumes technological learning curves dominate macro volatility and institutional continuity persists.</p>
+                    </div>
+                </div>
+
+                <!-- Method Tab -->
+                <div id="helpTab-method" class="help-tab-content">
+                    <div class="help-section">
+
+                        <h3>Valuation Methodology</h3>
+                        
+                        <h4>Earth Operations Valuation</h4>
+                        <p>Earth operations generate cash flows through:</p>
+                        <ul>
+                            <li><strong>Starlink:</strong> TAM-based revenue model using GDP growth, inflation, penetration rate, and revenue multiple</li>
+                            <li><strong>Starshield:</strong> Estimated as 10% of Starlink revenue</li>
+                            <li><strong>Launch Services:</strong> Breakdown between Starship (80%) and Falcon 9 (20%)</li>
+                        </ul>
+                        <p><strong>Valuation Method:</strong> EBITDA Multiple (18x) applied to final year EBITDA for 2030 horizon. For longer horizons, discounted cash flow with terminal value.</p>
+
+                        <h4>Mars Operations Valuation</h4>
+                        <p>Mars operations are valued using real-options theory:</p>
+                        <ul>
+                            <li><strong>Underlying Value:</strong> Present value of future Mars cash flows</li>
+                            <li><strong>Strike Price:</strong> Cost to establish first colony</li>
+                            <li><strong>Time to Expiry:</strong> Years until first permanent settlement</li>
+                            <li><strong>Volatility:</strong> Based on transport cost decline and population growth assumptions</li>
+                        </ul>
+                        <p>The model accounts for multiple scenarios (success, delay, failure) with probability-weighted expected values.</p>
+
+                        <h4>Detailed Calculations</h4>
+                        <p>The model includes granular tracking of:</p>
+                        <ul>
+                            <li><strong>Launch Capacity:</strong> Rockets manufactured, available, retired, and reserved for Mars</li>
+                            <li><strong>Satellite Constellation:</strong> Satellites launched, deorbited, and active; bandwidth capacity</li>
+                            <li><strong>Capital Expenditures:</strong> Satellite, rocket, and facility capex</li>
+                            <li><strong>Cost Breakdown:</strong> Satellite manufacturing/operations, launch costs, depreciation</li>
+                            <li><strong>Cash Flow:</strong> Revenue - Costs - Capex = Free Cash Flow</li>
+                        </ul>
+
+                        <h4>Key Assumptions</h4>
+                        <ul>
+                            <li><strong>Time Horizon:</strong> Aggressive 2030/2040 anchor points (conservative by infrastructure standards)</li>
+                            <li><strong>Discount Rate:</strong> Default 12% (can be adjusted)</li>
+                            <li><strong>EBITDA Multiple:</strong> 18x for 2030 valuation (as per Excel model)</li>
+                            <li><strong>Dilution:</strong> 15% default (accounts for future capital raises)</li>
+                            <li><strong>Starlink Revenue Model:</strong> TAM-based with penetration and revenue multiple</li>
+                            <li><strong>Mars Option:</strong> Black-Scholes framework adapted for real options</li>
+                        </ul>
+
+                        <h4>Limitations & Considerations</h4>
+                        <ul>
+                            <li>Mars political economy and governance frameworks are not deeply modeled</li>
+                            <li>Discount rate assumptions are philosophical choices, not empirically derived</li>
+                            <li>Competition from nationalized LEO constellations could impact pricing power</li>
+                            <li>Model assumes technological learning curves dominate macro volatility</li>
+                            <li>Institutional continuity is assumed to persist</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Process Tab -->
+                <div id="helpTab-process" class="help-tab-content">
+                    <div class="help-section">
+
+                        <h3>Process & Workflow</h3>
+                        
+                        <h4>1. Input Parameters</h4>
+                        <p>Navigate to the <strong>Inputs</strong> tab to set:</p>
+                        <ul>
+                            <li><strong>Earth Operations:</strong> Starlink penetration, bandwidth price decline, launch volume, launch price decline</li>
+                            <li><strong>Mars Operations:</strong> First colony year, transport cost decline, population growth, industrial bootstrapping</li>
+                            <li><strong>Financial:</strong> Discount rate, dilution factor, terminal growth rate</li>
+                        </ul>
+
+                        <h4>2. Calculate Base Valuation</h4>
+                        <p>Click <strong>Calculate Valuation</strong> to run the model. The system will:</p>
+                        <ul>
+                            <li>Calculate year-by-year projections for Earth operations</li>
+                            <li>Compute Mars real-options value</li>
+                            <li>Apply dilution adjustments</li>
+                            <li>Generate detailed capacity, constellation, and cash flow data</li>
+                        </ul>
+                        <p>This gives you a <strong>point estimate</strong> based on your specific input assumptions.</p>
+
+                        <h4>3. Analyze Results</h4>
+                        <p>View results in multiple ways:</p>
+                        <ul>
+                            <li><strong>Dashboard:</strong> High-level metrics, valuation breakdown, charts</li>
+                            <li><strong>Earth Tab:</strong> Detailed Earth operations analysis, revenue breakdown, cash flow projections</li>
+                            <li><strong>Mars Tab:</strong> Mars option analysis, population projections, scenario breakdown</li>
+                        </ul>
+
+                        <h4>4. Advanced Analysis Tools</h4>
+                        
+                        <h5>Sensitivity Analysis</h5>
+                        <p>Test the impact of individual variables on valuation:</p>
+                        <ul>
+                            <li>Select a variable (e.g., Starlink penetration, discount rate)</li>
+                            <li>Set a range (min, max, steps)</li>
+                            <li>View how valuation changes across the range</li>
+                            <li>Identifies which variables have the most impact</li>
+                        </ul>
+                        <p><strong>Use Case:</strong> Understand which assumptions drive valuation most significantly.</p>
+
+                        <h5>Monte Carlo Simulation</h5>
+                        <p><strong>How Monte Carlo Fits Into the Process:</strong></p>
+                        <p>While the base calculation gives you a point estimate, Monte Carlo simulation addresses uncertainty by:</p>
+                        <ul>
+                            <li><strong>Running thousands of simulations</strong> (default: 5,000 runs)</li>
+                            <li><strong>Randomizing inputs</strong> based on probability distributions for each variable</li>
+                            <li><strong>Generating a distribution</strong> of possible outcomes rather than a single value</li>
+                            <li><strong>Providing statistical insights:</strong> mean, median, percentiles (10th, 90th), quartiles, standard deviation</li>
+                        </ul>
+                        <p><strong>Process:</strong></p>
+                        <ol>
+                            <li>Set base inputs (your best estimates)</li>
+                            <li>Run Monte Carlo simulation</li>
+                            <li>Review the distribution histogram to see the range of possible valuations</li>
+                            <li>Analyze statistics to understand:
+                                <ul>
+                                    <li>Expected value (mean)</li>
+                                    <li>Median (50th percentile)</li>
+                                    <li>Confidence intervals (10th-90th percentile range)</li>
+                                    <li>Risk assessment (standard deviation)</li>
+                                </ul>
+                            </li>
+                        </ol>
+                        <p><strong>Use Case:</strong> When you want to understand the <strong>range of possible outcomes</strong> given uncertainty in inputs, rather than relying on a single point estimate. This is especially valuable for Mars operations where uncertainty is high.</p>
+                        <p><strong>Key Insight:</strong> Monte Carlo reveals that even with uncertain inputs, the valuation distribution may show strong central tendencies, or it may reveal significant tail risks.</p>
+
+                        <h5>Scenario Comparison</h5>
+                        <p>Compare different time horizons and scopes:</p>
+                        <ul>
+                            <li>2030 Earth Only</li>
+                            <li>2030 Earth & Mars</li>
+                            <li>2040 Earth & Mars</li>
+                        </ul>
+                        <p><strong>Use Case:</strong> Understand how time horizon and Mars inclusion affect valuation.</p>
+
+                        <h4>5. Save & Manage Models</h4>
+                        <p>Save your valuation models for future reference:</p>
+                        <ul>
+                            <li>Click <strong>Save Current Model</strong> to store inputs and results</li>
+                            <li>Models are automatically recalculated with latest logic when loaded</li>
+                            <li>Use tags and favorites to organize models</li>
+                            <li>Duplicate models to create variations</li>
+                        </ul>
+
+                        <h4>Recommended Workflow</h4>
+                        <ol>
+                            <li><strong>Start with base inputs</strong> - Use default values or your best estimates</li>
+                            <li><strong>Calculate base valuation</strong> - Get your point estimate</li>
+                            <li><strong>Run sensitivity analysis</strong> - Identify which variables matter most</li>
+                            <li><strong>Run Monte Carlo simulation</strong> - Understand the distribution of outcomes</li>
+                            <li><strong>Run stress tests</strong> - Evaluate downside scenarios</li>
+                            <li><strong>Compare scenarios</strong> - See how different horizons affect results</li>
+                            <li><strong>Save models</strong> - Document your analysis</li>
+                        </ol>
+
+                        <h3>Technical Notes</h3>
+                        <ul>
+                            <li>All values are displayed in billions (B) or trillions (T)</li>
+                            <li>Cash flows are discounted to present value using the specified discount rate</li>
+                            <li>Year-by-year projections track capacity, constellation, capex, and costs</li>
+                            <li>Models saved with old calculation logic are automatically updated when loaded</li>
+                            <li>Monte Carlo uses normal distributions for input randomization (can be customized)</li>
+                        </ul>
+
+                        <div style="margin-top: 32px; padding-top: 24px; border-top: 1px solid #e0e0e0;">
+                            <p style="color: #666; font-size: 14px;">
+                                <strong>Note:</strong> This model is designed to force the correct questions about civilizational-scale infrastructure valuation, not to provide definitive answers. It treats SpaceX as a capacity-creation company where value follows physics and coordination, not traditional demand curves.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Stress Testing Tab -->
+                <div id="helpTab-stress" class="help-tab-content">
+                    <div class="help-section">
+                        <h3>Stress Testing</h3>
+                        <p><strong>How Stress Testing Fits Into the Process:</strong></p>
+                        <p>While Monte Carlo simulation explores the <strong>distribution of outcomes</strong> under normal uncertainty, stress testing evaluates <strong>specific adverse scenarios</strong> and failure modes. It answers: "What happens if things go wrong?"</p>
+                        
+                        <h4>What Stress Testing Does</h4>
+                        <ul>
+                            <li><strong>Tests extreme scenarios:</strong> Evaluates what happens under adverse conditions</li>
+                            <li><strong>Identifies failure modes:</strong> Reveals which assumptions, if violated, would most impact valuation</li>
+                            <li><strong>Quantifies downside risk:</strong> Shows how much value could be lost in worst-case scenarios</li>
+                            <li><strong>Validates model robustness:</strong> Ensures the valuation model behaves reasonably under stress</li>
+                        </ul>
+                        
+                        <h4>Predefined Stress Scenarios</h4>
+                        <p>The application includes three predefined stress scenarios:</p>
+                        <ul>
+                            <li><strong>Mars Delay:</strong> First colony delayed to 2060 (tests impact of Mars timeline slippage)
+                                <ul>
+                                    <li>Modifies: <code>mars.firstColonyYear = 2060</code></li>
+                                    <li>Impact: Reduces Mars option value due to longer time to expiry</li>
+                                    <li>Use Case: Test resilience if Mars colonization is delayed</li>
+                                </ul>
+                            </li>
+                            <li><strong>Competition:</strong> Starlink penetration cut in half (tests impact of competitive pressure)
+                                <ul>
+                                    <li>Modifies: <code>earth.starlinkPenetration = baseValue × 0.5</code></li>
+                                    <li>Impact: Reduces Earth revenue significantly (penetration is highly sensitive)</li>
+                                    <li>Use Case: Test impact of competitive LEO constellations or market share loss</li>
+                                </ul>
+                            </li>
+                            <li><strong>Mars Failure:</strong> Zero population growth, no industrial bootstrapping (tests complete Mars failure)
+                                <ul>
+                                    <li>Modifies: <code>mars.populationGrowth = 0</code>, <code>mars.industrialBootstrap = false</code></li>
+                                    <li>Impact: Eliminates Mars value growth, reduces option value</li>
+                                    <li>Use Case: Test worst-case scenario where Mars colony fails to scale</li>
+                                </ul>
+                            </li>
+                        </ul>
+                        
+                        <h4>Custom Stress Scenarios</h4>
+                        <p>You can define your own adverse conditions by modifying any input parameter:</p>
+                        <ul>
+                            <li>Adjust Earth operations inputs (penetration, pricing, launch volume)</li>
+                            <li>Modify Mars operations inputs (colony year, cost decline, growth)</li>
+                            <li>Change financial parameters (discount rate, dilution, terminal growth)</li>
+                            <li>Test specific failure modes or market conditions</li>
+                        </ul>
+                        <p><strong>Example Custom Scenarios:</strong></p>
+                        <ul>
+                            <li>Regulatory risk: Reduce launch volume by 50%</li>
+                            <li>Technology failure: Increase bandwidth price decline rate</li>
+                            <li>Capital constraints: Increase dilution factor</li>
+                            <li>Market disruption: Reduce terminal growth rate</li>
+                        </ul>
+                        
+                        <h4>Process</h4>
+                        <ol>
+                            <li><strong>Start with base valuation:</strong> Calculate your base case point estimate</li>
+                            <li><strong>Select scenario:</strong> Choose a predefined scenario or create a custom one</li>
+                            <li><strong>Run stress test:</strong> The system recalculates valuation with modified inputs</li>
+                            <li><strong>Compare results:</strong>
+                                <ul>
+                                    <li>Absolute value difference (base vs. stress)</li>
+                                    <li>Percentage change</li>
+                                    <li>Which components (Earth/Mars) are most affected</li>
+                                    <li>Breakdown of value impact</li>
+                                </ul>
+                            </li>
+                            <li><strong>Analyze impact:</strong> Identify which assumptions drive the stress impact</li>
+                            <li><strong>Iterate:</strong> Test multiple scenarios to understand risk profile</li>
+                        </ol>
+                        
+                        <h4>Interpreting Results</h4>
+                        <p>When reviewing stress test results, consider:</p>
+                        <ul>
+                            <li><strong>Magnitude of Impact:</strong> How much does valuation change?</li>
+                            <li><strong>Asymmetry:</strong> Is the impact symmetric or does it favor upside/downside?</li>
+                            <li><strong>Component Breakdown:</strong> Which part (Earth/Mars) is more sensitive?</li>
+                            <li><strong>Relative to Base:</strong> Is the stress scenario still valuable, or does it destroy value?</li>
+                            <li><strong>Probability:</strong> How likely is this scenario? (Stress testing doesn't assign probabilities)</li>
+                        </ul>
+                        
+                        <h4>Use Cases</h4>
+                        <ul>
+                            <li><strong>Risk Assessment:</strong> Understand downside exposure and worst-case scenarios</li>
+                            <li><strong>Assumption Validation:</strong> Identify which assumptions are most critical to valuation</li>
+                            <li><strong>Scenario Planning:</strong> Prepare for adverse market conditions or execution failures</li>
+                            <li><strong>Model Validation:</strong> Ensure the model produces reasonable results under extreme conditions</li>
+                            <li><strong>Investment Decision Support:</strong> Understand risk-adjusted returns and downside protection</li>
+                            <li><strong>Due Diligence:</strong> Test model sensitivity to key risk factors</li>
+                        </ul>
+                        
+                        <h4>Key Insights</h4>
+                        <ul>
+                            <li>Stress testing reveals <strong>asymmetric risks</strong> - some scenarios have disproportionate impact</li>
+                            <li>It helps identify <strong>critical assumptions</strong> that, if wrong, would materially change valuation</li>
+                            <li>Comparing multiple stress scenarios shows which <strong>failure modes</strong> are most dangerous</li>
+                            <li>Stress testing complements Monte Carlo by testing <strong>specific known risks</strong> rather than general uncertainty</li>
+                            <li>Results can inform <strong>risk mitigation strategies</strong> and contingency planning</li>
+                        </ul>
+                        
+                        <h4>Difference from Monte Carlo</h4>
+                        <p>Understanding when to use each tool:</p>
+                        <table style="width: 100%; border-collapse: collapse; margin: 16px 0;">
+                            <thead>
+                                <tr style="background: var(--background);">
+                                    <th style="padding: 12px; border: 1px solid var(--border-color); text-align: left;">Aspect</th>
+                                    <th style="padding: 12px; border: 1px solid var(--border-color); text-align: left;">Monte Carlo</th>
+                                    <th style="padding: 12px; border: 1px solid var(--border-color); text-align: left;">Stress Testing</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td style="padding: 12px; border: 1px solid var(--border-color);"><strong>Purpose</strong></td>
+                                    <td style="padding: 12px; border: 1px solid var(--border-color);">Explore general uncertainty</td>
+                                    <td style="padding: 12px; border: 1px solid var(--border-color);">Test specific adverse scenarios</td>
+                                </tr>
+                                <tr>
+                                    <td style="padding: 12px; border: 1px solid var(--border-color);"><strong>Inputs</strong></td>
+                                    <td style="padding: 12px; border: 1px solid var(--border-color);">Randomized based on distributions</td>
+                                    <td style="padding: 12px; border: 1px solid var(--border-color);">Specific modified values</td>
+                                </tr>
+                                <tr>
+                                    <td style="padding: 12px; border: 1px solid var(--border-color);"><strong>Output</strong></td>
+                                    <td style="padding: 12px; border: 1px solid var(--border-color);">Distribution of outcomes</td>
+                                    <td style="padding: 12px; border: 1px solid var(--border-color);">Point estimate for scenario</td>
+                                </tr>
+                                <tr>
+                                    <td style="padding: 12px; border: 1px solid var(--border-color);"><strong>Question</strong></td>
+                                    <td style="padding: 12px; border: 1px solid var(--border-color);">"What could happen?"</td>
+                                    <td style="padding: 12px; border: 1px solid var(--border-color);">"What happens if X goes wrong?"</td>
+                                </tr>
+                                <tr>
+                                    <td style="padding: 12px; border: 1px solid var(--border-color);"><strong>Best For</strong></td>
+                                    <td style="padding: 12px; border: 1px solid var(--border-color);">Understanding range and probabilities</td>
+                                    <td style="padding: 12px; border: 1px solid var(--border-color);">Testing known risks and failure modes</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                        
+                        <p><strong>Together:</strong> Monte Carlo shows "what could happen" across the full uncertainty space, while stress testing shows "what happens if X goes wrong" for specific known risks. Both are valuable for comprehensive risk analysis.</p>
+                        
+                        <h4>Best Practices</h4>
+                        <ul>
+                            <li><strong>Start with base case:</strong> Always calculate base valuation first</li>
+                            <li><strong>Test multiple scenarios:</strong> Don't rely on a single stress test</li>
+                            <li><strong>Focus on plausible scenarios:</strong> Test realistic adverse conditions, not impossible ones</li>
+                            <li><strong>Document assumptions:</strong> Note which inputs were changed and why</li>
+                            <li><strong>Compare systematically:</strong> Use consistent base case for all stress tests</li>
+                            <li><strong>Consider correlations:</strong> Some failures may cascade (e.g., Mars delay → reduced launch demand)</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="/js/app.js"></script>
+    <script>
+        // Initialize Lucide icons
+        lucide.createIcons();
+    </script>
+</body>
+</html>
+

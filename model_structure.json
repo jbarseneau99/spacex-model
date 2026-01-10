@@ -1,0 +1,377 @@
+{
+  "sheets": [
+    {
+      "name": "Disclosure",
+      "max_row": 17,
+      "max_col": 8,
+      "formulas": [],
+      "values_sample": {},
+      "headers": [
+        [
+          "This work is licensed under a Creative Commons Att"
+        ],
+        [
+          "You may not use the material for commercial purpos"
+        ],
+        [
+          "2025, ARK Investment Management LLC and Mach33. Al"
+        ]
+      ],
+      "formula_count": 0
+    },
+    {
+      "name": "Table Of Contents",
+      "max_row": 18,
+      "max_col": 9,
+      "formulas": [],
+      "values_sample": {},
+      "headers": [],
+      "formula_count": 0
+    },
+    {
+      "name": "Valuation Inputs & Logic",
+      "max_row": 50,
+      "max_col": 12,
+      "formulas": [
+        {
+          "cell": "C10",
+          "formula": "=QUARTILE('Valuation Outputs'!$M$7:$M$5006,1)/10^9"
+        },
+        {
+          "cell": "D10",
+          "formula": "=AVERAGE('Valuation Outputs'!$M$7:$M$5006)/10^9"
+        },
+        {
+          "cell": "E10",
+          "formula": "=QUARTILE('Valuation Outputs'!$M$7:$M$5006,3)/10^9"
+        },
+        {
+          "cell": "C11",
+          "formula": "=_xlfn.RRI(((C$8-$B$8)/365),$B$10,C10)"
+        },
+        {
+          "cell": "D11",
+          "formula": "=_xlfn.RRI(((D$8-$B$8)/365),$B$10,D10)"
+        },
+        {
+          "cell": "E11",
+          "formula": "=_xlfn.RRI(((E$8-$B$8)/365),$B$10,E10)"
+        },
+        {
+          "cell": "C15",
+          "formula": "=QUARTILE('Valuation Outputs'!$BZ$7:$BZ$5006,1)/10^9"
+        },
+        {
+          "cell": "D15",
+          "formula": "=AVERAGE('Valuation Outputs'!$BZ$7:$BZ$5006)/10^9"
+        },
+        {
+          "cell": "E15",
+          "formula": "=QUARTILE('Valuation Outputs'!$BZ$7:$BZ$5006,3)/10^9"
+        },
+        {
+          "cell": "C16",
+          "formula": "=_xlfn.RRI(((C$13-$B$13)/365),$B$15,C15)"
+        }
+      ],
+      "values_sample": {},
+      "headers": [],
+      "formula_count": 69
+    },
+    {
+      "name": "Earth",
+      "max_row": 1154,
+      "max_col": 36,
+      "formulas": [
+        {
+          "cell": "B7",
+          "formula": "=O153"
+        },
+        {
+          "cell": "C7",
+          "formula": "=O153"
+        },
+        {
+          "cell": "D7",
+          "formula": "=Y153"
+        },
+        {
+          "cell": "C8",
+          "formula": "=B8"
+        },
+        {
+          "cell": "D8",
+          "formula": "=C8"
+        },
+        {
+          "cell": "B9",
+          "formula": "=B7*B8"
+        },
+        {
+          "cell": "C9",
+          "formula": "=C7*C8"
+        },
+        {
+          "cell": "D9",
+          "formula": "=D7*D8"
+        },
+        {
+          "cell": "C10",
+          "formula": "=Mars!K54+Mars!K8-Mars!K27"
+        },
+        {
+          "cell": "D10",
+          "formula": "=Mars!U54+Mars!U8-Mars!U27"
+        }
+      ],
+      "values_sample": {},
+      "headers": [],
+      "formula_count": 7705
+    },
+    {
+      "name": "Earth Bandwidth TAM",
+      "max_row": 1012,
+      "max_col": 10,
+      "formulas": [],
+      "values_sample": {},
+      "headers": [],
+      "formula_count": 0
+    },
+    {
+      "name": "Mars",
+      "max_row": 55,
+      "max_col": 32,
+      "formulas": [
+        {
+          "cell": "L6",
+          "formula": "=K6+1"
+        },
+        {
+          "cell": "M6",
+          "formula": "=L6+1"
+        },
+        {
+          "cell": "N6",
+          "formula": "=M6+1"
+        },
+        {
+          "cell": "O6",
+          "formula": "=N6+1"
+        },
+        {
+          "cell": "P6",
+          "formula": "=O6+1"
+        },
+        {
+          "cell": "Q6",
+          "formula": "=P6+1"
+        },
+        {
+          "cell": "R6",
+          "formula": "=Q6+1"
+        },
+        {
+          "cell": "S6",
+          "formula": "=R6+1"
+        },
+        {
+          "cell": "T6",
+          "formula": "=S6+1"
+        },
+        {
+          "cell": "U6",
+          "formula": "=T6+1"
+        }
+      ],
+      "values_sample": {},
+      "headers": [],
+      "formula_count": 1038
+    },
+    {
+      "name": "Valuation Outputs",
+      "max_row": 5006,
+      "max_col": 79,
+      "formulas": [
+        {
+          "cell": "B7",
+          "formula": "=Earth!O59"
+        },
+        {
+          "cell": "C7",
+          "formula": "=Earth!O62"
+        },
+        {
+          "cell": "D7",
+          "formula": "=Earth!O58"
+        },
+        {
+          "cell": "E7",
+          "formula": "=Earth!O61"
+        },
+        {
+          "cell": "F7",
+          "formula": "=Earth!O116"
+        },
+        {
+          "cell": "G7",
+          "formula": "=Earth!O117"
+        },
+        {
+          "cell": "H7",
+          "formula": "=Earth!O118"
+        },
+        {
+          "cell": "I7",
+          "formula": "=Earth!O119"
+        },
+        {
+          "cell": "J7",
+          "formula": "=Earth!O144"
+        },
+        {
+          "cell": "K7",
+          "formula": "=Earth!O153"
+        }
+      ],
+      "values_sample": {},
+      "headers": [],
+      "formula_count": 79
+    }
+  ],
+  "formulas": {},
+  "named_ranges": [
+    {
+      "name": "IQ_CH",
+      "value": "<openpyxl.workbook.defined_name.DefinedName object>\nParameters:\nname='IQ_CH', comment=None, customMenu=None, description=None, help=None, statusBar=None, localSheetId=None, hidden=None, function=None, vbProcedure=None, xlm=None, functionGroupId=None, shortcutKey=None, publishToServer=None, workbookParameter=None, attr_text='110000'"
+    },
+    {
+      "name": "IQ_CQ",
+      "value": "<openpyxl.workbook.defined_name.DefinedName object>\nParameters:\nname='IQ_CQ', comment=None, customMenu=None, description=None, help=None, statusBar=None, localSheetId=None, hidden=None, function=None, vbProcedure=None, xlm=None, functionGroupId=None, shortcutKey=None, publishToServer=None, workbookParameter=None, attr_text='5000'"
+    },
+    {
+      "name": "IQ_CY",
+      "value": "<openpyxl.workbook.defined_name.DefinedName object>\nParameters:\nname='IQ_CY', comment=None, customMenu=None, description=None, help=None, statusBar=None, localSheetId=None, hidden=None, function=None, vbProcedure=None, xlm=None, functionGroupId=None, shortcutKey=None, publishToServer=None, workbookParameter=None, attr_text='10000'"
+    },
+    {
+      "name": "IQ_DAILY",
+      "value": "<openpyxl.workbook.defined_name.DefinedName object>\nParameters:\nname='IQ_DAILY', comment=None, customMenu=None, description=None, help=None, statusBar=None, localSheetId=None, hidden=None, function=None, vbProcedure=None, xlm=None, functionGroupId=None, shortcutKey=None, publishToServer=None, workbookParameter=None, attr_text='500000'"
+    },
+    {
+      "name": "IQ_DNTM",
+      "value": "<openpyxl.workbook.defined_name.DefinedName object>\nParameters:\nname='IQ_DNTM', comment=None, customMenu=None, description=None, help=None, statusBar=None, localSheetId=None, hidden=True, function=None, vbProcedure=None, xlm=None, functionGroupId=None, shortcutKey=None, publishToServer=None, workbookParameter=None, attr_text='700000'"
+    },
+    {
+      "name": "IQ_FH",
+      "value": "<openpyxl.workbook.defined_name.DefinedName object>\nParameters:\nname='IQ_FH', comment=None, customMenu=None, description=None, help=None, statusBar=None, localSheetId=None, hidden=None, function=None, vbProcedure=None, xlm=None, functionGroupId=None, shortcutKey=None, publishToServer=None, workbookParameter=None, attr_text='100000'"
+    },
+    {
+      "name": "IQ_FQ",
+      "value": "<openpyxl.workbook.defined_name.DefinedName object>\nParameters:\nname='IQ_FQ', comment=None, customMenu=None, description=None, help=None, statusBar=None, localSheetId=None, hidden=None, function=None, vbProcedure=None, xlm=None, functionGroupId=None, shortcutKey=None, publishToServer=None, workbookParameter=None, attr_text='500'"
+    },
+    {
+      "name": "IQ_FWD_CY",
+      "value": "<openpyxl.workbook.defined_name.DefinedName object>\nParameters:\nname='IQ_FWD_CY', comment=None, customMenu=None, description=None, help=None, statusBar=None, localSheetId=None, hidden=True, function=None, vbProcedure=None, xlm=None, functionGroupId=None, shortcutKey=None, publishToServer=None, workbookParameter=None, attr_text='10001'"
+    },
+    {
+      "name": "IQ_FWD_CY1",
+      "value": "<openpyxl.workbook.defined_name.DefinedName object>\nParameters:\nname='IQ_FWD_CY1', comment=None, customMenu=None, description=None, help=None, statusBar=None, localSheetId=None, hidden=True, function=None, vbProcedure=None, xlm=None, functionGroupId=None, shortcutKey=None, publishToServer=None, workbookParameter=None, attr_text='10002'"
+    },
+    {
+      "name": "IQ_FWD_CY2",
+      "value": "<openpyxl.workbook.defined_name.DefinedName object>\nParameters:\nname='IQ_FWD_CY2', comment=None, customMenu=None, description=None, help=None, statusBar=None, localSheetId=None, hidden=True, function=None, vbProcedure=None, xlm=None, functionGroupId=None, shortcutKey=None, publishToServer=None, workbookParameter=None, attr_text='10003'"
+    },
+    {
+      "name": "IQ_FWD_FY",
+      "value": "<openpyxl.workbook.defined_name.DefinedName object>\nParameters:\nname='IQ_FWD_FY', comment=None, customMenu=None, description=None, help=None, statusBar=None, localSheetId=None, hidden=True, function=None, vbProcedure=None, xlm=None, functionGroupId=None, shortcutKey=None, publishToServer=None, workbookParameter=None, attr_text='1001'"
+    },
+    {
+      "name": "IQ_FWD_FY1",
+      "value": "<openpyxl.workbook.defined_name.DefinedName object>\nParameters:\nname='IQ_FWD_FY1', comment=None, customMenu=None, description=None, help=None, statusBar=None, localSheetId=None, hidden=True, function=None, vbProcedure=None, xlm=None, functionGroupId=None, shortcutKey=None, publishToServer=None, workbookParameter=None, attr_text='1002'"
+    },
+    {
+      "name": "IQ_FWD_FY2",
+      "value": "<openpyxl.workbook.defined_name.DefinedName object>\nParameters:\nname='IQ_FWD_FY2', comment=None, customMenu=None, description=None, help=None, statusBar=None, localSheetId=None, hidden=True, function=None, vbProcedure=None, xlm=None, functionGroupId=None, shortcutKey=None, publishToServer=None, workbookParameter=None, attr_text='1003'"
+    },
+    {
+      "name": "IQ_FWD_Q",
+      "value": "<openpyxl.workbook.defined_name.DefinedName object>\nParameters:\nname='IQ_FWD_Q', comment=None, customMenu=None, description=None, help=None, statusBar=None, localSheetId=None, hidden=True, function=None, vbProcedure=None, xlm=None, functionGroupId=None, shortcutKey=None, publishToServer=None, workbookParameter=None, attr_text='501'"
+    },
+    {
+      "name": "IQ_FWD_Q1",
+      "value": "<openpyxl.workbook.defined_name.DefinedName object>\nParameters:\nname='IQ_FWD_Q1', comment=None, customMenu=None, description=None, help=None, statusBar=None, localSheetId=None, hidden=True, function=None, vbProcedure=None, xlm=None, functionGroupId=None, shortcutKey=None, publishToServer=None, workbookParameter=None, attr_text='502'"
+    },
+    {
+      "name": "IQ_FWD_Q2",
+      "value": "<openpyxl.workbook.defined_name.DefinedName object>\nParameters:\nname='IQ_FWD_Q2', comment=None, customMenu=None, description=None, help=None, statusBar=None, localSheetId=None, hidden=True, function=None, vbProcedure=None, xlm=None, functionGroupId=None, shortcutKey=None, publishToServer=None, workbookParameter=None, attr_text='503'"
+    },
+    {
+      "name": "IQ_FY",
+      "value": "<openpyxl.workbook.defined_name.DefinedName object>\nParameters:\nname='IQ_FY', comment=None, customMenu=None, description=None, help=None, statusBar=None, localSheetId=None, hidden=None, function=None, vbProcedure=None, xlm=None, functionGroupId=None, shortcutKey=None, publishToServer=None, workbookParameter=None, attr_text='1000'"
+    },
+    {
+      "name": "IQ_LATESTK",
+      "value": "<openpyxl.workbook.defined_name.DefinedName object>\nParameters:\nname='IQ_LATESTK', comment=None, customMenu=None, description=None, help=None, statusBar=None, localSheetId=None, hidden=True, function=None, vbProcedure=None, xlm=None, functionGroupId=None, shortcutKey=None, publishToServer=None, workbookParameter=None, attr_text='1000'"
+    },
+    {
+      "name": "IQ_LATESTQ",
+      "value": "<openpyxl.workbook.defined_name.DefinedName object>\nParameters:\nname='IQ_LATESTQ', comment=None, customMenu=None, description=None, help=None, statusBar=None, localSheetId=None, hidden=True, function=None, vbProcedure=None, xlm=None, functionGroupId=None, shortcutKey=None, publishToServer=None, workbookParameter=None, attr_text='500'"
+    },
+    {
+      "name": "IQ_LTM",
+      "value": "<openpyxl.workbook.defined_name.DefinedName object>\nParameters:\nname='IQ_LTM', comment=None, customMenu=None, description=None, help=None, statusBar=None, localSheetId=None, hidden=None, function=None, vbProcedure=None, xlm=None, functionGroupId=None, shortcutKey=None, publishToServer=None, workbookParameter=None, attr_text='2000'"
+    },
+    {
+      "name": "IQ_LTMMONTH",
+      "value": "<openpyxl.workbook.defined_name.DefinedName object>\nParameters:\nname='IQ_LTMMONTH', comment=None, customMenu=None, description=None, help=None, statusBar=None, localSheetId=None, hidden=True, function=None, vbProcedure=None, xlm=None, functionGroupId=None, shortcutKey=None, publishToServer=None, workbookParameter=None, attr_text='120000'"
+    },
+    {
+      "name": "IQ_MONTH",
+      "value": "<openpyxl.workbook.defined_name.DefinedName object>\nParameters:\nname='IQ_MONTH', comment=None, customMenu=None, description=None, help=None, statusBar=None, localSheetId=None, hidden=None, function=None, vbProcedure=None, xlm=None, functionGroupId=None, shortcutKey=None, publishToServer=None, workbookParameter=None, attr_text='15000'"
+    },
+    {
+      "name": "IQ_MTD",
+      "value": "<openpyxl.workbook.defined_name.DefinedName object>\nParameters:\nname='IQ_MTD', comment=None, customMenu=None, description=None, help=None, statusBar=None, localSheetId=None, hidden=True, function=None, vbProcedure=None, xlm=None, functionGroupId=None, shortcutKey=None, publishToServer=None, workbookParameter=None, attr_text='800000'"
+    },
+    {
+      "name": "IQ_NAMES_REVISION_DATE_",
+      "value": "<openpyxl.workbook.defined_name.DefinedName object>\nParameters:\nname='IQ_NAMES_REVISION_DATE_', comment=None, customMenu=None, description=None, help=None, statusBar=None, localSheetId=None, hidden=True, function=None, vbProcedure=None, xlm=None, functionGroupId=None, shortcutKey=None, publishToServer=None, workbookParameter=None, attr_text='44168.252025463'"
+    },
+    {
+      "name": "IQ_NTM",
+      "value": "<openpyxl.workbook.defined_name.DefinedName object>\nParameters:\nname='IQ_NTM', comment=None, customMenu=None, description=None, help=None, statusBar=None, localSheetId=None, hidden=None, function=None, vbProcedure=None, xlm=None, functionGroupId=None, shortcutKey=None, publishToServer=None, workbookParameter=None, attr_text='6000'"
+    },
+    {
+      "name": "IQ_QTD",
+      "value": "<openpyxl.workbook.defined_name.DefinedName object>\nParameters:\nname='IQ_QTD', comment=None, customMenu=None, description=None, help=None, statusBar=None, localSheetId=None, hidden=True, function=None, vbProcedure=None, xlm=None, functionGroupId=None, shortcutKey=None, publishToServer=None, workbookParameter=None, attr_text='750000'"
+    },
+    {
+      "name": "IQ_TODAY",
+      "value": "<openpyxl.workbook.defined_name.DefinedName object>\nParameters:\nname='IQ_TODAY', comment=None, customMenu=None, description=None, help=None, statusBar=None, localSheetId=None, hidden=True, function=None, vbProcedure=None, xlm=None, functionGroupId=None, shortcutKey=None, publishToServer=None, workbookParameter=None, attr_text='0'"
+    },
+    {
+      "name": "IQ_WEEK",
+      "value": "<openpyxl.workbook.defined_name.DefinedName object>\nParameters:\nname='IQ_WEEK', comment=None, customMenu=None, description=None, help=None, statusBar=None, localSheetId=None, hidden=None, function=None, vbProcedure=None, xlm=None, functionGroupId=None, shortcutKey=None, publishToServer=None, workbookParameter=None, attr_text='50000'"
+    },
+    {
+      "name": "IQ_YTD",
+      "value": "<openpyxl.workbook.defined_name.DefinedName object>\nParameters:\nname='IQ_YTD', comment=None, customMenu=None, description=None, help=None, statusBar=None, localSheetId=None, hidden=None, function=None, vbProcedure=None, xlm=None, functionGroupId=None, shortcutKey=None, publishToServer=None, workbookParameter=None, attr_text='3000'"
+    },
+    {
+      "name": "IQ_YTDMONTH",
+      "value": "<openpyxl.workbook.defined_name.DefinedName object>\nParameters:\nname='IQ_YTDMONTH', comment=None, customMenu=None, description=None, help=None, statusBar=None, localSheetId=None, hidden=True, function=None, vbProcedure=None, xlm=None, functionGroupId=None, shortcutKey=None, publishToServer=None, workbookParameter=None, attr_text='130000'"
+    },
+    {
+      "name": "Penetration",
+      "value": "<openpyxl.workbook.defined_name.DefinedName object>\nParameters:\nname='Penetration', comment=None, customMenu=None, description=None, help=None, statusBar=None, localSheetId=None, hidden=None, function=None, vbProcedure=None, xlm=None, functionGroupId=None, shortcutKey=None, publishToServer=None, workbookParameter=None, attr_text='OFFSET([1]S_Curve!$B$11,0,0,COUNTA([1]S_Curve!$B$11:$B$110),1)'"
+    },
+    {
+      "name": "Saturation",
+      "value": "<openpyxl.workbook.defined_name.DefinedName object>\nParameters:\nname='Saturation', comment=None, customMenu=None, description=None, help=None, statusBar=None, localSheetId=None, hidden=None, function=None, vbProcedure=None, xlm=None, functionGroupId=None, shortcutKey=None, publishToServer=None, workbookParameter=None, attr_text='OFFSET([1]S_Curve!$C$11,0,0,COUNTA([1]S_Curve!$C$11:$C$110),1)'"
+    },
+    {
+      "name": "Year",
+      "value": "<openpyxl.workbook.defined_name.DefinedName object>\nParameters:\nname='Year', comment=None, customMenu=None, description=None, help=None, statusBar=None, localSheetId=None, hidden=None, function=None, vbProcedure=None, xlm=None, functionGroupId=None, shortcutKey=None, publishToServer=None, workbookParameter=None, attr_text='OFFSET([1]S_Curve!$A$11,0,0,COUNTA([1]S_Curve!$A$11:$A$110),1)'"
+    }
+  ],
+  "structure": {}
+}
