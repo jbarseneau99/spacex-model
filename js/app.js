@@ -36,7 +36,10 @@ class ValuationApp {
         this.navigationHistory = []; // Track navigation history for context understanding
         this.previousContext = null; // Track previous context for change detection
         this.agentCommentaryEnabled = true; // Enable/disable agent commentary on context changes
-        this.agentCommentaryDebounceTimer = null; // Debounce timer for context change commentary // Flag to prevent duplicate generation
+        this.agentCommentaryDebounceTimer = null; // Debounce timer for context change commentary
+        this.elementSelectionDebounceTimer = null; // Debounce timer for element selection commentary
+        this.lastSelectedElement = null; // Track last selected element to avoid duplicate comments
+        this.elementSelectionHistory = []; // Track element selections for context // Flag to prevent duplicate generation
         this.agentSystemPrompts = null; // Will be loaded on demand
         this.agentChatHistory = []; // Store chat history for context
         this.alphaVantageApiKey = localStorage.getItem('alphaVantageApiKey') || '';
@@ -103,6 +106,9 @@ class ValuationApp {
         
         // Initialize actions bar visibility for Reference Data view
         this.updateReferenceDataActionsBar();
+        
+        // Initialize element selection detection for charts and text
+        this.setupElementSelectionDetection();
         
         // Initialize ratios dashboard with data
         // Load comparables on startup so ratios dashboard is ready
@@ -1550,6 +1556,26 @@ class ValuationApp {
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
+                onClick: (event, elements) => {
+                    if (elements && elements.length > 0) {
+                        const element = elements[0];
+                        const chart = this.charts.valuation;
+                        const label = chart.data.labels[element.index];
+                        const value = chart.data.datasets[0].data[element.index];
+                        const app = window.app; // Get app instance
+                        if (app) {
+                            app.handleElementSelection({
+                                type: 'chart',
+                                chartId: 'valuationChart',
+                                chartName: 'Valuation Breakdown',
+                                elementType: 'segment',
+                                label: label,
+                                value: formatValue(value),
+                                index: element.index
+                            });
+                        }
+                    }
+                },
                 plugins: {
                     legend: {
                         position: 'bottom'
@@ -1621,6 +1647,26 @@ class ValuationApp {
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
+                onClick: (event, elements) => {
+                    if (elements && elements.length > 0) {
+                        const element = elements[0];
+                        const chart = this.charts.revenueBreakdown;
+                        const label = chart.data.labels[element.index];
+                        const value = chart.data.datasets[0].data[element.index];
+                        const app = window.app;
+                        if (app) {
+                            app.handleElementSelection({
+                                type: 'chart',
+                                chartId: 'revenueBreakdownChart',
+                                chartName: 'Revenue Breakdown',
+                                elementType: 'segment',
+                                label: label,
+                                value: `$${value.toFixed(2)}B`,
+                                index: element.index
+                            });
+                        }
+                    }
+                },
                 plugins: {
                     title: {
                         display: true,
@@ -1706,6 +1752,28 @@ class ValuationApp {
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
+                onClick: (event, elements) => {
+                    if (elements && elements.length > 0) {
+                        const element = elements[0];
+                        const chart = this.charts.cashFlowTimeline;
+                        const datasetLabel = chart.data.datasets[element.datasetIndex].label;
+                        const year = chart.data.labels[element.index];
+                        const value = chart.data.datasets[element.datasetIndex].data[element.index];
+                        const app = window.app;
+                        if (app) {
+                            app.handleElementSelection({
+                                type: 'chart',
+                                chartId: 'cashFlowTimelineChart',
+                                chartName: 'Cash Flow Timeline',
+                                elementType: 'dataPoint',
+                                label: `${datasetLabel} - ${year}`,
+                                value: `$${value.toFixed(2)}B`,
+                                index: element.index,
+                                datasetIndex: element.datasetIndex
+                            });
+                        }
+                    }
+                },
                 plugins: {
                     legend: {
                         position: 'bottom'
@@ -13332,7 +13400,13 @@ Format your response as plain text. Use the link format exactly as shown above.`
             });
         });
         
-        messagesArea.scrollTop = messagesArea.scrollHeight;
+        // Auto-scroll to bottom smoothly
+        setTimeout(() => {
+            messagesArea.scrollTo({
+                top: messagesArea.scrollHeight,
+                behavior: 'smooth'
+            });
+        }, 10);
 
         return messageId;
     }
@@ -13395,6 +13469,255 @@ Format your response as plain text. Use the link format exactly as shown above.`
     }
 
     /**
+     * Setup element selection detection for charts and text
+     */
+    setupElementSelectionDetection() {
+        // Store reference to app instance for chart onClick handlers
+        if (!window.app) {
+            window.app = this;
+        }
+        // Detect text selection in center panel
+        document.addEventListener('mouseup', () => {
+            const selection = window.getSelection();
+            if (selection && selection.toString().trim().length > 0) {
+                // Check if selection is in a relevant area (dashboard, charts, insights)
+                const activeView = this.currentView;
+                const relevantViews = ['dashboard', 'charts', 'insights', 'earth', 'mars'];
+                
+                if (relevantViews.includes(activeView)) {
+                    const selectedText = selection.toString().trim();
+                    const range = selection.getRangeAt(0);
+                    const container = range.commonAncestorContainer;
+                    
+                    // Only comment on meaningful selections (more than 3 words or contains numbers/metrics)
+                    if (selectedText.split(/\s+/).length >= 3 || /\$|%|B|T|M|K|\d+/.test(selectedText)) {
+                        this.handleElementSelection({
+                            type: 'text',
+                            text: selectedText,
+                            context: this.getTextSelectionContext(container)
+                        });
+                    }
+                }
+            }
+        });
+    }
+
+    /**
+     * Get context for text selection
+     */
+    getTextSelectionContext(container) {
+        // Find the nearest section or chart container
+        let element = container.nodeType === Node.TEXT_NODE ? container.parentElement : container;
+        while (element && element !== document.body) {
+            if (element.classList.contains('section') || 
+                element.classList.contains('chart-container') ||
+                element.classList.contains('metric-card') ||
+                element.id) {
+                return {
+                    section: element.classList.contains('section') ? 'section' : null,
+                    chartContainer: element.classList.contains('chart-container') ? true : false,
+                    elementId: element.id || null,
+                    elementTag: element.tagName.toLowerCase()
+                };
+            }
+            element = element.parentElement;
+        }
+        return null;
+    }
+
+    /**
+     * Handle element selection (chart or text) and generate commentary
+     */
+    handleElementSelection(selectionInfo) {
+        // Skip if commentary disabled or agent window not open
+        if (!this.agentCommentaryEnabled) return;
+        
+        const agentWindow = document.getElementById('aiAgentWindow');
+        if (!agentWindow) return;
+        
+        const computedStyle = window.getComputedStyle(agentWindow);
+        const isVisible = agentWindow.style.display !== 'none' && 
+                         agentWindow.style.display !== '' &&
+                         computedStyle.display !== 'none' &&
+                         computedStyle.display !== '' &&
+                         !agentWindow.classList.contains('hidden');
+        
+        if (!isVisible) return;
+
+        // Debounce rapid selections
+        if (this.elementSelectionDebounceTimer) {
+            clearTimeout(this.elementSelectionDebounceTimer);
+        }
+
+        this.elementSelectionDebounceTimer = setTimeout(async () => {
+            // Check if this is a duplicate selection
+            const selectionKey = selectionInfo.type === 'chart' 
+                ? `${selectionInfo.chartId}-${selectionInfo.index}`
+                : selectionInfo.text.substring(0, 50);
+            
+            if (this.lastSelectedElement === selectionKey) {
+                return; // Same element selected, skip
+            }
+
+            this.lastSelectedElement = selectionKey;
+            
+            // Add to selection history
+            this.elementSelectionHistory.push({
+                timestamp: new Date().toISOString(),
+                ...selectionInfo
+            });
+            if (this.elementSelectionHistory.length > 20) {
+                this.elementSelectionHistory.shift();
+            }
+
+            // Determine if selection warrants commentary
+            const shouldComment = this.shouldCommentOnSelection(selectionInfo);
+            
+            if (shouldComment) {
+                // Show thinking animation
+                const thinkingId = this.addAgentThinkingMessage();
+                
+                try {
+                    await this.generateElementSelectionCommentary(selectionInfo, thinkingId);
+                } catch (error) {
+                    console.error('Error generating element selection commentary:', error);
+                    this.removeAgentMessage(thinkingId);
+                }
+            }
+        }, 500); // Debounce 500ms
+    }
+
+    /**
+     * Determine if a selection warrants commentary
+     */
+    shouldCommentOnSelection(selectionInfo) {
+        // Always comment on chart element selections
+        if (selectionInfo.type === 'chart') {
+            return true;
+        }
+
+        // Comment on text selections if they contain metrics, values, or are substantial
+        if (selectionInfo.type === 'text') {
+            const text = selectionInfo.text;
+            // Comment if contains financial/metric data
+            if (/\$[\d.,]+[BMKT]?|[\d.,]+%|\d+\.\d+/.test(text)) {
+                return true;
+            }
+            // Comment if substantial text (more than 10 words)
+            if (text.split(/\s+/).length >= 10) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Generate commentary on element selection
+     */
+    async generateElementSelectionCommentary(selectionInfo, thinkingMessageId) {
+        try {
+            const currentTabInfo = this.getCurrentTabInfo();
+            const inputs = this.getInputs();
+            
+            let prompt = `You are a Desktop Agent observing user interactions in a SpaceX valuation application.
+
+CURRENT CONTEXT:
+- View: ${this.currentView}
+- Tab: ${currentTabInfo.tab || 'N/A'}
+- Sub-Tab: ${currentTabInfo.subTab || 'N/A'}
+- Model: ${this.currentModelName || 'No model loaded'}
+${this.currentData ? `
+CURRENT VALUATION:
+- Total: $${((this.currentData.total?.value || 0) / 1000).toFixed(2)}T
+- Earth: $${((this.currentData.earth?.adjustedValue || 0) / 1000).toFixed(2)}T
+- Mars: $${((this.currentData.mars?.adjustedValue || 0) / 1000).toFixed(2)}T
+` : ''}
+
+USER SELECTED:
+`;
+
+            if (selectionInfo.type === 'chart') {
+                prompt += `Chart Element Selection:
+- Chart: ${selectionInfo.chartName}
+- Element: ${selectionInfo.label}
+- Value: ${selectionInfo.value}
+- Chart ID: ${selectionInfo.chartId}
+`;
+            } else if (selectionInfo.type === 'text') {
+                prompt += `Text Selection:
+- Selected Text: "${selectionInfo.text}"
+${selectionInfo.context ? `
+- Context: ${JSON.stringify(selectionInfo.context)}
+` : ''}
+`;
+            }
+
+            prompt += `
+
+TASK: Provide a brief, helpful comment (1-2 sentences max) about what the user selected:
+1. Acknowledge what they selected
+2. Provide context or insight about that element
+3. Suggest related areas they might want to explore (with links if helpful)
+4. Use link format: [link text|view:viewName] or [link text|view:viewName:subTab] or [link text|url:https://...]
+
+Only respond with "SKIP" if the selection is completely trivial or uninteresting.
+
+Format your response as plain text. Use the link format exactly as shown above.`;
+
+            const systemPrompts = this.agentSystemPrompts || this.getDefaultAgentSystemPrompts();
+            const systemPromptText = Object.values(systemPrompts)
+                .filter(p => p && p.trim())
+                .join('\n\n');
+
+            const response = await fetch('/api/agent/chat', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-AI-Model': document.getElementById('agentAIModelSelect')?.value || this.aiModel || 'grok:grok-3'
+                },
+                body: JSON.stringify({
+                    message: prompt,
+                    systemPrompt: systemPromptText,
+                    context: {
+                        currentView: this.currentView,
+                        currentTab: currentTabInfo.tab,
+                        currentSubTab: currentTabInfo.subTab,
+                        currentModel: {
+                            id: this.currentModelId,
+                            name: this.currentModelName,
+                            inputs: inputs,
+                            valuationData: this.currentData
+                        },
+                        selectionInfo: selectionInfo
+                    },
+                    history: []
+                })
+            });
+
+            const result = await response.json();
+            
+            // Remove thinking message
+            if (thinkingMessageId) {
+                this.removeAgentMessage(thinkingMessageId);
+            }
+            
+            if (result.success && result.response && 
+                !result.response.toUpperCase().includes('SKIP') && 
+                result.response.trim().length > 10) {
+                // Parse and render commentary with clickable links
+                const commentaryWithLinks = this.parseCommentaryLinks(result.response.trim());
+                this.addAgentMessage(`👆 ${commentaryWithLinks}`, 'system');
+            }
+        } catch (error) {
+            console.error('Error generating element selection commentary:', error);
+            if (thinkingMessageId) {
+                this.removeAgentMessage(thinkingMessageId);
+            }
+        }
+    }
+
+    /**
      * Toggle agent commentary on/off
      */
     toggleAgentCommentary() {
@@ -13436,7 +13759,13 @@ Format your response as plain text. Use the link format exactly as shown above.`
             </div>
         `;
         messagesArea.appendChild(messageDiv);
-        messagesArea.scrollTop = messagesArea.scrollHeight;
+        // Auto-scroll to bottom smoothly
+        setTimeout(() => {
+            messagesArea.scrollTo({
+                top: messagesArea.scrollHeight,
+                behavior: 'smooth'
+            });
+        }, 10);
         if (window.lucide) window.lucide.createIcons();
 
         return messageId;
@@ -13476,7 +13805,13 @@ Format your response as plain text. Use the link format exactly as shown above.`
         `;
         messageDiv.appendChild(iconElement);
         messagesArea.appendChild(messageDiv);
-        messagesArea.scrollTop = messagesArea.scrollHeight;
+        // Auto-scroll to bottom smoothly
+        setTimeout(() => {
+            messagesArea.scrollTo({
+                top: messagesArea.scrollHeight,
+                behavior: 'smooth'
+            });
+        }, 10);
         if (window.lucide) window.lucide.createIcons();
 
         return messageId;
