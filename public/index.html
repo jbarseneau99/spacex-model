@@ -271,7 +271,7 @@
                         <span>Advanced Earth Operations</span>
                     </button>
                     <button class="insights-tab" data-tab="advanced-mars">
-                        <i data-lucide="planet"></i>
+                        <i data-lucide="globe"></i>
                         <span>Advanced Mars Operations</span>
                     </button>
                     <button class="insights-tab" data-tab="tam-data">
@@ -3090,6 +3090,7 @@
             <div class="help-tabs">
                 <button class="help-tab active" data-tab="ai">AI Model</button>
                 <button class="help-tab" data-tab="mach33lib">Mach33Lib</button>
+                <button class="help-tab" data-tab="financial-api">Financial Data API</button>
                 <button class="help-tab" data-tab="general">General</button>
             </div>
             <div class="modal-body" style="max-height: calc(80vh - 140px); overflow-y: auto;">
@@ -3250,6 +3251,97 @@
                                 <i data-lucide="refresh-cw"></i> Reset to Defaults
                             </button>
                         </div>
+                    </div>
+                </div>
+                
+                <!-- Financial Data API Tab -->
+                <div id="settingsTab-financial-api" class="help-tab-content">
+                    <div class="help-section">
+                        <h3>Financial Data API Configuration</h3>
+                        <p>Select the data source for comparable company financial data. Free APIs are available with registration.</p>
+                        
+                        <div class="form-group" style="margin-top: var(--spacing-lg);">
+                            <label for="financialApiSelect" style="display: block; margin-bottom: var(--spacing-sm); font-weight: 600;">
+                                <i data-lucide="database"></i> Financial Data API Provider
+                            </label>
+                            <select id="financialApiSelect" class="select-input" style="width: 100%; max-width: 500px;">
+                                <option value="yahoo-finance">Yahoo Finance (Default - Free, No API Key Required)</option>
+                                <option value="alpha-vantage">Alpha Vantage (Free Tier Available)</option>
+                                <option value="financial-modeling-prep">Financial Modeling Prep (Free Tier Available)</option>
+                                <option value="sample-data">Sample Data (No API Key Required)</option>
+                            </select>
+                            <p style="margin-top: var(--spacing-sm); font-size: 13px; color: var(--text-secondary);">
+                                <strong>Current:</strong> <span id="currentFinancialApiDisplay">Loading...</span>
+                            </p>
+                        </div>
+                        
+                        <!-- Alpha Vantage API Key -->
+                        <div id="alphaVantageApiKeyGroup" class="form-group" style="margin-top: var(--spacing-lg);">
+                            <label for="alphaVantageApiKey" style="display: block; margin-bottom: var(--spacing-sm); font-weight: 600;">
+                                <i data-lucide="key"></i> Alpha Vantage API Key
+                            </label>
+                            <input type="password" id="alphaVantageApiKey" class="input-field" placeholder="Enter your Alpha Vantage API key" style="width: 100%; max-width: 500px;">
+                            <p style="margin-top: var(--spacing-sm); font-size: 13px; color: var(--text-secondary);">
+                                Get your free API key at <a href="https://www.alphavantage.co/support/#api-key" target="_blank" style="color: var(--primary-color);">alphavantage.co</a>
+                            </p>
+                        </div>
+                        
+                        <!-- Financial Modeling Prep API Key -->
+                        <div id="financialModelingPrepApiKeyGroup" class="form-group" style="margin-top: var(--spacing-lg); display: none;">
+                            <label for="financialModelingPrepApiKey" style="display: block; margin-bottom: var(--spacing-sm); font-weight: 600;">
+                                <i data-lucide="key"></i> Financial Modeling Prep API Key
+                            </label>
+                            <input type="password" id="financialModelingPrepApiKey" class="input-field" placeholder="Enter your FMP API key" style="width: 100%; max-width: 500px;">
+                            <p style="margin-top: var(--spacing-sm); font-size: 13px; color: var(--text-secondary);">
+                                Get your free API key at <a href="https://site.financialmodelingprep.com/developer/docs/" target="_blank" style="color: var(--primary-color);">financialmodelingprep.com</a>
+                            </p>
+                        </div>
+                        
+                        <!-- Yahoo Finance Info -->
+                        <div id="yahooFinanceInfoGroup" class="form-group" style="margin-top: var(--spacing-lg); display: none;">
+                            <div style="padding: var(--spacing-md); background: rgba(0, 102, 204, 0.05); border-radius: var(--radius); border-left: 3px solid var(--primary-color);">
+                                <p style="margin: 0; font-size: 13px; color: var(--text-secondary);">
+                                    <strong>Yahoo Finance:</strong> No API key required! This uses Yahoo Finance's public data endpoint. 
+                                    Free and unlimited for personal use. Data includes stock quotes, market cap, and basic financial metrics.
+                                </p>
+                            </div>
+                        </div>
+                        
+                        <div style="margin-top: var(--spacing-lg); padding: var(--spacing-md); background: rgba(0, 102, 204, 0.05); border-radius: var(--radius); border-left: 3px solid var(--primary-color);">
+                            <h4 style="margin-top: 0; margin-bottom: var(--spacing-sm);">
+                                <i data-lucide="info"></i> API Comparison
+                            </h4>
+                            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: var(--spacing-md); font-size: 13px;">
+                                <div>
+                                    <strong>Yahoo Finance</strong><br>
+                                    Free, unlimited (no API key)<br>
+                                    <em>Best for: Real-time quotes & market data</em>
+                                </div>
+                                <div>
+                                    <strong>Alpha Vantage</strong><br>
+                                    Free tier: 5 API calls/min, 500 calls/day<br>
+                                    <em>Best for: Detailed fundamentals</em>
+                                </div>
+                                <div>
+                                    <strong>Financial Modeling Prep</strong><br>
+                                    Free tier: 250 requests/day<br>
+                                    <em>Best for: Financial statements & ratios</em>
+                                </div>
+                                <div>
+                                    <strong>Sample Data</strong><br>
+                                    No API key required<br>
+                                    <em>Best for: Testing & demos</em>
+                                </div>
+                            </div>
+                            
+                            <div style="margin-top: var(--spacing-md); padding: var(--spacing-sm); background: rgba(245, 158, 11, 0.1); border-radius: var(--radius); font-size: 12px; color: var(--text-secondary);">
+                                <strong>Note:</strong> API keys are stored locally in your browser. For production use, configure API keys in environment variables on the server.
+                            </div>
+                        </div>
+                        
+                        <button class="btn btn-primary" onclick="app.saveFinancialApiSettings()" style="margin-top: var(--spacing-lg);">
+                            <i data-lucide="save"></i> Save Settings
+                        </button>
                     </div>
                 </div>
                 

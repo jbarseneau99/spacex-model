@@ -1,77 +1,44 @@
-# SpaceX Valuation Model Platform
+# SpaceX Valuation Model
 
-A web-based platform for analyzing and visualizing SpaceX valuation models, built with Node.js and Express.
+A comprehensive web application for valuing SpaceX operations, including Earth operations (Starlink, Launch Services) and Mars colonization potential.
 
-## Features
+## Quick Start
 
-- Interactive valuation model visualization
-- Excel data parsing and analysis
-- RESTful API for model data access
-- Modern web interface
-
-## Prerequisites
-
-- Node.js (v14 or higher)
-- npm or yarn
-
-## Installation
-
-1. Clone the repository:
-```bash
-git clone <repository-url>
-cd "SpaceX Model"
-```
-
-2. Install dependencies:
+1. Install dependencies:
 ```bash
 npm install
 ```
 
-3. Set up environment variables:
+2. Start the server:
 ```bash
-cp .env.example .env
-# Edit .env with your configuration
+node server.js
 ```
 
-4. Start the server:
-```bash
-npm start
-```
+3. Open browser to `http://localhost:2999`
 
-The application will be available at `http://localhost:2999`
+## Documentation
+
+All documentation is in the `docs/` directory:
+- **Complete Documentation**: `docs/TOOL_DESCRIPTION.md`
+- **Project Structure**: `docs/PROJECT_STRUCTURE.md`
+- **Excel Inputs Analysis**: `docs/EXCEL_INPUTS_COMPLETE_ANALYSIS.md`
 
 ## Project Structure
 
-```
-SpaceX Model/
-├── api/              # API routes
-├── css/              # Stylesheets
-├── db/               # Database models
-├── js/               # Frontend JavaScript
-├── public/           # Static assets
-├── scripts/          # Utility scripts
-├── services/         # Business logic services
-├── server.js         # Express server entry point
-└── package.json      # Dependencies and scripts
-```
+- `server.js` - Express server and API endpoints
+- `calculation-engine.js` - Primary calculation engine
+- `js/app.js` - Frontend application logic
+- `public/index.html` - Main HTML file
+- `scripts/` - Utility scripts
+- `docs/` - All documentation
+- `data/` - Application data files
 
-## Development
+## Key Features
 
-Run the development server:
-```bash
-npm run dev
-```
+- **Monte Carlo Simulation** - Probabilistic valuation
+- **Scenario Analysis** - Compare different scenarios
+- **Sensitivity Analysis** - Parameter sensitivity testing
+- **Greeks & Factor Risk** - Financial risk analysis
+- **Reference Data** - Input parameters and TAM data
 
-## API Endpoints
-
-- `GET /api/sheets` - Get all model sheets
-- Additional endpoints documented in the API routes
-
-## License
-
-MIT
-
-
-
-
-
+See `docs/TOOL_DESCRIPTION.md` for complete documentation.

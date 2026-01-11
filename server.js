@@ -6,9 +6,9 @@ const path = require('path');
 const fs = require('fs');
 const mongoose = require('mongoose');
 const fetch = require('node-fetch');
-const Mach33Lib = require('./mach33lib');
-const ValuationAlgorithms = require('./valuation-algorithms');
-const CalculationEngine = require('./calculation-engine');
+const Mach33Lib = require('./lib/mach33lib');
+const ValuationAlgorithms = require('./lib/valuation-algorithms');
+const CalculationEngine = require('./lib/calculation-engine');
 const FactorModelsService = require('./services/factor-models');
 
 const app = express();
@@ -2708,12 +2708,126 @@ app.get('/api/models/:id/monte-carlo-config', (req, res) => {
 });
 
 // Comparables API endpoint
+// Helper function to fetch company data from Alpha Vantage
+async function fetchAlphaVantageData(ticker, apiKey) {
+  try {
+    // Alpha Vantage free tier: 5 calls/min, 500 calls/day
+    // We'll use the OVERVIEW endpoint for company fundamentals
+    const url = `https://www.alphavantage.co/query?function=OVERVIEW&symbol=${ticker}&apikey=${apiKey}`;
+    const response = await fetch(url);
+    const data = await response.json();
+    
+    if (data.Note && data.Note.includes('API call frequency')) {
+      throw new Error('Alpha Vantage API rate limit exceeded');
+    }
+    
+    if (data.Symbol) {
+      return {
+        name: data.Name || ticker,
+        ticker: data.Symbol,
+        marketCap: data.MarketCapitalization ? parseFloat(data.MarketCapitalization) : null,
+        evRevenue: data.EVToRevenue ? parseFloat(data.EVToRevenue) : null,
+        evEbitda: data.EVToEBITDA ? parseFloat(data.EVToEBITDA) : null,
+        peRatio: data.PERatio ? parseFloat(data.PERatio) : null,
+        pegRatio: data.PEGRatio ? parseFloat(data.PEGRatio) : null,
+        revenueGrowth: data.RevenueTTM && data.RevenueGrowth ? parseFloat(data.RevenueGrowth) / 100 : null
+      };
+    }
+    return null;
+  } catch (error) {
+    console.error(`Error fetching Alpha Vantage data for ${ticker}:`, error.message);
+    return null;
+  }
+}
+
+// Helper function to fetch company data from Yahoo Finance
+async function fetchYahooFinanceData(ticker) {
+  try {
+    // Yahoo Finance doesn't have an official API, but we can use yahoo-finance2 npm package
+    // For now, we'll use a simple fetch to Yahoo Finance's quote endpoint
+    // Note: Yahoo Finance may block requests, so this is a basic implementation
+    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d&range=1d`;
+    const response = await fetch(url);
+    const data = await response.json();
+    
+    if (data.chart && data.chart.result && data.chart.result.length > 0) {
+      const result = data.chart.result[0];
+      const meta = result.meta || {};
+      
+      // Get market cap and other data from quote summary
+      const quoteUrl = `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${ticker}?modules=summaryProfile,financialData,defaultKeyStatistics`;
+      const quoteResponse = await fetch(quoteUrl);
+      const quoteData = await quoteResponse.json();
+      
+      let marketCap = null;
+      let peRatio = null;
+      let revenueGrowth = null;
+      
+      if (quoteData.quoteSummary && quoteData.quoteSummary.result && quoteData.quoteSummary.result.length > 0) {
+        const summary = quoteData.quoteSummary.result[0];
+        if (summary.defaultKeyStatistics) {
+          marketCap = summary.defaultKeyStatistics.marketCap?.raw || null;
+          peRatio = summary.defaultKeyStatistics.trailingPE?.raw || null;
+        }
+        if (summary.financialData) {
+          revenueGrowth = summary.financialData.revenueGrowth?.raw || null;
+        }
+      }
+      
+      return {
+        name: meta.longName || ticker,
+        ticker: meta.symbol || ticker,
+        marketCap: marketCap,
+        evRevenue: null, // Yahoo Finance doesn't provide EV/Revenue directly
+        evEbitda: null, // Yahoo Finance doesn't provide EV/EBITDA directly
+        peRatio: peRatio,
+        pegRatio: null,
+        revenueGrowth: revenueGrowth
+      };
+    }
+    return null;
+  } catch (error) {
+    console.error(`Error fetching Yahoo Finance data for ${ticker}:`, error.message);
+    return null;
+  }
+}
+
+// Helper function to fetch company data from Financial Modeling Prep
+async function fetchFinancialModelingPrepData(ticker, apiKey) {
+  try {
+    // FMP free tier: 250 requests/day
+    const url = `https://financialmodelingprep.com/api/v3/profile/${ticker}?apikey=${apiKey}`;
+    const response = await fetch(url);
+    const data = await response.json();
+    
+    if (Array.isArray(data) && data.length > 0) {
+      const company = data[0];
+      return {
+        name: company.companyName || ticker,
+        ticker: company.symbol,
+        marketCap: company.mktCap ? parseFloat(company.mktCap) : null,
+        evRevenue: null, // FMP profile doesn't include EV/Revenue directly
+        evEbitda: null, // FMP profile doesn't include EV/EBITDA directly
+        peRatio: company.priceEarnings ? parseFloat(company.priceEarnings) : null,
+        pegRatio: null,
+        revenueGrowth: null
+      };
+    }
+    return null;
+  } catch (error) {
+    console.error(`Error fetching FMP data for ${ticker}:`, error.message);
+    return null;
+  }
+}
+
 app.get('/api/comparables', async (req, res) => {
   try {
     const sector = req.query.sector || 'space';
+    const apiProvider = req.query.apiProvider || 'yahoo-finance'; // Default to Yahoo Finance
+    const alphaVantageKey = req.query.alphaVantageKey || '';
+    const fmpKey = req.query.fmpKey || '';
     
-    // Sample comparable companies data
-    // In production, this would fetch from a financial API like Alpha Vantage, Yahoo Finance, or Fundamentals API
+    // Sample comparable companies data (fallback)
     const comparablesData = {
       space: [
         {
@@ -2915,13 +3029,66 @@ app.get('/api/comparables', async (req, res) => {
       ]
     };
     
-    const companies = comparablesData[sector] || comparablesData.space;
+    let companies = comparablesData[sector] || comparablesData.space;
+    
+    // If API provider is selected and API key is provided, try to fetch real data
+    if (apiProvider !== 'sample-data') {
+      // Map of tickers by sector (excluding SpaceX which is private)
+      const tickerMap = {
+        space: ['RKLB', 'ASTR', 'SPCE', 'PL'],
+        tech: ['TSLA', 'AMZN', 'GOOGL', 'MSFT', 'AAPL'],
+        telecom: ['VSAT', 'IRDM', 'TSAT'],
+        aerospace: ['BA', 'LMT', 'NOC', 'RTX', 'GD']
+      };
+      
+      const tickers = tickerMap[sector] || [];
+      const fetchedCompanies = [];
+      
+      // Fetch data for each ticker
+      for (const ticker of tickers) {
+        let companyData = null;
+        
+        if (apiProvider === 'yahoo-finance') {
+          companyData = await fetchYahooFinanceData(ticker);
+          // Small delay to avoid rate limiting
+          if (tickers.indexOf(ticker) < tickers.length - 1) {
+            await new Promise(resolve => setTimeout(resolve, 500));
+          }
+        } else if (apiProvider === 'alpha-vantage' && alphaVantageKey) {
+          companyData = await fetchAlphaVantageData(ticker, alphaVantageKey);
+          // Rate limit: wait 12 seconds between calls (5 calls/min = 1 call per 12 seconds)
+          if (tickers.indexOf(ticker) < tickers.length - 1) {
+            await new Promise(resolve => setTimeout(resolve, 12000));
+          }
+        } else if (apiProvider === 'financial-modeling-prep' && fmpKey) {
+          companyData = await fetchFinancialModelingPrepData(ticker, fmpKey);
+        }
+        
+        if (companyData) {
+          fetchedCompanies.push(companyData);
+        }
+      }
+      
+      // Merge fetched data with sample data (use fetched if available, otherwise sample)
+      if (fetchedCompanies.length > 0) {
+        companies = companies.map(sampleCompany => {
+          const fetched = fetchedCompanies.find(f => 
+            f.ticker === sampleCompany.ticker || 
+            f.name.toLowerCase().includes(sampleCompany.name.toLowerCase())
+          );
+          return fetched || sampleCompany;
+        });
+      }
+    }
     
     res.json({
       success: true,
       data: companies,
       sector: sector,
-      note: 'Data is sample data. In production, integrate with financial APIs like Alpha Vantage, Yahoo Finance, or Fundamentals API.'
+      apiProvider: apiProvider,
+      note: apiProvider === 'sample-data' 
+        ? 'Using sample data. Configure an API provider in Settings to fetch real-time data.'
+        : `Using ${apiProvider} API. Some data may fall back to sample values if API limits are reached.`
     });
   } catch (error) {
     console.error('Error fetching comparables:', error);

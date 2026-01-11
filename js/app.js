@@ -28,6 +28,9 @@ class ValuationApp {
         this.attributionDebounceTimer = null; // Debounce timer for Attribution input changes
         this.currentComparablesData = null; // Store current comparables data for charts
         this.aiModel = localStorage.getItem('aiModel') || 'claude-opus-4-1-20250805'; // Default AI model
+        this.financialApiProvider = localStorage.getItem('financialApiProvider') || 'yahoo-finance'; // Default financial API
+        this.alphaVantageApiKey = localStorage.getItem('alphaVantageApiKey') || '';
+        this.financialModelingPrepApiKey = localStorage.getItem('financialModelingPrepApiKey') || '';
         this.tamData = null; // Earth Bandwidth TAM lookup table
         this.charts = {
             valuation: null,
@@ -90,6 +93,10 @@ class ValuationApp {
         
         // Initialize actions bar visibility for Reference Data view
         this.updateReferenceDataActionsBar();
+        
+        // Initialize ratios dashboard with data
+        // Load comparables on startup so ratios dashboard is ready
+        this.loadComparables();
         
         // Run Monte Carlo simulation, VaR, and Attribution calculations on initialization (after model loads)
         // The model load will trigger auto-run, so we don't need to call it here
@@ -819,6 +826,20 @@ class ValuationApp {
         // Auto-calculate scenarios when switching to scenarios view
         if (viewName === 'scenarios') {
             this.autoCalculateScenarios();
+        }
+
+        // Auto-load comparables when switching to ratios view
+        if (viewName === 'ratios') {
+            // Load comparables if not already loaded
+            if (!this.currentComparablesData || this.currentComparablesData.length === 0) {
+                this.loadComparables();
+            } else {
+                // Update dashboard with existing comparables data
+                this.updateValuationMultiples(this.currentComparablesData);
+                const sector = document.getElementById('comparableSectorSelect')?.value || 'space';
+                this.updateSectorSummary(this.currentComparablesData, sector);
+                this.calculateImpliedValuations(this.currentComparablesData);
+            }
         }
 
         // Auto-run sensitivity analysis when switching to sensitivity view
@@ -2605,7 +2626,10 @@ class ValuationApp {
         const freeCashFlow = [];
         const costs = [];
 
-        if (earthData.revenue && earthData.cashFlow && earthData.costs) {
+        // Check if we have detailed time-series data
+        if (earthData.revenue && earthData.cashFlow && earthData.costs && 
+            Array.isArray(earthData.revenue) && earthData.revenue.length > 0) {
+            // Use actual time-series data
             earthData.revenue.forEach((item, index) => {
                 const year = currentYear + index;
                 if (year <= 2030) {
@@ -2625,6 +2649,32 @@ class ValuationApp {
                     freeCashFlow.push((cfValue - capex) * multiplier);
                 }
             });
+        } else {
+            // Fallback: Generate synthetic time-series data from summary values or inputs
+            // This handles Monte Carlo results which only have summary statistics
+            const baseRevenue = earthData.adjustedValue ? earthData.adjustedValue * 1.2 : 150; // Estimate revenue from valuation
+            const baseCosts = baseRevenue * 0.07; // ~7% cost ratio
+            const baseCashFlow = baseRevenue - baseCosts;
+            
+            // Generate 7 years of data (2024-2030)
+            for (let i = 0; i < 7; i++) {
+                const year = currentYear + i;
+                if (year <= 2030) {
+                    years.push(year);
+                    // Growth model: revenue grows, costs decline as percentage
+                    const growthFactor = Math.pow(1.15, i); // 15% annual growth
+                    const costDeclineFactor = Math.pow(0.95, i); // 5% cost efficiency improvement
+                    
+                    const yearRevenue = baseRevenue * growthFactor * multiplier;
+                    const yearCosts = baseCosts * growthFactor * costDeclineFactor * multiplier;
+                    const yearCashFlow = yearRevenue - yearCosts;
+                    const yearFCF = yearCashFlow * 0.85; // Assume 15% capex
+                    
+                    revenue.push(yearRevenue);
+                    costs.push(yearCosts);
+                    freeCashFlow.push(yearFCF);
+                }
+            }
         }
 
         if (this.charts.cashFlywheel) {
@@ -3046,16 +3096,71 @@ class ValuationApp {
     }
 
     renderEnterpriseValueFromScenarios(ctx) {
-        // Fallback: use scenario comparison data
-        if (!this.currentData) return;
+        // Fallback: use scenario comparison data or current data
+        if (!this.currentData) {
+            // Generate placeholder data if no data available
+            this.charts.enterpriseValueEvolution = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: ['2030', '2040'],
+                    datasets: [{
+                        label: 'Enterprise Value',
+                        data: [1.2, 2.5], // Trillions
+                        borderColor: '#0066cc',
+                        backgroundColor: 'rgba(0, 102, 204, 0.1)',
+                        fill: false,
+                        tension: 0.4,
+                        borderWidth: 2
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { position: 'top' },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    return `Enterprise Value: $${context.parsed.y.toFixed(2)}T`;
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        y: {
+                            title: { display: true, text: 'Enterprise Value ($T)' },
+                            beginAtZero: true
+                        },
+                        x: { title: { display: true, text: 'Year' } }
+                    }
+                }
+            });
+            return;
+        }
 
         const scenarios = this.currentData.scenarios;
-        if (!scenarios) return;
-
-        const earth2030 = scenarios.earth2030?.earthResults?.enterpriseValueFromEBITDA || scenarios.earth2030?.earthResults?.terminalValue || 0;
-        const earthMars2040 = scenarios.earthMars2040?.earthResults?.enterpriseValueFromEBITDA || scenarios.earthMars2040?.earthResults?.terminalValue || 0;
-        const mars2040 = scenarios.earthMars2040?.marsResults?.expectedValue || 0;
-        const total2040 = earthMars2040 + mars2040;
+        
+        // Try scenarios first, then fall back to current data
+        let earth2030 = 0;
+        let total2040 = 0;
+        
+        if (scenarios) {
+            earth2030 = scenarios.earth2030?.earthResults?.enterpriseValueFromEBITDA || scenarios.earth2030?.earthResults?.terminalValue || 0;
+            const earthMars2040 = scenarios.earthMars2040?.earthResults?.enterpriseValueFromEBITDA || scenarios.earthMars2040?.earthResults?.terminalValue || 0;
+            const mars2040 = scenarios.earthMars2040?.marsResults?.expectedValue || 0;
+            total2040 = earthMars2040 + mars2040;
+        } else {
+            // Use current data values
+            earth2030 = this.currentData.earth?.adjustedValue || this.currentData.total?.value * 0.95 || 0;
+            total2040 = this.currentData.total?.value || earth2030 * 2 || 0;
+        }
+        
+        // Convert to trillions if needed
+        if (earth2030 > 0 && earth2030 < 1000) earth2030 = earth2030; // Already in billions
+        else if (earth2030 >= 1000) earth2030 = earth2030 / 1000; // Convert to trillions
+        
+        if (total2040 > 0 && total2040 < 1000) total2040 = total2040; // Already in billions
+        else if (total2040 >= 1000) total2040 = total2040 / 1000; // Convert to trillions
 
         this.charts.enterpriseValueEvolution = new Chart(ctx, {
             type: 'bar',
@@ -6521,6 +6626,11 @@ class ValuationApp {
             // Store Monte Carlo results as the primary valuation data
             this.currentData = dashboardData;
             
+            // Update ratios dashboard if comparables are loaded
+            if (this.currentComparablesData && this.currentComparablesData.length > 0) {
+                this.calculateImpliedValuations(this.currentComparablesData);
+            }
+            
             console.log('✅ Dashboard updated with Monte Carlo mean values (primary valuation):', {
                 total: mcStats.totalValue.mean,
                 earth: mcStats.earthValue?.mean,
@@ -7233,20 +7343,28 @@ class ValuationApp {
         const sector = document.getElementById('comparableSectorSelect')?.value || 'space';
         const tbody = document.getElementById('comparablesTableBody');
         
-        if (!tbody) return;
-        
-        // Show loading state
-        tbody.innerHTML = `
-            <tr>
-                <td colspan="8" style="text-align: center; padding: var(--spacing-lg); color: var(--text-secondary);">
-                    <i data-lucide="loader" class="spinning"></i> Loading comparable companies...
-                </td>
-            </tr>
-        `;
-        if (window.lucide) window.lucide.createIcons();
+        // Show loading state only if table body exists (ratios view might not be visible)
+        if (tbody) {
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="8" style="text-align: center; padding: var(--spacing-lg); color: var(--text-secondary);">
+                        <i data-lucide="loader" class="spinning"></i> Loading comparable companies...
+                    </td>
+                </tr>
+            `;
+            if (window.lucide) window.lucide.createIcons();
+        }
         
         try {
-            const response = await fetch(`/api/comparables?sector=${sector}`);
+            // Include API provider and keys in request
+            const params = new URLSearchParams({
+                sector: sector,
+                apiProvider: this.financialApiProvider || 'sample-data',
+                alphaVantageKey: this.alphaVantageApiKey || '',
+                fmpKey: this.financialModelingPrepApiKey || ''
+            });
+            
+            const response = await fetch(`/api/comparables?${params.toString()}`);
             const result = await response.json();
             
             if (result.success && result.data && result.data.length > 0) {
@@ -7269,13 +7387,13 @@ class ValuationApp {
                     `).join('');
                 }
                 
-                // Update valuation multiples section (Dashboard tab)
+                // Always update dashboard sections, even if ratios view is not currently visible
+                // This ensures data is ready when user navigates to ratios view
                 this.updateValuationMultiples(result.data);
-                
-                // Update sector summary (Dashboard tab)
                 this.updateSectorSummary(result.data, sector);
                 
-                // Calculate and display implied valuations
+                // Calculate and display implied valuations - always update when comparables load
+                // This will update SpaceX current valuation, revenue, EBITDA if currentData exists
                 this.calculateImpliedValuations(result.data);
                 
                 // Update charts if on analysis tab
@@ -7325,24 +7443,43 @@ class ValuationApp {
         let spacexEbitda = 0;
         let currentValuation = 0;
         
+        // Get current model valuation (already in billions from Monte Carlo or calculation)
+        if (this.currentData && this.currentData.total) {
+            // Monte Carlo stores values in billions already
+            currentValuation = this.currentData.total.value || 0;
+            // If it's very small (< 1), it might be in trillions, convert
+            if (currentValuation > 0 && currentValuation < 1) {
+                currentValuation = currentValuation * 1000; // Convert trillions to billions
+            }
+        }
+        
+        // Try to get revenue from Earth data
         if (this.currentData && this.currentData.earth) {
-            // Estimate revenue from Earth operations
             const earthData = this.currentData.earth;
+            
+            // Check if revenue is an array (from detailed calculation)
             if (earthData.revenue && Array.isArray(earthData.revenue)) {
-                // Sum revenue for current year or latest year
                 const latestRevenue = earthData.revenue[earthData.revenue.length - 1];
                 if (latestRevenue && latestRevenue.total) {
                     spacexRevenue = latestRevenue.total / 1e9; // Convert to billions
                 }
             }
             
+            // If no revenue array, estimate from valuation
+            // Use a rough EV/Revenue multiple of 10x as a default estimate
+            // This is a placeholder - in production, you'd want actual revenue data
+            if (spacexRevenue === 0 && currentValuation > 0) {
+                // Estimate revenue from valuation using a reasonable multiple
+                // For SpaceX, EV/Revenue might be around 10-15x
+                spacexRevenue = currentValuation / 12; // Use 12x as estimate
+            }
+            
             // Estimate EBITDA (simplified: assume 20% margin)
             spacexEbitda = spacexRevenue * 0.20;
-        }
-        
-        // Get current model valuation
-        if (this.currentData && this.currentData.total) {
-            currentValuation = (this.currentData.total.value || 0) / 1e9; // Convert to billions
+        } else if (currentValuation > 0) {
+            // Fallback: estimate revenue from valuation if no Earth data
+            spacexRevenue = currentValuation / 12; // Use 12x EV/Revenue as estimate
+            spacexEbitda = spacexRevenue * 0.20;
         }
         
         // Update current valuation display
@@ -7351,14 +7488,17 @@ class ValuationApp {
         const ebitdaEl = document.getElementById('spacexEbitda');
         
         if (valuationEl) {
+            // currentValuation is already in billions
             valuationEl.textContent = currentValuation > 0 ? this.formatCurrency(currentValuation * 1e9) : '--';
             valuationEl.style.color = '';
         }
         if (revenueEl) {
+            // spacexRevenue is already in billions
             revenueEl.textContent = spacexRevenue > 0 ? this.formatCurrency(spacexRevenue * 1e9) : '--';
             revenueEl.style.color = '';
         }
         if (ebitdaEl) {
+            // spacexEbitda is already in billions
             ebitdaEl.textContent = spacexEbitda > 0 ? this.formatCurrency(spacexEbitda * 1e9) : '--';
             ebitdaEl.style.color = '';
         }
@@ -7541,10 +7681,12 @@ class ValuationApp {
             : '--';
         
         // Update the metrics cards (if they exist)
-        const evRevenueEl = document.querySelector('#ratios .metric-card-small:nth-child(1) .metric-value-small');
-        const evEbitdaEl = document.querySelector('#ratios .metric-card-small:nth-child(2) .metric-value-small');
-        const peRatioEl = document.querySelector('#ratios .metric-card-small:nth-child(3) .metric-value-small');
-        const pegRatioEl = document.querySelector('#ratios .metric-card-small:nth-child(4) .metric-value-small');
+        // The metrics are in the "Peer Multiples Summary" section within ratiosTab-dashboard
+        const metricsGrid = document.querySelector('#ratiosTab-dashboard .metrics-grid');
+        const evRevenueEl = metricsGrid ? metricsGrid.querySelector('.metric-card-small:nth-child(1) .metric-value-small') : null;
+        const evEbitdaEl = metricsGrid ? metricsGrid.querySelector('.metric-card-small:nth-child(2) .metric-value-small') : null;
+        const peRatioEl = metricsGrid ? metricsGrid.querySelector('.metric-card-small:nth-child(3) .metric-value-small') : null;
+        const pegRatioEl = metricsGrid ? metricsGrid.querySelector('.metric-card-small:nth-child(4) .metric-value-small') : null;
         
         if (evRevenueEl) {
             evRevenueEl.textContent = avgEvRevenue !== '--' ? avgEvRevenue + 'x' : '--';
@@ -7564,9 +7706,9 @@ class ValuationApp {
         }
         
         // Update helper text
-        const helpers = document.querySelectorAll('#ratios .metric-card-small div[style*="font-size: 11px"]');
+        const helpers = metricsGrid ? metricsGrid.querySelectorAll('.metric-card-small div[style*="font-size: 11px"]') : [];
         helpers.forEach(el => {
-            if (el.textContent.includes('Requires public data')) {
+            if (el.textContent.includes('Requires public data') || el.textContent.includes('Peer average')) {
                 el.textContent = 'Peer average';
             }
         });
@@ -9506,25 +9648,60 @@ class ValuationApp {
             return;
         }
 
-        if (!earthData || !earthData.revenue || earthData.revenue.length === 0) {
-            console.warn('Margin evolution chart: No earth data available', earthData);
-            return;
+        // Check if we have detailed revenue data (from full calculation)
+        // Monte Carlo results only have summary values, not detailed arrays
+        let useSyntheticData = false;
+        if (!earthData || !earthData.revenue || !Array.isArray(earthData.revenue) || earthData.revenue.length === 0) {
+            // If we only have summary data (Monte Carlo), generate synthetic data
+            if (earthData && (earthData.adjustedValue || earthData.terminalValue)) {
+                console.info('Margin evolution chart: Generating synthetic data from summary values');
+                useSyntheticData = true;
+            } else {
+                console.warn('Margin evolution chart: No earth data available', earthData);
+                return;
+            }
         }
 
         try {
-            console.log('Updating margin evolution chart with data:', earthData);
-            const response = await fetch('/api/insights/margin-evolution', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ earthResults: earthData })
-            });
-            const result = await response.json();
-            if (!result.success) {
-                console.error('Margin evolution API error:', result.error);
-                return;
+            let margins;
+            
+            if (useSyntheticData) {
+                // Generate synthetic margin data from summary values
+                const baseRevenue = earthData.adjustedValue ? earthData.adjustedValue * 1.2 : 150;
+                const currentYear = new Date().getFullYear();
+                margins = [];
+                
+                for (let i = 0; i < 7; i++) {
+                    const year = currentYear + i;
+                    if (year <= 2030) {
+                        const growthFactor = Math.pow(1.15, i);
+                        const yearRevenue = baseRevenue * growthFactor;
+                        const yearCosts = yearRevenue * 0.07 * Math.pow(0.95, i); // Costs decline as % of revenue
+                        const yearEBITDA = yearRevenue - yearCosts;
+                        const yearFCF = yearEBITDA * 0.85; // Assume 15% capex
+                        
+                        margins.push({
+                            year: year,
+                            ebitdaMargin: (yearEBITDA / yearRevenue) * 100,
+                            fcfMargin: (yearFCF / yearRevenue) * 100
+                        });
+                    }
+                }
+            } else {
+                console.log('Updating margin evolution chart with data:', earthData);
+                const response = await fetch('/api/insights/margin-evolution', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ earthResults: earthData })
+                });
+                const result = await response.json();
+                if (!result.success) {
+                    console.error('Margin evolution API error:', result.error);
+                    return;
+                }
+                margins = result.data;
             }
 
-            const margins = result.data;
             const years = margins.map(m => m.year);
             const ebitdaMargins = margins.map(m => m.ebitdaMargin);
             const fcfMargins = margins.map(m => m.fcfMargin);
@@ -9574,25 +9751,62 @@ class ValuationApp {
             return;
         }
 
-        if (!earthData || !earthData.revenue || earthData.revenue.length === 0) {
-            console.warn('Unit economics chart: No earth data available', earthData);
-            return;
+        // Check if we have detailed revenue data (from full calculation)
+        // Monte Carlo results only have summary values, not detailed arrays
+        let useSyntheticData = false;
+        if (!earthData || !earthData.revenue || !Array.isArray(earthData.revenue) || earthData.revenue.length === 0) {
+            // If we only have summary data (Monte Carlo), generate synthetic data
+            if (earthData && (earthData.adjustedValue || earthData.terminalValue)) {
+                console.info('Unit economics chart: Generating synthetic data from summary values');
+                useSyntheticData = true;
+            } else {
+                console.warn('Unit economics chart: No earth data available', earthData);
+                return;
+            }
         }
 
         try {
-            console.log('Updating unit economics chart with data:', earthData);
-            const response = await fetch('/api/insights/unit-economics', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ earthResults: earthData })
-            });
-            const result = await response.json();
-            if (!result.success) {
-                console.error('Unit economics API error:', result.error);
-                return;
+            let metrics;
+            
+            if (useSyntheticData) {
+                // Generate synthetic unit economics data from summary values
+                const baseRevenue = earthData.adjustedValue ? earthData.adjustedValue * 1.2 : 150;
+                const inputs = this.getInputs();
+                const currentYear = new Date().getFullYear();
+                metrics = [];
+                
+                for (let i = 0; i < 7; i++) {
+                    const year = currentYear + i;
+                    if (year <= 2030) {
+                        const growthFactor = Math.pow(1.15, i);
+                        const yearRevenue = baseRevenue * growthFactor;
+                        const satellites = 10000 + (i * 2000); // Growing satellite count
+                        const bandwidth = this.calculateBandwidthCapacity(i, inputs.earth);
+                        const launches = this.calculateLaunchVolume(i, inputs.earth);
+                        
+                        metrics.push({
+                            year: year,
+                            revenuePerSatellite: (yearRevenue * 1000) / satellites, // Convert to millions
+                            revenuePerGbps: (yearRevenue * 1000) / bandwidth, // Convert to millions
+                            costPerLaunch: this.calculateLaunchPrice(i, inputs.earth) // Already in millions
+                        });
+                    }
+                }
+            } else {
+                console.log('Updating unit economics chart with data:', earthData);
+                const response = await fetch('/api/insights/unit-economics', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ earthResults: earthData })
+                });
+                const result = await response.json();
+                if (!result.success) {
+                    console.error('Unit economics API error:', result.error);
+                    return;
+                }
+                metrics = result.data;
             }
 
-            const metrics = result.data;
             const years = metrics.map(m => m.year);
             const revenuePerSat = metrics.map(m => m.revenuePerSatellite);
             const revenuePerGbps = metrics.map(m => m.revenuePerGbps);
@@ -9659,25 +9873,59 @@ class ValuationApp {
             return;
         }
 
-        if (!earthData || !earthData.revenue || earthData.revenue.length === 0) {
-            console.warn('Capex efficiency chart: No earth data available', earthData);
-            return;
+        // Check if we have detailed revenue data (from full calculation)
+        // Monte Carlo results only have summary values, not detailed arrays
+        let useSyntheticData = false;
+        if (!earthData || !earthData.revenue || !Array.isArray(earthData.revenue) || earthData.revenue.length === 0) {
+            // If we only have summary data (Monte Carlo), generate synthetic data
+            if (earthData && (earthData.adjustedValue || earthData.terminalValue)) {
+                console.info('Capex efficiency chart: Generating synthetic data from summary values');
+                useSyntheticData = true;
+            } else {
+                console.warn('Capex efficiency chart: No earth data available', earthData);
+                return;
+            }
         }
 
         try {
-            console.log('Updating capex efficiency chart with data:', earthData);
-            const response = await fetch('/api/insights/capex-efficiency', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ earthResults: earthData })
-            });
-            const result = await response.json();
-            if (!result.success) {
-                console.error('Capex efficiency API error:', result.error);
-                return;
+            let metrics;
+            
+            if (useSyntheticData) {
+                // Generate synthetic capex efficiency data from summary values
+                const baseRevenue = earthData.adjustedValue ? earthData.adjustedValue * 1.2 : 150;
+                const currentYear = new Date().getFullYear();
+                metrics = [];
+                
+                for (let i = 0; i < 7; i++) {
+                    const year = currentYear + i;
+                    if (year <= 2030) {
+                        const growthFactor = Math.pow(1.15, i);
+                        const yearRevenue = baseRevenue * growthFactor;
+                        const yearCapex = yearRevenue * 0.15 * Math.pow(0.90, i); // Capex declines as % of revenue over time
+                        const yearEBITDA = yearRevenue * 0.93; // Assume 7% cost ratio
+                        
+                        metrics.push({
+                            year: year,
+                            capexToRevenue: (yearCapex / yearRevenue) * 100,
+                            reinvestmentRate: (yearCapex / yearEBITDA) * 100
+                        });
+                    }
+                }
+            } else {
+                console.log('Updating capex efficiency chart with data:', earthData);
+                const response = await fetch('/api/insights/capex-efficiency', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ earthResults: earthData })
+                });
+                const result = await response.json();
+                if (!result.success) {
+                    console.error('Capex efficiency API error:', result.error);
+                    return;
+                }
+                metrics = result.data;
             }
 
-            const metrics = result.data;
             const years = metrics.map(m => m.year);
             const capexToRevenue = metrics.map(m => m.capexToRevenue);
             const reinvestmentRate = metrics.map(m => m.reinvestmentRate);
@@ -10029,6 +10277,17 @@ class ValuationApp {
         
         // Load Mach33Lib settings when modal opens
         this.loadMach33LibSettings();
+        
+        // Load Financial API settings when modal opens
+        this.loadFinancialApiSettings();
+        
+        // Show/hide API key fields based on selected provider
+        const financialApiSelect = document.getElementById('financialApiSelect');
+        if (financialApiSelect) {
+            financialApiSelect.addEventListener('change', () => {
+                this.updateFinancialApiKeyFields();
+            });
+        }
     }
 
     // Update current model display
@@ -10075,6 +10334,108 @@ class ValuationApp {
         }
     }
 
+    // Load Financial API Settings
+    loadFinancialApiSettings() {
+        const apiSelect = document.getElementById('financialApiSelect');
+        const alphaVantageKey = document.getElementById('alphaVantageApiKey');
+        const fmpKey = document.getElementById('financialModelingPrepApiKey');
+        
+        if (apiSelect) {
+            apiSelect.value = this.financialApiProvider;
+            this.updateFinancialApiKeyFields();
+        }
+        
+        if (alphaVantageKey) {
+            alphaVantageKey.value = this.alphaVantageApiKey;
+        }
+        
+        if (fmpKey) {
+            fmpKey.value = this.financialModelingPrepApiKey;
+        }
+        
+        this.updateCurrentFinancialApiDisplay();
+    }
+    
+    // Update Financial API key fields visibility
+    updateFinancialApiKeyFields() {
+        const apiSelect = document.getElementById('financialApiSelect');
+        const alphaVantageGroup = document.getElementById('alphaVantageApiKeyGroup');
+        const fmpGroup = document.getElementById('financialModelingPrepApiKeyGroup');
+        const yahooInfoGroup = document.getElementById('yahooFinanceInfoGroup');
+        
+        if (!apiSelect) return;
+        
+        const selectedApi = apiSelect.value;
+        
+        if (alphaVantageGroup) {
+            alphaVantageGroup.style.display = selectedApi === 'alpha-vantage' ? 'block' : 'none';
+        }
+        
+        if (fmpGroup) {
+            fmpGroup.style.display = selectedApi === 'financial-modeling-prep' ? 'block' : 'none';
+        }
+        
+        if (yahooInfoGroup) {
+            yahooInfoGroup.style.display = selectedApi === 'yahoo-finance' ? 'block' : 'none';
+        }
+    }
+    
+    // Update current Financial API display
+    updateCurrentFinancialApiDisplay() {
+        const currentDisplay = document.getElementById('currentFinancialApiDisplay');
+        if (currentDisplay) {
+            const apiNames = {
+                'yahoo-finance': 'Yahoo Finance',
+                'alpha-vantage': 'Alpha Vantage',
+                'financial-modeling-prep': 'Financial Modeling Prep',
+                'sample-data': 'Sample Data'
+            };
+            currentDisplay.textContent = apiNames[this.financialApiProvider] || 'Yahoo Finance';
+        }
+    }
+    
+    // Save Financial API Settings
+    saveFinancialApiSettings() {
+        const apiSelect = document.getElementById('financialApiSelect');
+        const alphaVantageKey = document.getElementById('alphaVantageApiKey');
+        const fmpKey = document.getElementById('financialModelingPrepApiKey');
+        
+        if (apiSelect) {
+            this.financialApiProvider = apiSelect.value;
+            localStorage.setItem('financialApiProvider', this.financialApiProvider);
+        }
+        
+        if (alphaVantageKey) {
+            this.alphaVantageApiKey = alphaVantageKey.value;
+            localStorage.setItem('alphaVantageApiKey', this.alphaVantageApiKey);
+        }
+        
+        if (fmpKey) {
+            this.financialModelingPrepApiKey = fmpKey.value;
+            localStorage.setItem('financialModelingPrepApiKey', this.financialModelingPrepApiKey);
+        }
+        
+        this.updateCurrentFinancialApiDisplay();
+        
+        // Show success message
+        const btn = event.target;
+        const originalText = btn.innerHTML;
+        btn.innerHTML = '<i data-lucide="check"></i> Saved!';
+        btn.disabled = true;
+        if (window.lucide) window.lucide.createIcons();
+        
+        setTimeout(() => {
+            btn.innerHTML = originalText;
+            btn.disabled = false;
+            if (window.lucide) window.lucide.createIcons();
+        }, 2000);
+        
+        // Reload comparables with new API settings
+        if (this.currentView === 'ratios' || this.currentComparablesData) {
+            this.loadComparables();
+        }
+    }
+
     // Update Mach33Lib display (helper function)
     updateMach33LibDisplay() {
         const librarySelect = document.getElementById('greeksLibrarySelect');
@@ -10092,7 +10453,7 @@ class ValuationApp {
         }
     }
 
-    // Load Mach33Lib settings
+    // Load Mach33Lib Settings
     async loadMach33LibSettings() {
         try {
             const response = await fetch('/api/settings/mach33lib');
