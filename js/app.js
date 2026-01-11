@@ -1484,14 +1484,28 @@ class ValuationApp {
 
     updateCashFlowTable(earthData) {
         const tbody = document.getElementById('cashFlowBody');
-        if (!tbody) return;
+        if (!tbody) {
+            console.warn('⚠️ cashFlowBody element not found - table may not be visible');
+            return;
+        }
         
         tbody.innerHTML = '';
 
         if (!earthData || !earthData.cashFlow || earthData.cashFlow.length === 0) {
+            console.warn('⚠️ updateCashFlowTable: No cash flow data available:', {
+                hasEarthData: !!earthData,
+                hasCashFlow: !!earthData?.cashFlow,
+                cashFlowLength: earthData?.cashFlow?.length || 0
+            });
             tbody.innerHTML = '<tr><td colspan="7" class="empty-state">No cash flow data available</td></tr>';
             return;
         }
+        
+        console.log('📊 updateCashFlowTable: Updating main dashboard cash flow table:', {
+            cashFlowLength: earthData.cashFlow.length,
+            firstValue: earthData.cashFlow[0]?.value,
+            lastValue: earthData.cashFlow[earthData.cashFlow.length - 1]?.value
+        });
 
         const formatValue = (value) => {
             if (!value && value !== 0) return 'N/A';
