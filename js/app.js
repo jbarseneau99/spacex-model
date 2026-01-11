@@ -1538,6 +1538,9 @@ class ValuationApp {
             }
         };
 
+        // Store reference for onClick handler
+        const appInstance = this;
+        
         this.charts.valuation = new Chart(ctx, {
             type: 'doughnut',
             data: {
@@ -1556,14 +1559,20 @@ class ValuationApp {
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
-                onClick: (event, elements) => {
+                interaction: {
+                    intersect: true,
+                    mode: 'point'
+                },
+                onClick: function(event, elements, chart) {
+                    console.log('Valuation chart onClick fired:', { elements: elements?.length || 0, chart: !!chart });
                     if (elements && elements.length > 0) {
                         const element = elements[0];
-                        const chart = this.charts.valuation;
-                        const label = chart.data.labels[element.index];
-                        const value = chart.data.datasets[0].data[element.index];
-                        const app = window.app; // Get app instance
-                        if (app) {
+                        const app = window.app || appInstance;
+                        if (app && app.charts && app.charts.valuation) {
+                            const chartInstance = app.charts.valuation;
+                            const label = chartInstance.data.labels[element.index];
+                            const value = chartInstance.data.datasets[0].data[element.index];
+                            console.log('Chart element selected:', { label, value, index: element.index });
                             app.handleElementSelection({
                                 type: 'chart',
                                 chartId: 'valuationChart',
@@ -1573,7 +1582,11 @@ class ValuationApp {
                                 value: formatValue(value),
                                 index: element.index
                             });
+                        } else {
+                            console.warn('App or chart not available:', { app: !!app, chart: app?.charts?.valuation });
                         }
+                    } else {
+                        console.log('Chart clicked but no element selected (clicked on empty area or center)');
                     }
                 },
                 plugins: {
@@ -1590,6 +1603,12 @@ class ValuationApp {
                     }
                 }
             }
+        });
+        
+        // Also add canvas-level click handler as fallback
+        ctx.addEventListener('click', (e) => {
+            console.log('Valuation chart canvas clicked directly');
+            // Chart.js onClick should handle this, but this confirms canvas is clickable
         });
     }
 
@@ -1625,6 +1644,9 @@ class ValuationApp {
             return value;
         };
 
+        // Store reference for onClick handler
+        const appInstance = this;
+        
         this.charts.revenueBreakdown = new Chart(ctx, {
             type: 'doughnut',
             data: {
@@ -1647,14 +1669,20 @@ class ValuationApp {
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
-                onClick: (event, elements) => {
+                interaction: {
+                    intersect: true,
+                    mode: 'point'
+                },
+                onClick: function(event, elements, chart) {
+                    console.log('Revenue chart onClick fired:', { elements, chart: !!chart });
                     if (elements && elements.length > 0) {
                         const element = elements[0];
-                        const chart = this.charts.revenueBreakdown;
-                        const label = chart.data.labels[element.index];
-                        const value = chart.data.datasets[0].data[element.index];
-                        const app = window.app;
-                        if (app) {
+                        const app = window.app || appInstance;
+                        if (app && app.charts && app.charts.revenueBreakdown) {
+                            const chartInstance = app.charts.revenueBreakdown;
+                            const label = chartInstance.data.labels[element.index];
+                            const value = chartInstance.data.datasets[0].data[element.index];
+                            console.log('Chart element selected:', { label, value, index: element.index });
                             app.handleElementSelection({
                                 type: 'chart',
                                 chartId: 'revenueBreakdownChart',
@@ -1664,7 +1692,11 @@ class ValuationApp {
                                 value: `$${value.toFixed(2)}B`,
                                 index: element.index
                             });
+                        } else {
+                            console.warn('App or chart not available:', { app: !!app, chart: app?.charts?.revenueBreakdown });
                         }
+                    } else {
+                        console.log('Chart clicked but no element selected (clicked on empty area)');
                     }
                 },
                 plugins: {
@@ -1685,6 +1717,11 @@ class ValuationApp {
                     }
                 }
             }
+        });
+        
+        // Also add canvas-level click handler as fallback
+        ctx.addEventListener('click', (e) => {
+            console.log('Revenue chart canvas clicked directly');
         });
     }
 
@@ -1724,6 +1761,9 @@ class ValuationApp {
             }
         });
 
+        // Store reference for onClick handler
+        const appInstance = this;
+        
         this.charts.cashFlowTimeline = new Chart(ctx, {
             type: 'line',
             data: {
@@ -1736,7 +1776,9 @@ class ValuationApp {
                         backgroundColor: 'rgba(0, 102, 204, 0.1)',
                         yAxisID: 'y',
                         tension: 0.4,
-                        fill: true
+                        fill: true,
+                        pointRadius: 4,
+                        pointHoverRadius: 6
                     },
                     {
                         label: 'Cumulative PV ($B)',
@@ -1745,22 +1787,30 @@ class ValuationApp {
                         backgroundColor: 'rgba(16, 185, 129, 0.1)',
                         yAxisID: 'y1',
                         tension: 0.4,
-                        fill: false
+                        fill: false,
+                        pointRadius: 4,
+                        pointHoverRadius: 6
                     }
                 ]
             },
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
-                onClick: (event, elements) => {
+                interaction: {
+                    intersect: false,
+                    mode: 'index'
+                },
+                onClick: function(event, elements, chart) {
+                    console.log('Cash flow chart onClick fired:', { elements, chart: !!chart });
                     if (elements && elements.length > 0) {
                         const element = elements[0];
-                        const chart = this.charts.cashFlowTimeline;
-                        const datasetLabel = chart.data.datasets[element.datasetIndex].label;
-                        const year = chart.data.labels[element.index];
-                        const value = chart.data.datasets[element.datasetIndex].data[element.index];
-                        const app = window.app;
-                        if (app) {
+                        const app = window.app || appInstance;
+                        if (app && app.charts && app.charts.cashFlowTimeline) {
+                            const chartInstance = app.charts.cashFlowTimeline;
+                            const datasetLabel = chartInstance.data.datasets[element.datasetIndex].label;
+                            const year = chartInstance.data.labels[element.index];
+                            const value = chartInstance.data.datasets[element.datasetIndex].data[element.index];
+                            console.log('Chart element selected:', { datasetLabel, year, value, index: element.index });
                             app.handleElementSelection({
                                 type: 'chart',
                                 chartId: 'cashFlowTimelineChart',
@@ -1771,7 +1821,11 @@ class ValuationApp {
                                 index: element.index,
                                 datasetIndex: element.datasetIndex
                             });
+                        } else {
+                            console.warn('App or chart not available:', { app: !!app, chart: app?.charts?.cashFlowTimeline });
                         }
+                    } else {
+                        console.log('Chart clicked but no element selected (clicked on empty area)');
                     }
                 },
                 plugins: {
@@ -13529,11 +13583,19 @@ Format your response as plain text. Use the link format exactly as shown above.`
      * Handle element selection (chart or text) and generate commentary
      */
     handleElementSelection(selectionInfo) {
+        console.log('handleElementSelection called:', selectionInfo);
+        
         // Skip if commentary disabled or agent window not open
-        if (!this.agentCommentaryEnabled) return;
+        if (!this.agentCommentaryEnabled) {
+            console.log('Commentary disabled, skipping');
+            return;
+        }
         
         const agentWindow = document.getElementById('aiAgentWindow');
-        if (!agentWindow) return;
+        if (!agentWindow) {
+            console.log('Agent window not found');
+            return;
+        }
         
         const computedStyle = window.getComputedStyle(agentWindow);
         const isVisible = agentWindow.style.display !== 'none' && 
@@ -13542,7 +13604,12 @@ Format your response as plain text. Use the link format exactly as shown above.`
                          computedStyle.display !== '' &&
                          !agentWindow.classList.contains('hidden');
         
-        if (!isVisible) return;
+        if (!isVisible) {
+            console.log('Agent window not visible');
+            return;
+        }
+
+        console.log('Processing element selection...');
 
         // Debounce rapid selections
         if (this.elementSelectionDebounceTimer) {
