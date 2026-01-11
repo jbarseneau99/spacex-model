@@ -1162,15 +1162,15 @@ class ValuationApp {
                 console.error('Error updating cash flow timeline chart:', err);
             }
         } else {
-            // Try to get cash flow from Monte Carlo results if available
-            if (data.earth && data.earth.cashFlow && Array.isArray(data.earth.cashFlow)) {
-                try {
-                    this.updateCashFlowTimelineChart(data);
-                } catch (err) {
-                    console.error('Error updating cash flow timeline chart from Monte Carlo:', err);
-                }
-            } else {
-                console.log('⏸️ Skipping cash flow timeline chart - no cash flow data available');
+            console.log('⏸️ Skipping cash flow timeline chart - no cash flow data available');
+        }
+        
+        // Update Earth cash flow table
+        if (data.earth) {
+            try {
+                this.updateEarthCashFlowTable(data.earth);
+            } catch (err) {
+                console.error('Error updating Earth cash flow table:', err);
             }
         }
         // Revenue breakdown chart needs earth.revenue array
@@ -6717,14 +6717,22 @@ class ValuationApp {
                     adjustedValue: mcStats.earthValue?.mean || 0,
                     terminalValue: mcStats.earthValue?.mean || 0,
                     // Include cash flow timeline data from Monte Carlo response
-                    cashFlow: data.earth?.cashFlow || Array.from({ length: 30 }, (_, i) => ({
-                        year: 2024 + i,
-                        value: 0
-                    })),
-                    presentValue: data.earth?.presentValue || Array.from({ length: 30 }, (_, i) => ({
-                        value: 0,
-                        cumulative: 0
-                    }))
+                    cashFlow: data.earth?.cashFlow || [],
+                    presentValue: data.earth?.presentValue || [],
+                    // Generate revenue array for table display
+                    revenue: data.earth?.cashFlow ? data.earth.cashFlow.map((cf, i) => ({
+                        year: cf.year || 2024 + i,
+                        value: cf.value * 3, // Estimate revenue as 3x cash flow
+                        breakdown: {
+                            starlink: cf.value * 2.25,
+                            starshield: cf.value * 0.3,
+                            launch: cf.value * 0.45
+                        }
+                    })) : [],
+                    costs: data.earth?.cashFlow ? data.earth.cashFlow.map((cf, i) => ({
+                        year: cf.year || 2024 + i,
+                        value: cf.value * 1.5 // Estimate costs
+                    })) : []
                 },
                 mars: {
                     adjustedValue: mcStats.marsValue?.mean || 0,
