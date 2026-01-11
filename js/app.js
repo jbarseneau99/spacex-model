@@ -651,6 +651,53 @@ class ValuationApp {
                 if (contentEl) {
                     contentEl.classList.add('active');
                     contentEl.style.display = 'block';
+                    
+                    // If Launch Services tab, reset its sub-tabs to show first one
+                    if (tabName === 'launch') {
+                        const launchTab = contentEl;
+                        launchTab.querySelectorAll('[data-launch-subtab]').forEach(t => t.classList.remove('active'));
+                        launchTab.querySelectorAll('[id^="launchSubTab-"]').forEach(c => {
+                            c.classList.remove('active');
+                            c.style.display = 'none';
+                        });
+                        const firstSubTab = launchTab.querySelector('[data-launch-subtab]');
+                        const firstSubContent = launchTab.querySelector('[id^="launchSubTab-"]');
+                        if (firstSubTab && firstSubContent) {
+                            firstSubTab.classList.add('active');
+                            firstSubContent.classList.add('active');
+                            firstSubContent.style.display = 'block';
+                        }
+                    }
+                }
+                
+                // Refresh icons
+                if (window.lucide) window.lucide.createIcons();
+            });
+        });
+
+        // Launch Services sub-tabs (nested within Launch Services tab)
+        document.querySelectorAll('[data-launch-subtab]').forEach(tab => {
+            tab.addEventListener('click', () => {
+                const subtabName = tab.dataset.launchSubtab;
+                const launchTab = tab.closest('#earthTab-launch');
+                
+                if (!launchTab) return;
+                
+                // Remove active class from all Launch sub-tabs
+                launchTab.querySelectorAll('[data-launch-subtab]').forEach(t => {
+                    t.classList.remove('active');
+                });
+                launchTab.querySelectorAll('[id^="launchSubTab-"]').forEach(c => {
+                    c.classList.remove('active');
+                    c.style.display = 'none';
+                });
+                
+                // Add active class to clicked sub-tab and corresponding content
+                tab.classList.add('active');
+                const contentEl = document.getElementById(`launchSubTab-${subtabName}`);
+                if (contentEl) {
+                    contentEl.classList.add('active');
+                    contentEl.style.display = 'block';
                 }
                 
                 // Refresh icons

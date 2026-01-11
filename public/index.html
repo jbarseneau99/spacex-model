@@ -715,6 +715,24 @@
 
                 <!-- Launch Services Tab Content -->
                 <div id="earthTab-launch" class="insights-tab-content">
+                <!-- Launch Services Sub-Tabs -->
+                <div class="insights-tabs" style="display: flex; gap: 8px; padding: 0 var(--spacing-lg); margin-bottom: var(--spacing-md); border-bottom: 1px solid var(--border-color);">
+                    <button class="insights-tab active" data-launch-subtab="services">
+                        <i data-lucide="rocket"></i>
+                        <span>Launch Services</span>
+                    </button>
+                    <button class="insights-tab" data-launch-subtab="utilization">
+                        <i data-lucide="activity"></i>
+                        <span>Utilization Metrics</span>
+                    </button>
+                    <button class="insights-tab" data-launch-subtab="cadence">
+                        <i data-lucide="trending-up"></i>
+                        <span>Launch Cadence</span>
+                    </button>
+                </div>
+
+                <!-- Launch Services Sub-Tab Content -->
+                <div id="launchSubTab-services" class="insights-tab-content active">
                 <!-- Launch Services -->
                 <div class="section" style="margin-bottom: var(--spacing-md);">
                     <h3 style="margin: 0 0 12px 0; font-size: 16px;"><i data-lucide="rocket"></i> Launch Services</h3>
@@ -744,7 +762,10 @@
                         <canvas id="launchChart"></canvas>
                     </div>
                 </div>
+                </div>
 
+                <!-- Utilization Metrics Sub-Tab Content -->
+                <div id="launchSubTab-utilization" class="insights-tab-content">
                 <!-- Utilization Metrics -->
                 <div class="section" style="margin-bottom: var(--spacing-md);">
                     <h3 style="margin: 0 0 12px 0; font-size: 16px;"><i data-lucide="activity"></i> Utilization Metrics</h3>
@@ -770,7 +791,10 @@
                         <canvas id="utilizationChart"></canvas>
                     </div>
                 </div>
+                </div>
 
+                <!-- Launch Cadence Sub-Tab Content -->
+                <div id="launchSubTab-cadence" class="insights-tab-content">
                 <!-- Launch Cadence -->
                 <div class="section" style="margin-bottom: var(--spacing-md);">
                     <h3 style="margin: 0 0 12px 0; font-size: 16px;"><i data-lucide="rocket"></i> Launch Cadence</h3>
@@ -780,6 +804,7 @@
                     <div class="chart-container" style="height: 300px;">
                         <canvas id="launchCadenceChart"></canvas>
                     </div>
+                </div>
                 </div>
                 </div>
 
