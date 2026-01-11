@@ -2099,18 +2099,27 @@ class ValuationApp {
 
     updateEarthCashFlowTable(earthData) {
         const tbody = document.getElementById('earthCashFlowBody');
-        if (!tbody) return;
+        if (!tbody) {
+            console.warn('⚠️ earthCashFlowBody element not found - table may not be visible');
+            return;
+        }
         
         tbody.innerHTML = '';
 
-        if (!earthData.cashFlow || earthData.cashFlow.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="9" class="empty-state">No data available</td></tr>';
+        if (!earthData || !earthData.cashFlow || earthData.cashFlow.length === 0) {
+            console.warn('⚠️ No cash flow data available:', {
+                hasEarthData: !!earthData,
+                hasCashFlow: !!earthData?.cashFlow,
+                cashFlowLength: earthData?.cashFlow?.length || 0
+            });
+            tbody.innerHTML = '<tr><td colspan="7" class="empty-state">No data available</td></tr>';
             return;
         }
         
         console.log('📊 Updating Earth cash flow table:', {
             cashFlowLength: earthData.cashFlow.length,
             firstValue: earthData.cashFlow[0]?.value,
+            lastValue: earthData.cashFlow[earthData.cashFlow.length - 1]?.value,
             hasRevenue: !!earthData.revenue,
             hasCosts: !!earthData.costs,
             hasPresentValue: !!earthData.presentValue
