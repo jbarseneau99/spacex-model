@@ -2372,7 +2372,7 @@ textarea:focus {
     transform: translateX(2px);
 }
 
-/* ==================== FLOATING AI AGENT WINDOW ==================== */
+/* ==================== FLOATING DESKTOP AGENT WINDOW ==================== */
 .floating-agent-window {
     position: fixed;
     z-index: 10000;
@@ -2684,7 +2684,7 @@ textarea:focus {
     transform: translateX(2px);
 }
 
-/* ==================== FLOATING AI AGENT WINDOW ==================== */
+/* ==================== FLOATING DESKTOP AGENT WINDOW ==================== */
 .floating-agent-window {
     position: fixed;
     z-index: 10000;
@@ -2883,4 +2883,24 @@ textarea:focus {
     width: 12px;
     height: 12px;
     color: var(--text-secondary);
+}
+
+/* Agent Thinking Message - Subtle spinner for context change detection */
+.agent-thinking-message {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 4px 0;
+    margin: 4px 0;
+    background: transparent;
+    border: none;
+}
+
+.agent-thinking-message .spinning {
+    display: inline-block;
+    animation: spin 1s linear infinite;
+    width: 16px;
+    height: 16px;
+    color: var(--text-secondary);
+    opacity: 0.6;
 }

@@ -22,7 +22,7 @@
                 <button class="icon-button" id="helpBtn" title="Help & Methodology">
                     <i data-lucide="help-circle"></i>
                 </button>
-                <button class="icon-button" id="aiAgentBtn" title="AI Agent">
+                <button class="icon-button" id="aiAgentBtn" title="Desktop Agent">
                     <i data-lucide="bot"></i>
                 </button>
                 <button class="icon-button" id="settingsBtn" title="Settings">
@@ -703,20 +703,6 @@
                     </div>
                     <div class="chart-container" style="height: 300px;">
                         <canvas id="bandwidthEconomicsChart"></canvas>
-                    </div>
-                </div>
-                </div>
-
-                <!-- Technology Tab Content -->
-                <div id="earthTab-technology" class="insights-tab-content">
-                <!-- Technology Transition -->
-                <div class="section" style="margin-bottom: var(--spacing-md);">
-                    <h3 style="margin: 0 0 12px 0; font-size: 16px;"><i data-lucide="refresh-cw"></i> Technology Transition</h3>
-                    <p style="color: var(--text-secondary); font-size: 14px; margin-bottom: var(--spacing-md); line-height: 1.6;">
-                        Evolution from Starlink v2 to v3 satellites increases bandwidth capacity per satellite and improves cost efficiency.
-                    </p>
-                    <div class="chart-container" style="height: 300px;">
-                        <canvas id="technologyTransitionChart"></canvas>
                     </div>
                 </div>
                 </div>
@@ -3976,20 +3962,23 @@
         });
     </script>
 
-    <!-- Floating AI Agent Window -->
+    <!-- Floating Desktop Agent Window -->
     <div id="aiAgentWindow" class="floating-agent-window" style="display: none;">
         <!-- Agent Header -->
         <div class="agent-header" id="agentHeader">
             <div class="agent-header-left">
                 <i data-lucide="bot" style="width: 20px; height: 20px; color: var(--primary-color);"></i>
                 <div style="display: flex; flex-direction: column; gap: 2px;">
-                    <span class="agent-title">AI Agent</span>
+                    <span class="agent-title">Desktop Agent</span>
                     <span id="agentContextBadge" class="agent-context-badge" style="font-size: 10px; color: var(--text-secondary); font-weight: 400;">
                         Dashboard
                     </span>
                 </div>
             </div>
             <div class="agent-header-right">
+                <button class="icon-button agent-header-btn" id="agentCommentaryToggleBtn" title="Toggle Context Commentary">
+                    <i data-lucide="message-square"></i>
+                </button>
                 <button class="icon-button agent-header-btn" id="agentSettingsBtn" title="Agent Settings">
                     <i data-lucide="settings"></i>
                 </button>
@@ -4008,7 +3997,7 @@
             <div class="agent-chat-messages" id="agentChatMessages">
                 <div class="agent-message agent-message-system">
                     <div class="message-content">
-                        <p>Hello! I'm your AI agent. I can help you analyze SpaceX valuation data, answer questions, and provide insights. How can I assist you today?</p>
+                        <p>Hello! I'm your Desktop Agent. I can help you analyze SpaceX valuation data, answer questions, and provide insights. How can I assist you today?</p>
                     </div>
                 </div>
             </div>

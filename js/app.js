@@ -30,7 +30,13 @@ class ValuationApp {
         this.aiModel = localStorage.getItem('aiModel') || 'claude-opus-4-1-20250805'; // Default AI model
         this.financialApiProvider = localStorage.getItem('financialApiProvider') || 'yahoo-finance'; // Default financial API
         this.cachedAIInsights = {}; // Cache AI insights by model ID
-        this.generatingAIInsights = false; // Flag to prevent duplicate generation
+        this.generatingAIInsights = false;
+        this.loadingTerminalInsights = false; // Flag to prevent concurrent terminal insight loading
+        this.terminalInsightsLoadPromise = null; // Store promise to prevent duplicate loads
+        this.navigationHistory = []; // Track navigation history for context understanding
+        this.previousContext = null; // Track previous context for change detection
+        this.agentCommentaryEnabled = true; // Enable/disable agent commentary on context changes
+        this.agentCommentaryDebounceTimer = null; // Debounce timer for context change commentary // Flag to prevent duplicate generation
         this.agentSystemPrompts = null; // Will be loaded on demand
         this.agentChatHistory = []; // Store chat history for context
         this.alphaVantageApiKey = localStorage.getItem('alphaVantageApiKey') || '';
@@ -105,6 +111,73 @@ class ValuationApp {
         // Run Monte Carlo simulation, VaR, and Attribution calculations on initialization (after model loads)
         // The model load will trigger auto-run, so we don't need to call it here
         this.isInitializing = false;
+
+        // Trigger terminal insights load after initialization (will run when model loads and data is available)
+        // This will be called again when model loads, but having it here ensures it runs even if no model auto-loads
+        setTimeout(() => {
+            if (this.currentData && this.currentModelId) {
+                const gridContainer = document.getElementById('dashboardGrid');
+                if (gridContainer) {
+                    // Get tiles from current layout or generate fallback
+                    this.loadTerminalInsightsAfterModelLoad();
+                }
+            }
+        }, 2000); // Wait 2 seconds for model to load
+    }
+
+    /**
+     * Load terminal insights after model change - called from loadModel
+     */
+    async loadTerminalInsightsAfterModelLoad() {
+        // Wait a bit for Monte Carlo to complete and dashboard to update
+        setTimeout(async () => {
+            if (!this.currentData || !this.currentModelId) {
+                console.log('⏸️ Skipping terminal insights load - no data or model');
+                return;
+            }
+
+            const gridContainer = document.getElementById('dashboardGrid');
+            if (!gridContainer) {
+                console.log('⏸️ Skipping terminal insights load - dashboard grid not found');
+                return;
+            }
+
+            // Get all tiles from the grid
+            const tileElements = gridContainer.querySelectorAll('[data-tile-id]');
+            if (tileElements.length === 0) {
+                console.log('⏸️ Skipping terminal insights load - no tiles found');
+                return;
+            }
+
+            // Extract tile data from elements
+            const tiles = Array.from(tileElements).map(el => {
+                const tileId = el.getAttribute('data-tile-id');
+                const title = el.querySelector('[style*="font-size"]')?.textContent?.trim() || '';
+                const value = el.querySelector('[style*="font-weight: 700"]')?.textContent?.trim() || '';
+                // Try to determine insight type from tile ID
+                let insightType = null;
+                if (tileId.includes('valuation') || tileId.includes('overview')) insightType = 'valuation-summary';
+                else if (tileId.includes('earth') || tileId.includes('starlink')) insightType = 'starlink-earth';
+                else if (tileId.includes('mars')) insightType = 'mars-optionality';
+                else if (tileId.includes('x') || tileId.includes('posts')) insightType = 'x-feeds';
+                else if (tileId.includes('news')) insightType = 'news';
+                else if (tileId.includes('financial') || tileId.includes('revenue') || tileId.includes('margin') || tileId.includes('capex')) insightType = 'financial';
+                
+                return {
+                    id: tileId,
+                    title: title,
+                    value: value,
+                    insightType: insightType,
+                    gridColumn: el.style.gridColumn,
+                    gridRow: el.style.gridRow
+                };
+            }).filter(tile => tile.insightType); // Only include tiles that need insights
+
+            if (tiles.length > 0) {
+                const inputs = this.getInputs();
+                await this.loadTerminalInsightsInParallel(tiles, this.currentData, inputs, gridContainer);
+            }
+        }, 3000); // Wait 3 seconds for Monte Carlo and dashboard to update
     }
     
     updateReferenceDataActionsBar() {
@@ -383,7 +456,10 @@ class ValuationApp {
             this.closeMonteCarloProgress();
         });
 
-        // AI Agent Window
+        // Desktop Agent Window
+        document.getElementById('agentCommentaryToggleBtn')?.addEventListener('click', () => {
+            this.toggleAgentCommentary();
+        });
         document.getElementById('agentSettingsBtn')?.addEventListener('click', () => {
             this.openAgentSettings();
         });
@@ -429,7 +505,7 @@ class ValuationApp {
             });
         }
         
-        // Check for dedicated AI agent button
+        // Check for dedicated Desktop Agent button
         const dedicatedAIBtn = document.getElementById('aiAgentBtn');
         if (dedicatedAIBtn) {
             dedicatedAIBtn.addEventListener('click', () => {
@@ -732,6 +808,30 @@ class ValuationApp {
                     contentEl.style.display = 'block';
                 }
                 
+                // Track navigation history for tab change
+                const currentTabInfo = this.getCurrentTabInfo();
+                this.navigationHistory.push({
+                    timestamp: new Date().toISOString(),
+                    view: this.currentView,
+                    tab: tabName,
+                    subTab: null,
+                    modelId: this.currentModelId,
+                    modelName: this.currentModelName
+                });
+                if (this.navigationHistory.length > 50) {
+                    this.navigationHistory.shift();
+                }
+
+                // Detect context change for tab switches
+                if (viewContainer.closest('#insights') || viewContainer.closest('#earth') || viewContainer.closest('#mars')) {
+                    this.detectAndCommentOnContextChange({
+                        type: 'subtab_change',
+                        view: this.currentView,
+                        previousSubTab: currentTabInfo.subTab,
+                        newSubTab: tabName
+                    });
+                }
+
                 // Refresh icons
                 if (window.lucide) window.lucide.createIcons();
                 
@@ -759,6 +859,11 @@ class ValuationApp {
                         // Terminal tab - generate dashboard layout
                         this.generateDashboardLayout(this.currentData, this.getInputs()).catch(err => {
                             console.error('Error generating dashboard layout:', err);
+                        }).then(() => {
+                            // After layout is generated, trigger parallel insights load
+                            setTimeout(() => {
+                                this.loadTerminalInsightsAfterModelLoad();
+                            }, 500);
                         });
                     } else if (tabName === 'insights' && this.currentData) {
                         // Key Insights tab - generate key insights
@@ -793,6 +898,163 @@ class ValuationApp {
                         this.updateUnitEconomicsChart(this.currentData.earth).catch(err => console.error('Unit economics chart error:', err));
                     } else if (tabName === 'capexEfficiency' && this.currentData.earth) {
                         this.updateCapexEfficiencyChart(this.currentData.earth).catch(err => console.error('Capex efficiency chart error:', err));
+                    }
+                }
+            });
+        });
+
+        // Mars Operations sub-tab switching
+        document.querySelectorAll('[data-mars-tab]').forEach(tab => {
+            tab.addEventListener('click', () => {
+                const marsTabName = tab.dataset.marsTab;
+                const viewContainer = tab.closest('.view');
+                
+                // Remove active class from all Mars tabs in this view
+                viewContainer.querySelectorAll('[data-mars-tab]').forEach(t => {
+                    t.classList.remove('active');
+                });
+                
+                // Hide all Mars tab content
+                viewContainer.querySelectorAll('[id^="marsTab-"]').forEach(c => {
+                    c.classList.remove('active');
+                    c.style.display = 'none';
+                });
+                
+                // Add active class to clicked tab
+                tab.classList.add('active');
+                
+                // Show corresponding content
+                const contentEl = document.getElementById(`marsTab-${marsTabName}`);
+                if (contentEl) {
+                    contentEl.classList.add('active');
+                    contentEl.style.display = 'block';
+                    
+                    // Track navigation history for sub-tab change
+                    const tabInfo = this.getCurrentTabInfo();
+                    this.navigationHistory.push({
+                        timestamp: new Date().toISOString(),
+                        view: this.currentView,
+                        tab: tabInfo.tab,
+                        subTab: marsTabName,
+                        modelId: this.currentModelId,
+                        modelName: this.currentModelName
+                    });
+                    if (this.navigationHistory.length > 50) {
+                        this.navigationHistory.shift();
+                    }
+
+                    // Detect context change
+                    this.detectAndCommentOnContextChange({
+                        type: 'subtab_change',
+                        view: 'mars',
+                        previousSubTab: tabInfo.subTab,
+                        newSubTab: marsTabName
+                    });
+
+                    // Refresh icons
+                    if (window.lucide) window.lucide.createIcons();
+                    
+                    // If switching to Overview tab, update the charts
+                    if (marsTabName === 'overview' && this.currentData && this.currentData.mars) {
+                        const inputs = this.getInputs();
+                        // Small delay to ensure canvas elements are visible
+                        setTimeout(() => {
+                            this.updateMarsOptionChart(this.currentData.mars);
+                            this.updateMarsPopulationChart(this.currentData.mars);
+                        }, 100);
+                    }
+                    
+                    // If switching to Launch Scaling tab, update the chart
+                    if (marsTabName === 'launch-scaling' && this.currentData && this.currentData.mars) {
+                        const inputs = this.getInputs();
+                        setTimeout(() => {
+                            this.updateMarsLaunchScalingChart(this.currentData.mars, inputs, 'base');
+                        }, 100);
+                    }
+                    
+                    // If switching to Scenarios tab, render detailed scenarios
+                    if (marsTabName === 'scenarios' && this.currentData && this.currentData.mars) {
+                        setTimeout(() => {
+                            this.renderMarsScenariosDetail(this.currentData.mars.scenarios);
+                        }, 100);
+                    }
+                }
+            });
+        });
+
+        // Earth Operations sub-tab switching
+        document.querySelectorAll('[data-earth-tab]').forEach(tab => {
+            tab.addEventListener('click', () => {
+                const earthTabName = tab.dataset.earthTab;
+                const viewContainer = tab.closest('.view');
+                
+                // Remove active class from all Earth tabs in this view
+                viewContainer.querySelectorAll('[data-earth-tab]').forEach(t => {
+                    t.classList.remove('active');
+                });
+                
+                // Hide all Earth tab content
+                viewContainer.querySelectorAll('[id^="earthTab-"]').forEach(c => {
+                    c.classList.remove('active');
+                    c.style.display = 'none';
+                });
+                
+                // Add active class to clicked tab
+                tab.classList.add('active');
+                
+                // Show corresponding content
+                const contentEl = document.getElementById(`earthTab-${earthTabName}`);
+                if (contentEl) {
+                    contentEl.classList.add('active');
+                    contentEl.style.display = 'block';
+                    
+                    // Track navigation history for sub-tab change
+                    const tabInfo = this.getCurrentTabInfo();
+                    this.navigationHistory.push({
+                        timestamp: new Date().toISOString(),
+                        view: this.currentView,
+                        tab: tabInfo.tab,
+                        subTab: earthTabName,
+                        modelId: this.currentModelId,
+                        modelName: this.currentModelName
+                    });
+                    if (this.navigationHistory.length > 50) {
+                        this.navigationHistory.shift();
+                    }
+
+                    // Detect context change
+                    this.detectAndCommentOnContextChange({
+                        type: 'subtab_change',
+                        view: 'earth',
+                        previousSubTab: tabInfo.subTab,
+                        newSubTab: earthTabName
+                    });
+
+                    // Refresh icons
+                    if (window.lucide) window.lucide.createIcons();
+                    
+                    // Update charts/data when switching tabs
+                    if (this.currentData && this.currentData.earth) {
+                        const inputs = this.getInputs();
+                        
+                        setTimeout(() => {
+                            // Update charts based on which tab is active
+                            if (earthTabName === 'starlink') {
+                                this.updateStarlinkChart(this.currentData.earth, inputs);
+                                this.updateBandwidthEconomicsChart(this.currentData.earth).catch(err => console.error('Bandwidth economics chart error:', err));
+                            } else if (earthTabName === 'launch') {
+                                this.updateLaunchChart(this.currentData.earth, inputs);
+                            } else if (earthTabName === 'utilization') {
+                                this.updateUtilizationChart(this.currentData.earth, inputs).catch(err => console.error('Utilization chart error:', err));
+                            } else if (earthTabName === 'cadence') {
+                                this.updateLaunchCadenceChart(this.currentData.earth, inputs).catch(err => console.error('Launch cadence chart error:', err));
+                            } else if (earthTabName === 'technology') {
+                                this.updateTechnologyTransitionChart(this.currentData.earth).catch(err => console.error('Technology transition chart error:', err));
+                            } else if (earthTabName === 'financials') {
+                                // Financials tab uses the cash flow table which is already updated
+                                this.updateEarthCashFlowTable(this.currentData.earth);
+                            }
+                        }, 100);
                     }
                 }
             });
@@ -867,6 +1129,23 @@ class ValuationApp {
     }
 
     switchView(viewName) {
+        // Track navigation history
+        const tabInfo = this.getCurrentTabInfo();
+        const navigationEntry = {
+            timestamp: new Date().toISOString(),
+            view: this.currentView,
+            tab: tabInfo.tab,
+            subTab: tabInfo.subTab,
+            modelId: this.currentModelId,
+            modelName: this.currentModelName
+        };
+        
+        // Add to history (keep last 50 entries)
+        this.navigationHistory.push(navigationEntry);
+        if (this.navigationHistory.length > 50) {
+            this.navigationHistory.shift();
+        }
+
         // Update navigation
         document.querySelectorAll('.nav-item').forEach(item => {
             item.classList.remove('active');
@@ -885,7 +1164,17 @@ class ValuationApp {
             targetView.classList.add('active');
         }
 
+        const previousView = this.currentView;
         this.currentView = viewName;
+        
+        // Detect context change and trigger agent commentary
+        this.detectAndCommentOnContextChange({
+            type: 'view_change',
+            previousView: previousView,
+            newView: viewName,
+            previousTab: tabInfo.tab,
+            previousSubTab: tabInfo.subTab
+        });
         
         // Update agent context badge if agent window is open
         this.updateAgentContextBadge();
@@ -1141,8 +1430,24 @@ class ValuationApp {
             marsPercentEl.textContent = `${data.total.breakdown.marsPercent.toFixed(1)}%`;
         }
 
+        // Detect context change before updating currentData
+        const previousData = this.currentData;
+        const dataChanged = !previousData || 
+            JSON.stringify(previousData.total?.value) !== JSON.stringify(data.total?.value) ||
+            JSON.stringify(previousData.earth?.adjustedValue) !== JSON.stringify(data.earth?.adjustedValue) ||
+            JSON.stringify(previousData.mars?.adjustedValue) !== JSON.stringify(data.mars?.adjustedValue);
+
         // Store currentData BEFORE updating charts (charts may need it)
         this.currentData = data;
+
+        // Detect context change if data changed
+        if (dataChanged) {
+            this.detectAndCommentOnContextChange({
+                type: 'data_change',
+                previousData: previousData,
+                newData: data
+            });
+        }
 
         // Update charts (only if data has required structure)
         try {
@@ -1158,8 +1463,8 @@ class ValuationApp {
                 console.error('Error updating cash flow timeline chart:', err);
             }
         } else {
-            // Monte Carlo results don't have cash flow timeline - skip chart update
-            console.log('⏸️ Skipping cash flow timeline chart - Monte Carlo results don\'t include timeline data');
+            // Cash flow data not available - skip chart update
+            console.log('⏸️ Skipping cash flow timeline chart - cash flow data not available');
         }
         // Revenue breakdown chart needs earth.revenue array
         if (data.earth && data.earth.revenue && Array.isArray(data.earth.revenue)) {
@@ -1959,6 +2264,30 @@ class ValuationApp {
     updateEarthView(data) {
         if (!data.earth) return;
 
+        // Ensure default tab (Starlink) is visible
+        const earthView = document.getElementById('earth');
+        if (earthView) {
+            // Hide all Earth tab content
+            earthView.querySelectorAll('[id^="earthTab-"]').forEach(c => {
+                c.classList.remove('active');
+                c.style.display = 'none';
+            });
+            
+            // Show default Starlink tab
+            const starlinkTab = earthView.querySelector('[data-earth-tab="starlink"]');
+            const starlinkContent = document.getElementById('earthTab-starlink');
+            if (starlinkTab && starlinkContent) {
+                // Remove active from all tabs
+                earthView.querySelectorAll('[data-earth-tab]').forEach(t => {
+                    t.classList.remove('active');
+                });
+                // Activate Starlink tab
+                starlinkTab.classList.add('active');
+                starlinkContent.classList.add('active');
+                starlinkContent.style.display = 'block';
+            }
+        }
+
         const formatBillion = (value) => {
             if (!value && value !== 0) return 'N/A';
             // Values are already in billions
@@ -2080,16 +2409,24 @@ class ValuationApp {
         if (underlyingValueEl) underlyingValueEl.textContent = formatBillion(data.mars.underlyingValue);
         if (yearsToColonyEl) yearsToColonyEl.textContent = `${data.mars.yearsToColony} years`;
 
-        // Render scenarios
+        // Render scenarios (compact in Overview tab)
         this.renderMarsScenarios(data.mars.scenarios);
+        
+        // Render detailed scenarios (in Scenarios tab) if it's visible
+        const scenariosTab = document.getElementById('marsTab-scenarios');
+        if (scenariosTab && scenariosTab.classList.contains('active')) {
+            this.renderMarsScenariosDetail(data.mars.scenarios);
+        }
 
         // Get inputs for charts
         const inputs = this.getInputs();
 
-        // Update charts
-        this.updateMarsOptionChart(data.mars);
-        this.updateMarsPopulationChart(data.mars);
-        this.updateMarsLaunchScalingChart(data.mars, inputs);
+        // Update charts - use setTimeout to ensure canvas elements are visible
+        setTimeout(() => {
+            this.updateMarsOptionChart(data.mars);
+            this.updateMarsPopulationChart(data.mars);
+            this.updateMarsLaunchScalingChart(data.mars, inputs);
+        }, 100);
     }
 
     updateEarthCashFlowTable(earthData) {
@@ -2147,8 +2484,18 @@ class ValuationApp {
     }
 
     updateStarlinkChart(earthData, inputs) {
-        const ctx = document.getElementById('starlinkChart');
-        if (!ctx) return;
+        const canvas = document.getElementById('starlinkChart');
+        if (!canvas) {
+            console.warn('Starlink Chart canvas not found');
+            return;
+        }
+
+        // Ensure the parent tab content is visible
+        const tabContent = canvas.closest('.insights-tab-content');
+        if (tabContent && tabContent.style.display === 'none') {
+            // Tab is hidden, chart will be rendered when tab becomes visible
+            return;
+        }
 
         // Get current scenario (default to 'base')
         const activeScenario = document.querySelector('.scenario-btn.active')?.dataset.scenario || 'base';
@@ -2195,7 +2542,7 @@ class ValuationApp {
             this.charts.starlink.destroy();
         }
 
-        this.charts.starlink = new Chart(ctx, {
+        this.charts.starlink = new Chart(canvas, {
             type: 'line',
             data: {
                 labels: years,
@@ -2275,8 +2622,18 @@ class ValuationApp {
     }
 
     updateLaunchChart(earthData, inputs) {
-        const ctx = document.getElementById('launchChart');
-        if (!ctx) return;
+        const canvas = document.getElementById('launchChart');
+        if (!canvas) {
+            console.warn('Launch Chart canvas not found');
+            return;
+        }
+
+        // Ensure the parent tab content is visible
+        const tabContent = canvas.closest('.insights-tab-content');
+        if (tabContent && tabContent.style.display === 'none') {
+            // Tab is hidden, chart will be rendered when tab becomes visible
+            return;
+        }
 
         const years = [];
         const volume = [];
@@ -2304,7 +2661,7 @@ class ValuationApp {
             this.charts.launch.destroy();
         }
 
-        this.charts.launch = new Chart(ctx, {
+        this.charts.launch = new Chart(canvas, {
             type: 'bar',
             data: {
                 labels: years,
@@ -3340,21 +3697,152 @@ class ValuationApp {
             return `$${value.toFixed(1)}B`;
         };
 
-        scenarios.forEach(scenario => {
+        // Handle both array and object formats
+        const scenariosArray = Array.isArray(scenarios) ? scenarios : Object.values(scenarios || {});
+
+        scenariosArray.forEach(scenario => {
+            if (!scenario) return;
             const card = document.createElement('div');
             card.className = 'scenario-card';
             card.innerHTML = `
-                <h4>${scenario.name}</h4>
-                <div class="metric-value-small">${formatBillion(scenario.value)}</div>
-                <div class="metric-label-small">Probability: ${(scenario.probability * 100).toFixed(0)}%</div>
+                <h4>${scenario.name || 'Unknown Scenario'}</h4>
+                <div class="metric-value-small">${formatBillion(scenario.value || scenario.optionValue || 0)}</div>
+                <div class="metric-label-small">Probability: ${((scenario.probability || 0.33) * 100).toFixed(0)}%</div>
             `;
             grid.appendChild(card);
         });
     }
 
+    renderMarsScenariosDetail(scenarios) {
+        const grid = document.getElementById('marsScenariosGridDetail');
+        if (!grid) return;
+
+        grid.innerHTML = '';
+
+        const formatBillion = (value) => {
+            if (!value && value !== 0) return 'N/A';
+            // Values are already in billions
+            // If >= 1000 billion, display as trillions
+            if (value >= 1000) {
+                return `$${(value / 1000).toFixed(1)}T`;
+            }
+            return `$${value.toFixed(1)}B`;
+        };
+
+        // Handle both array and object formats
+        let scenariosArray = [];
+        
+        if (Array.isArray(scenarios)) {
+            scenariosArray = scenarios;
+        } else if (scenarios && typeof scenarios === 'object') {
+            // Convert object with keys (bear, base, bull) to array
+            scenariosArray = Object.keys(scenarios).map(key => {
+                const scenario = scenarios[key];
+                return {
+                    key: key,
+                    name: scenario.name || key.charAt(0).toUpperCase() + key.slice(1) + ' Case',
+                    ...scenario
+                };
+            });
+        }
+
+        // Generate default scenarios if none provided or empty
+        if (scenariosArray.length === 0) {
+            const marsData = this.currentData?.mars;
+            const baseValue = marsData?.optionValue || marsData?.expectedValue || marsData?.adjustedValue || 0;
+            
+            scenariosArray = [
+                { 
+                    name: 'Bear Case', 
+                    value: baseValue * 0.6, 
+                    probability: 0.2, 
+                    description: 'Conservative assumptions',
+                    inputs: {
+                        mars: {
+                            firstColonyYear: 2035,
+                            transportCostDecline: 0.15,
+                            populationGrowth: 0.30
+                        }
+                    }
+                },
+                { 
+                    name: 'Base Case', 
+                    value: baseValue, 
+                    probability: 0.5, 
+                    description: 'Moderate assumptions',
+                    inputs: {
+                        mars: {
+                            firstColonyYear: 2030,
+                            transportCostDecline: 0.20,
+                            populationGrowth: 0.50
+                        }
+                    }
+                },
+                { 
+                    name: 'Bull Case', 
+                    value: baseValue * 1.5, 
+                    probability: 0.3, 
+                    description: 'Optimistic assumptions',
+                    inputs: {
+                        mars: {
+                            firstColonyYear: 2028,
+                            transportCostDecline: 0.30,
+                            populationGrowth: 0.70
+                        }
+                    }
+                }
+            ];
+        }
+
+        scenariosArray.forEach(scenario => {
+            if (!scenario) return;
+            const card = document.createElement('div');
+            card.className = 'scenario-card';
+            
+            // Build detailed card content
+            let cardContent = `
+                <h4>${scenario.name || 'Unknown Scenario'}</h4>
+                <div class="metric-value-small">${formatBillion(scenario.value || scenario.optionValue || scenario.expectedValue || 0)}</div>
+                <div class="metric-label-small" style="margin-top: 8px;">Probability: ${((scenario.probability || 0.33) * 100).toFixed(0)}%</div>
+            `;
+
+            // Add description if available
+            if (scenario.description) {
+                cardContent += `<div class="metric-label-small" style="margin-top: 4px; color: var(--text-secondary); font-size: 12px;">${scenario.description}</div>`;
+            }
+
+            // Add Mars-specific inputs if available
+            if (scenario.inputs && scenario.inputs.mars) {
+                const mars = scenario.inputs.mars;
+                cardContent += `
+                    <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border-color);">
+                        <div class="metric-label-small" style="font-size: 11px; color: var(--text-secondary);">
+                            <div>Colony Year: ${mars.firstColonyYear || 'N/A'}</div>
+                            <div>Transport Cost Decline: ${mars.transportCostDecline ? (mars.transportCostDecline * 100).toFixed(1) + '%' : 'N/A'}</div>
+                            <div>Population Growth: ${mars.populationGrowth ? (mars.populationGrowth * 100).toFixed(1) + '%' : 'N/A'}</div>
+                        </div>
+                    </div>
+                `;
+            }
+
+            card.innerHTML = cardContent;
+            grid.appendChild(card);
+        });
+    }
+
     updateMarsOptionChart(marsData) {
-        const ctx = document.getElementById('marsOptionChart');
-        if (!ctx) return;
+        const canvas = document.getElementById('marsOptionChart');
+        if (!canvas) {
+            console.warn('Mars Option Chart canvas not found');
+            return;
+        }
+
+        // Ensure the parent tab content is visible
+        const tabContent = canvas.closest('.insights-tab-content');
+        if (tabContent && tabContent.style.display === 'none') {
+            // Tab is hidden, chart will be rendered when tab becomes visible
+            return;
+        }
 
         // Simulate option payoff curve
         const underlyingValues = [];
@@ -3370,7 +3858,7 @@ class ValuationApp {
             this.charts.marsOption.destroy();
         }
 
-        this.charts.marsOption = new Chart(ctx, {
+        this.charts.marsOption = new Chart(canvas, {
             type: 'line',
             data: {
                 labels: underlyingValues,
@@ -3614,14 +4102,29 @@ class ValuationApp {
     }
 
     updateMarsPopulationChart(marsData) {
-        const ctx = document.getElementById('marsPopulationChart');
-        if (!ctx) return;
+        const canvas = document.getElementById('marsPopulationChart');
+        if (!canvas) {
+            console.warn('Mars Population Chart canvas not found');
+            return;
+        }
+
+        // Ensure the parent tab content is visible
+        const tabContent = canvas.closest('.insights-tab-content');
+        if (tabContent && tabContent.style.display === 'none') {
+            // Tab is hidden, chart will be rendered when tab becomes visible
+            return;
+        }
 
         const inputs = this.getInputs();
+        if (!inputs || !inputs.mars) {
+            console.warn('Mars inputs not available for population chart');
+            return;
+        }
+
         const years = [];
         const population = [];
         const currentYear = new Date().getFullYear();
-        const colonyYear = inputs.mars.firstColonyYear;
+        const colonyYear = inputs.mars.firstColonyYear || 2030;
         const horizonYear = 2040;
 
         let pop = 1000; // Initial population
@@ -3630,7 +4133,7 @@ class ValuationApp {
             if (year === colonyYear) {
                 population.push(pop);
             } else {
-                pop = pop * (1 + inputs.mars.populationGrowth);
+                pop = pop * (1 + (inputs.mars.populationGrowth || 0.1));
                 population.push(pop);
             }
         }
@@ -3639,7 +4142,7 @@ class ValuationApp {
             this.charts.marsPopulation.destroy();
         }
 
-        this.charts.marsPopulation = new Chart(ctx, {
+        this.charts.marsPopulation = new Chart(canvas, {
             type: 'line',
             data: {
                 labels: years,
@@ -6807,7 +7310,10 @@ class ValuationApp {
                 },
                 earth: {
                     adjustedValue: mcStats.earthValue?.mean || 0,
-                    terminalValue: mcStats.earthValue?.mean || 0
+                    terminalValue: mcStats.earthValue?.mean || 0,
+                    // Include cash flow timeline from Monte Carlo results
+                    cashFlow: data.earth?.cashFlow || null,
+                    presentValue: data.earth?.presentValue || null
                 },
                 mars: {
                     adjustedValue: mcStats.marsValue?.mean || 0,
@@ -9555,7 +10061,19 @@ class ValuationApp {
                 }
 
                 // Store model name for dashboard title
+                const previousModelName = this.currentModelName;
                 this.currentModelName = model.name;
+
+                // Detect model change
+                if (previousModelId && previousModelId !== id) {
+                    this.detectAndCommentOnContextChange({
+                        type: 'model_change',
+                        previousModelId: previousModelId,
+                        previousModelName: previousModelName,
+                        newModelId: id,
+                        newModelName: model.name
+                    });
+                }
 
                 // Clear cached AI insights when switching models
                 if (previousModelId && previousModelId !== id) {
@@ -9657,6 +10175,9 @@ class ValuationApp {
 
                 // Save inputs to local storage
                 this.saveInputs();
+
+                // Trigger terminal insights load after model change
+                this.loadTerminalInsightsAfterModelLoad();
 
                 // Force UI refresh
                 setTimeout(() => {
@@ -10207,9 +10728,16 @@ class ValuationApp {
     }
 
     async updateUtilizationChart(earthData, inputs) {
-        const ctx = document.getElementById('utilizationChart');
-        if (!ctx) {
+        const canvas = document.getElementById('utilizationChart');
+        if (!canvas) {
             console.warn('Utilization chart canvas not found');
+            return;
+        }
+
+        // Ensure the parent tab content is visible
+        const tabContent = canvas.closest('.insights-tab-content');
+        if (tabContent && tabContent.style.display === 'none') {
+            // Tab is hidden, chart will be rendered when tab becomes visible
             return;
         }
 
@@ -10219,11 +10747,42 @@ class ValuationApp {
         }
 
         try {
+            // Generate synthetic constellation/capacity data if missing
+            let earthResultsForAPI = { ...earthData };
+            if (!earthResultsForAPI.constellation || !earthResultsForAPI.capacity) {
+                console.log('Generating synthetic utilization data from summary values');
+                const currentYear = new Date().getFullYear();
+                const launchVolume = inputs.earth?.launchVolume || 100;
+                const baseSatellites = 5000;
+                const baseCapacity = 100; // Tbps
+                
+                earthResultsForAPI.constellation = [];
+                earthResultsForAPI.capacity = [];
+                
+                for (let i = 0; i < 7; i++) {
+                    const year = currentYear + i;
+                    const satellites = baseSatellites + (i * 2000);
+                    const capacity = baseCapacity * Math.pow(1.2, i);
+                    
+                    earthResultsForAPI.constellation.push({
+                        year: year,
+                        total: satellites,
+                        gen1: satellites * 0.1,
+                        gen2: satellites * 0.9
+                    });
+                    
+                    earthResultsForAPI.capacity.push({
+                        year: year,
+                        total: capacity
+                    });
+                }
+            }
+
             console.log('Updating utilization chart with data:', { earthData: !!earthData, inputs: !!inputs });
             const response = await fetch('/api/insights/utilization', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ earthResults: earthData, inputs })
+                body: JSON.stringify({ earthResults: earthResultsForAPI, inputs })
             });
             const result = await response.json();
             if (!result.success) {
@@ -10258,7 +10817,7 @@ class ValuationApp {
                 this.charts.utilization.destroy();
             }
 
-            this.charts.utilization = new Chart(ctx, {
+            this.charts.utilization = new Chart(canvas, {
                 type: 'line',
                 data: {
                     labels: years,
@@ -10297,21 +10856,136 @@ class ValuationApp {
             });
         } catch (error) {
             console.error('Utilization chart error:', error);
+            // Try to render with fallback data if API fails
+            try {
+                const currentYear = new Date().getFullYear();
+                const launchVolume = inputs?.earth?.launchVolume || 100;
+                const falcon9Utilization = Math.min(95, 60 + (launchVolume / 10));
+                const starshipUtilization = Math.min(90, 50 + (launchVolume / 15));
+                const rocketUtilization = (falcon9Utilization + starshipUtilization) / 2;
+                
+                const years = [];
+                const falcon9Util = [];
+                const starshipUtil = [];
+                const totalUtil = [];
+                
+                for (let i = 0; i < 7; i++) {
+                    years.push(currentYear + i);
+                    falcon9Util.push(falcon9Utilization);
+                    starshipUtil.push(starshipUtilization);
+                    totalUtil.push(rocketUtilization);
+                }
+                
+                // Update metric cards
+                const rocketUtilEl = document.getElementById('rocketUtilization');
+                const capacityUtilEl = document.getElementById('capacityUtilization');
+                const falcon9UtilEl = document.getElementById('falcon9Utilization');
+                const starshipUtilEl = document.getElementById('starshipUtilization');
+                
+                if (rocketUtilEl) rocketUtilEl.textContent = `${rocketUtilization.toFixed(1)}%`;
+                if (capacityUtilEl) capacityUtilEl.textContent = `${rocketUtilization.toFixed(1)}%`;
+                if (falcon9UtilEl) falcon9UtilEl.textContent = `${falcon9Utilization.toFixed(1)}%`;
+                if (starshipUtilEl) starshipUtilEl.textContent = `${starshipUtilization.toFixed(1)}%`;
+                
+                if (this.charts.utilization) {
+                    this.charts.utilization.destroy();
+                }
+                
+                this.charts.utilization = new Chart(canvas, {
+                    type: 'line',
+                    data: {
+                        labels: years,
+                        datasets: [{
+                            label: 'Falcon 9 Utilization (%)',
+                            data: falcon9Util,
+                            borderColor: '#0066cc',
+                            backgroundColor: 'rgba(0, 102, 204, 0.1)',
+                            tension: 0.1
+                        }, {
+                            label: 'Starship Utilization (%)',
+                            data: starshipUtil,
+                            borderColor: '#10b981',
+                            backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                            tension: 0.1
+                        }, {
+                            label: 'Total Utilization (%)',
+                            data: totalUtil,
+                            borderColor: '#f59e0b',
+                            backgroundColor: 'rgba(245, 158, 11, 0.1)',
+                            tension: 0.1,
+                            borderWidth: 2
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        scales: {
+                            y: {
+                                beginAtZero: true,
+                                max: 100,
+                                title: { display: true, text: 'Utilization (%)' }
+                            }
+                        }
+                    }
+                });
+            } catch (fallbackError) {
+                console.error('Failed to render utilization chart with fallback data:', fallbackError);
+            }
         }
     }
 
     async updateTechnologyTransitionChart(earthData) {
-        const ctx = document.getElementById('technologyTransitionChart');
-        if (!ctx) return;
+        const canvas = document.getElementById('technologyTransitionChart');
+        if (!canvas) {
+            console.warn('Technology Transition Chart canvas not found');
+            return;
+        }
+
+        // Ensure the parent tab content is visible
+        const tabContent = canvas.closest('.insights-tab-content');
+        if (tabContent && tabContent.style.display === 'none') {
+            // Tab is hidden, chart will be rendered when tab becomes visible
+            return;
+        }
 
         try {
+            // Generate synthetic constellation data if missing
+            let earthResultsForAPI = { ...earthData };
+            if (!earthResultsForAPI.constellation) {
+                console.log('Generating synthetic technology transition data from summary values');
+                const currentYear = new Date().getFullYear();
+                const baseSatellites = 5000;
+                
+                earthResultsForAPI.constellation = [];
+                
+                for (let i = 0; i < 7; i++) {
+                    const year = currentYear + i;
+                    const satellites = baseSatellites + (i * 2000);
+                    
+                    earthResultsForAPI.constellation.push({
+                        year: year,
+                        total: satellites,
+                        gen1: satellites * 0.1,
+                        gen2: satellites * 0.9
+                    });
+                }
+            }
+
             const response = await fetch('/api/insights/technology-transition', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ earthResults: earthData })
+                body: JSON.stringify({ earthResults: earthResultsForAPI })
             });
             const result = await response.json();
-            if (!result.success) return;
+            if (!result.success) {
+                console.error('Technology transition API error:', result.error);
+                return;
+            }
+
+            if (!result.data || result.data.length === 0) {
+                console.warn('Technology transition API returned no data');
+                return;
+            }
 
             const transition = result.data;
             const years = transition.map(t => t.year);
@@ -10322,7 +10996,7 @@ class ValuationApp {
                 this.charts.technologyTransition.destroy();
             }
 
-            this.charts.technologyTransition = new Chart(ctx, {
+            this.charts.technologyTransition = new Chart(canvas, {
                 type: 'line',
                 data: {
                     labels: years,
@@ -10353,12 +11027,79 @@ class ValuationApp {
             });
         } catch (error) {
             console.error('Technology transition chart error:', error);
+            // Try to render with fallback data if API fails
+            try {
+                const currentYear = new Date().getFullYear();
+                const baseSatellites = 5000;
+                
+                const years = [];
+                const v2Satellites = [];
+                const v3Satellites = [];
+                
+                for (let i = 0; i < 7; i++) {
+                    const year = currentYear + i;
+                    const satellites = baseSatellites + (i * 2000);
+                    // V2 satellites decline over time, V3 increase
+                    const v2Ratio = Math.max(0.1, 1 - (i * 0.15));
+                    const v3Ratio = 1 - v2Ratio;
+                    
+                    years.push(year);
+                    v2Satellites.push(satellites * v2Ratio);
+                    v3Satellites.push(satellites * v3Ratio);
+                }
+                
+                if (this.charts.technologyTransition) {
+                    this.charts.technologyTransition.destroy();
+                }
+                
+                this.charts.technologyTransition = new Chart(canvas, {
+                    type: 'line',
+                    data: {
+                        labels: years,
+                        datasets: [{
+                            label: 'V2 Satellites',
+                            data: v2Satellites,
+                            borderColor: '#6b7280',
+                            backgroundColor: 'rgba(107, 114, 128, 0.1)',
+                            tension: 0.1
+                        }, {
+                            label: 'V3 Satellites',
+                            data: v3Satellites,
+                            borderColor: '#10b981',
+                            backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                            tension: 0.1
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        scales: {
+                            y: {
+                                beginAtZero: true,
+                                title: { display: true, text: 'Number of Satellites' }
+                            }
+                        }
+                    }
+                });
+            } catch (fallbackError) {
+                console.error('Failed to render technology transition chart with fallback data:', fallbackError);
+            }
         }
     }
 
     async updateLaunchCadenceChart(earthData, inputs) {
-        const ctx = document.getElementById('launchCadenceChart');
-        if (!ctx) return;
+        const canvas = document.getElementById('launchCadenceChart');
+        if (!canvas) {
+            console.warn('Launch Cadence Chart canvas not found');
+            return;
+        }
+
+        // Ensure the parent tab content is visible
+        const tabContent = canvas.closest('.insights-tab-content');
+        if (tabContent && tabContent.style.display === 'none') {
+            // Tab is hidden, chart will be rendered when tab becomes visible
+            return;
+        }
 
         try {
             const response = await fetch('/api/insights/launch-cadence', {
@@ -10378,7 +11119,7 @@ class ValuationApp {
                 this.charts.launchCadence.destroy();
             }
 
-            this.charts.launchCadence = new Chart(ctx, {
+            this.charts.launchCadence = new Chart(canvas, {
                 type: 'line',
                 data: {
                     labels: years,
@@ -10413,8 +11154,18 @@ class ValuationApp {
     }
 
     async updateBandwidthEconomicsChart(earthData) {
-        const ctx = document.getElementById('bandwidthEconomicsChart');
-        if (!ctx) return;
+        const canvas = document.getElementById('bandwidthEconomicsChart');
+        if (!canvas) {
+            console.warn('Bandwidth Economics Chart canvas not found');
+            return;
+        }
+
+        // Ensure the parent tab content is visible
+        const tabContent = canvas.closest('.insights-tab-content');
+        if (tabContent && tabContent.style.display === 'none') {
+            // Tab is hidden, chart will be rendered when tab becomes visible
+            return;
+        }
 
         try {
             const response = await fetch('/api/insights/bandwidth-economics', {
@@ -10442,7 +11193,7 @@ class ValuationApp {
                 this.charts.bandwidthEconomics.destroy();
             }
 
-            this.charts.bandwidthEconomics = new Chart(ctx, {
+            this.charts.bandwidthEconomics = new Chart(canvas, {
                 type: 'line',
                 data: {
                     labels: years,
@@ -11358,34 +12109,9 @@ class ValuationApp {
         gridContainer.style.maxHeight = '100%';
         gridContainer.style.overflow = 'hidden';
 
+        // Render tiles first with placeholder data
         for (const tile of tiles) {
-            let insightData = null;
-            if (data && tile.insightType) {
-                try {
-                    const response = await fetch('/api/insights/enhanced', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            valuationData: data,
-                            inputs: inputs,
-                            tileId: tile.id,
-                            tileTitle: tile.title,
-                            tileValue: tile.value,
-                            context: {
-                                metric: tile.title,
-                                value: tile.value,
-                                subtitle: tile.subtitle,
-                                tileType: tile.insightType
-                            }
-                        })
-                    });
-                    const result = await response.json();
-                    insightData = result.success ? result.data : null;
-                } catch (error) {
-                    console.error(`Error fetching insight for tile ${tile.id}:`, error);
-                }
-            }
-            const tileHTML = this.renderDashboardTile(tile, insightData);
+            const tileHTML = this.renderDashboardTile(tile, null);
             const tempDiv = document.createElement('div');
             tempDiv.innerHTML = tileHTML.trim();
             const tileElement = tempDiv.firstElementChild;
@@ -11394,6 +12120,125 @@ class ValuationApp {
             }
         }
         if (window.lucide) window.lucide.createIcons();
+
+        // Load insights in parallel (non-blocking) - only if we have data
+        if (data && inputs) {
+            this.loadTerminalInsightsInParallel(tiles, data, inputs, gridContainer).catch(err => {
+                console.error('Error loading terminal insights:', err);
+            });
+        }
+    }
+
+    /**
+     * Load all terminal insights in parallel - ensures only one process runs at a time
+     * Called automatically on app init and model change
+     */
+    async loadTerminalInsightsInParallel(tiles, data, inputs, gridContainer) {
+        // Prevent concurrent execution - if already loading, return existing promise
+        if (this.loadingTerminalInsights) {
+            console.log('⏸️ Terminal insights already loading - skipping duplicate request');
+            return this.terminalInsightsLoadPromise;
+        }
+
+        // Check if we have required data
+        if (!data || !inputs || !tiles || tiles.length === 0) {
+            console.log('⏸️ Skipping terminal insights load - missing data or tiles');
+            return;
+        }
+
+        // Set loading flag
+        this.loadingTerminalInsights = true;
+        console.log('🚀 Starting parallel terminal insights load...');
+
+        // Create promise for this load operation
+        this.terminalInsightsLoadPromise = (async () => {
+            try {
+                // Filter tiles that need insights
+                const tilesNeedingInsights = tiles.filter(tile => tile.insightType && data);
+
+                if (tilesNeedingInsights.length === 0) {
+                    console.log('ℹ️ No tiles need insights');
+                    return;
+                }
+
+                console.log(`📊 Loading insights for ${tilesNeedingInsights.length} tiles in parallel...`);
+
+                // Load all insights in parallel
+                const insightPromises = tilesNeedingInsights.map(async (tile) => {
+                    try {
+                        const response = await fetch('/api/insights/enhanced', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                valuationData: data,
+                                inputs: inputs,
+                                tileId: tile.id,
+                                tileTitle: tile.title,
+                                tileValue: tile.value,
+                                context: {
+                                    metric: tile.title,
+                                    value: tile.value,
+                                    subtitle: tile.subtitle,
+                                    tileType: tile.insightType
+                                }
+                            })
+                        });
+                        const result = await response.json();
+                        return {
+                            tileId: tile.id,
+                            insightData: result.success ? result.data : null,
+                            error: result.success ? null : result.error
+                        };
+                    } catch (error) {
+                        console.error(`Error fetching insight for tile ${tile.id}:`, error);
+                        return {
+                            tileId: tile.id,
+                            insightData: null,
+                            error: error.message
+                        };
+                    }
+                });
+
+                // Wait for all insights to load
+                const insightResults = await Promise.all(insightPromises);
+
+                // Update tiles with loaded insights
+                insightResults.forEach(({ tileId, insightData }) => {
+                    const tileElement = gridContainer.querySelector(`[data-tile-id="${tileId}"]`);
+                    if (tileElement) {
+                        // Find the tile definition
+                        const tile = tiles.find(t => t.id === tileId);
+                        if (tile) {
+                            // Update tile content with insight data
+                            const updatedHTML = this.renderDashboardTile(tile, insightData);
+                            const tempDiv = document.createElement('div');
+                            tempDiv.innerHTML = updatedHTML.trim();
+                            const updatedElement = tempDiv.firstElementChild;
+                            if (updatedElement) {
+                                // Preserve grid position
+                                updatedElement.style.gridColumn = tileElement.style.gridColumn;
+                                updatedElement.style.gridRow = tileElement.style.gridRow;
+                                tileElement.replaceWith(updatedElement);
+                            }
+                        }
+                    }
+                });
+
+                // Refresh icons after updates
+                if (window.lucide) window.lucide.createIcons();
+
+                console.log(`✅ Terminal insights loaded successfully for ${insightResults.length} tiles`);
+            } catch (error) {
+                console.error('❌ Error loading terminal insights in parallel:', error);
+            } finally {
+                // Clear loading flag
+                this.loadingTerminalInsights = false;
+                this.terminalInsightsLoadPromise = null;
+            }
+        })();
+
+        // Return promise (but don't await - let it run in background)
+        return this.terminalInsightsLoadPromise;
     }
 
     packGridTiles(tiles, gridColumns) {
@@ -11480,7 +12325,7 @@ class ValuationApp {
         const specialContent = isSpecialTile && aiData ? this.renderSpecialTileContent(tile, aiData) : '';
         
         return `
-            <div class="dashboard-tile" style="
+            <div class="dashboard-tile" data-tile-id="${tile.id}" style="
                 grid-column: ${style.gridColumn};
                 grid-row: ${style.gridRow};
                 background: var(--surface);
@@ -11619,12 +12464,12 @@ class ValuationApp {
         await this.generateDashboardLayout(this.currentData, this.getInputs());
     }
 
-    // ==================== AI AGENT WINDOW ====================
+    // ==================== DESKTOP AGENT WINDOW ====================
 
     toggleAIAgent() {
         const agentWindow = document.getElementById('aiAgentWindow');
         if (!agentWindow) {
-            console.error('AI Agent window not found in DOM');
+            console.error('Desktop Agent window not found in DOM');
             return;
         }
         
@@ -11645,7 +12490,7 @@ class ValuationApp {
                 agentWindow.style.width = '500px';
                 agentWindow.style.height = '600px';
             }
-            console.log('✅ AI Agent window opened at:', {
+            console.log('✅ Desktop Agent window opened at:', {
                 left: agentWindow.style.left,
                 top: agentWindow.style.top,
                 display: agentWindow.style.display,
@@ -11658,6 +12503,48 @@ class ValuationApp {
 
     initializeAgentWindow() {
         const window = document.getElementById('aiAgentWindow');
+        
+        // Load commentary preference
+        const savedPreference = localStorage.getItem('agentCommentaryEnabled');
+        if (savedPreference !== null) {
+            this.agentCommentaryEnabled = savedPreference === 'true';
+        }
+        
+        // Update commentary toggle button state
+        const toggleBtn = document.getElementById('agentCommentaryToggleBtn');
+        const icon = toggleBtn?.querySelector('i');
+        if (toggleBtn && icon) {
+            if (this.agentCommentaryEnabled) {
+                icon.setAttribute('data-lucide', 'message-square');
+                toggleBtn.title = 'Disable Context Commentary';
+                toggleBtn.style.opacity = '1';
+                toggleBtn.style.color = 'var(--primary-color)';
+            } else {
+                icon.setAttribute('data-lucide', 'message-square');
+                toggleBtn.title = 'Enable Context Commentary';
+                toggleBtn.style.opacity = '0.4';
+                toggleBtn.style.color = 'var(--text-secondary)';
+            }
+            if (window.lucide) window.lucide.createIcons();
+        }
+        
+        // Initialize context tracking when agent window opens
+        if (!this.previousContext) {
+            const currentTabInfo = this.getCurrentTabInfo();
+            this.previousContext = {
+                view: this.currentView,
+                tab: currentTabInfo.tab,
+                subTab: currentTabInfo.subTab,
+                modelId: this.currentModelId,
+                modelName: this.currentModelName,
+                data: this.currentData ? {
+                    totalValue: this.currentData.total?.value,
+                    earthValue: this.currentData.earth?.adjustedValue,
+                    marsValue: this.currentData.mars?.adjustedValue
+                } : null
+            };
+            console.log('📝 Initialized agent context tracking:', this.previousContext);
+        }
         if (!window) return;
 
         // Load system prompts
@@ -11829,7 +12716,7 @@ class ValuationApp {
         const agentWindow = document.getElementById('aiAgentWindow');
         if (agentWindow) {
             agentWindow.style.display = 'none';
-            console.log('✅ AI Agent window closed');
+            console.log('✅ Desktop Agent window closed');
         }
     }
 
@@ -12027,7 +12914,8 @@ class ValuationApp {
                     earth: inputs.earth || {},
                     mars: inputs.mars || {},
                     financial: inputs.financial || {}
-                }
+                },
+                navigationHistory: this.navigationHistory.slice(-10) // Include recent navigation history
             };
             
             // Build system prompts from 10-level hierarchy
@@ -12076,12 +12964,287 @@ class ValuationApp {
         } else if (this.currentView === 'earth') {
             const activeTab = document.querySelector('#earth .insights-tab.active');
             subTab = activeTab?.dataset.earthTab || null;
+        } else if (this.currentView === 'mars') {
+            const activeTab = document.querySelector('#mars .insights-tab.active');
+            subTab = activeTab?.dataset.marsTab || null;
         } else if (this.currentView === 'models') {
             const activeTab = document.querySelector('#models .insights-tab.active');
             subTab = activeTab?.dataset.tab || null;
         }
         
         return { tab, subTab };
+    }
+
+    /**
+     * Detect context changes and generate agent commentary if relevant
+     * Considers navigation history to understand user intent
+     */
+    async detectAndCommentOnContextChange(changeInfo) {
+        // Skip if agent commentary is disabled
+        if (!this.agentCommentaryEnabled) {
+            console.log('🔇 Agent commentary disabled');
+            return;
+        }
+        
+        // Check if agent window is open (check both style.display and computed style)
+        const agentWindow = document.getElementById('aiAgentWindow');
+        if (!agentWindow) {
+            console.log('🔇 Agent window not found');
+            return;
+        }
+        
+        const computedStyle = window.getComputedStyle(agentWindow);
+        const isVisible = agentWindow.style.display !== 'none' && 
+                         agentWindow.style.display !== '' &&
+                         computedStyle.display !== 'none' &&
+                         computedStyle.display !== '' &&
+                         !agentWindow.classList.contains('hidden');
+        
+        if (!isVisible) {
+            console.log('🔇 Agent window not visible (display:', agentWindow.style.display, 'computed:', computedStyle.display, ')');
+            return; // Agent window not open, don't generate commentary
+        }
+
+        console.log('🔍 Context change detected:', changeInfo.type, changeInfo);
+
+        // Debounce rapid context changes
+        if (this.agentCommentaryDebounceTimer) {
+            clearTimeout(this.agentCommentaryDebounceTimer);
+        }
+
+        this.agentCommentaryDebounceTimer = setTimeout(async () => {
+            try {
+                // Get current context
+                const currentTabInfo = this.getCurrentTabInfo();
+                const currentContext = {
+                    view: this.currentView,
+                    tab: currentTabInfo.tab,
+                    subTab: currentTabInfo.subTab,
+                    modelId: this.currentModelId,
+                    modelName: this.currentModelName,
+                    data: this.currentData ? {
+                        totalValue: this.currentData.total?.value,
+                        earthValue: this.currentData.earth?.adjustedValue,
+                        marsValue: this.currentData.mars?.adjustedValue
+                    } : null
+                };
+
+                console.log('📊 Current context:', currentContext);
+                console.log('📜 Previous context:', this.previousContext);
+
+                // Check if context actually changed
+                if (this.previousContext && 
+                    JSON.stringify(this.previousContext) === JSON.stringify(currentContext)) {
+                    console.log('⏭️ No actual context change detected');
+                    return; // No actual change
+                }
+
+                // Determine if change is relevant based on navigation history
+                const isRelevant = this.isContextChangeRelevant(changeInfo, currentContext);
+                console.log('🎯 Change relevance:', isRelevant);
+                
+                if (!isRelevant) {
+                    console.log('⏭️ Change not relevant, skipping commentary');
+                    this.previousContext = currentContext;
+                    return; // Change not relevant to user's current focus
+                }
+
+                console.log('💬 Generating agent commentary...');
+                
+                // Show thinking animation immediately when context change is detected
+                const thinkingId = this.addAgentThinkingMessage();
+                
+                try {
+                    // Generate agent commentary on the context change (pass thinkingId to remove it)
+                    await this.generateContextChangeCommentary(changeInfo, currentContext, thinkingId);
+                } catch (error) {
+                    // Ensure thinking message is removed even if there's an error
+                    this.removeAgentMessage(thinkingId);
+                    throw error;
+                }
+
+                // Update previous context
+                this.previousContext = currentContext;
+            } catch (error) {
+                console.error('❌ Error detecting context change:', error);
+            }
+        }, 1000); // Debounce 1 second
+    }
+
+    /**
+     * Determine if a context change is relevant based on navigation history
+     */
+    isContextChangeRelevant(changeInfo, currentContext) {
+        // Model changes are always relevant
+        if (changeInfo.type === 'model_change') {
+            console.log('✅ Model change is always relevant');
+            return true;
+        }
+
+        // Data changes are relevant if user is viewing related content
+        if (changeInfo.type === 'data_change') {
+            // Relevant if user is on dashboard, insights, or operations views
+            const relevantViews = ['dashboard', 'insights', 'earth', 'mars', 'charts', 'scenarios', 'monteCarlo'];
+            const isRelevant = relevantViews.includes(currentContext.view);
+            console.log(`📊 Data change relevance: ${isRelevant} (current view: ${currentContext.view})`);
+            return isRelevant;
+        }
+
+        // View changes are always relevant (user is actively navigating)
+        if (changeInfo.type === 'view_change') {
+            // Always comment on view changes - user is actively exploring
+            console.log('✅ View change is relevant');
+            return true;
+        }
+
+        // Sub-tab changes are relevant if user is exploring within a view
+        if (changeInfo.type === 'subtab_change') {
+            // Always comment on sub-tab changes - shows user is exploring details
+            console.log('✅ Sub-tab change is relevant');
+            return true;
+        }
+
+        console.log('❓ Unknown change type:', changeInfo.type);
+        return false; // Unknown change type, be conservative
+    }
+
+    /**
+     * Generate agent commentary on context changes
+     */
+    async generateContextChangeCommentary(changeInfo, currentContext, thinkingMessageId = null) {
+        try {
+            // Get navigation history summary (last 10 entries)
+            const historySummary = this.navigationHistory.slice(-10).map((entry, index) => {
+                const timeAgo = index === this.navigationHistory.length - 1 ? 'just now' : 
+                               `${this.navigationHistory.length - index - 1} steps ago`;
+                return `${timeAgo}: ${entry.view}${entry.subTab ? ` > ${entry.subTab}` : ''}`;
+            }).join('\n');
+
+            // Build prompt for agent commentary
+            let prompt = `You are an AI assistant observing context changes in a SpaceX valuation application. 
+
+NAVIGATION HISTORY (most recent first):
+${historySummary}
+
+CURRENT CONTEXT:
+- View: ${currentContext.view}
+- Tab: ${currentContext.tab || 'N/A'}
+- Sub-Tab: ${currentContext.subTab || 'N/A'}
+- Model: ${currentContext.modelName || 'No model loaded'}
+${currentContext.data ? `
+CURRENT VALUATION:
+- Total: $${(currentContext.data.totalValue / 1000).toFixed(2)}T
+- Earth: $${(currentContext.data.earthValue / 1000).toFixed(2)}T
+- Mars: $${(currentContext.data.marsValue / 1000).toFixed(2)}T
+` : ''}
+
+CONTEXT CHANGE DETECTED:
+`;
+
+            if (changeInfo.type === 'model_change') {
+                prompt += `Model changed from "${changeInfo.previousModelName || 'Unknown'}" to "${changeInfo.newModelName}".`;
+            } else if (changeInfo.type === 'data_change') {
+                const prevTotal = changeInfo.previousData?.total?.value || 0;
+                const newTotal = changeInfo.newData?.total?.value || 0;
+                const change = newTotal - prevTotal;
+                prompt += `Valuation data changed. Total value ${change >= 0 ? 'increased' : 'decreased'} from $${(prevTotal / 1000).toFixed(2)}T to $${(newTotal / 1000).toFixed(2)}T (${change >= 0 ? '+' : ''}$${(change / 1000).toFixed(2)}T).`;
+            } else if (changeInfo.type === 'view_change') {
+                prompt += `User navigated from "${changeInfo.previousView}" to "${changeInfo.newView}".`;
+            } else if (changeInfo.type === 'subtab_change') {
+                prompt += `User switched sub-tabs within ${changeInfo.view} view: from "${changeInfo.previousSubTab || 'none'}" to "${changeInfo.newSubTab}".`;
+            }
+
+            prompt += `
+
+AVAILABLE APPLICATION VIEWS FOR INTERNAL LINKS:
+- dashboard: Main dashboard view
+- insights: Strategic insights (with sub-tabs: insights, drivers, risks, real-time, dashboard)
+- earth: Earth Operations (with sub-tabs: starlink, launch, utilization, cadence, technology, financials)
+- mars: Mars Operations (with sub-tabs: overview, launch-scaling, scenarios)
+- charts: Charts view
+- models: Models management
+- scenarios: Scenarios view
+- sensitivity: Sensitivity analysis
+- greeks: Greeks analysis
+- attribution: Attribution analysis
+- ratios: Valuation ratios
+- monteCarlo: Monte Carlo simulations
+
+TASK: Analyze this context change and provide a brief, insightful comment (1-2 sentences max) that:
+1. Acknowledges what changed
+2. Relates it to the user's navigation pattern if relevant
+3. Provides helpful context or suggests what the user might be exploring
+4. Be conversational and helpful - the user is actively exploring the application
+5. Include clickable links where helpful:
+   - For internal navigation: Use format [link text|view:viewName] or [link text|view:viewName:subTab]
+   - For external articles/news: Use format [link text|url:https://example.com]
+   - You can include 1-3 links per comment
+
+EXAMPLES:
+- "You're exploring Earth Operations. Check out the [Starlink metrics|view:earth:starlink] or read about recent [Starlink developments|url:https://www.spacex.com/starlink]"
+- "The valuation increased significantly. You might want to review the [sensitivity analysis|view:sensitivity] to see which inputs drive this change"
+- "Switching to Mars Operations. Explore the [scenarios|view:mars:scenarios] to see different colonization timelines, or check out [recent Mars news|url:https://www.spacex.com/mars]"
+
+IMPORTANT: Only respond with "SKIP" if the change is completely trivial (like clicking the same tab twice). 
+For most navigation and data changes, provide a helpful comment with relevant links.
+
+Format your response as plain text. Use the link format exactly as shown above.`;
+
+            const inputs = this.getInputs();
+            const systemPrompts = this.agentSystemPrompts || this.getDefaultAgentSystemPrompts();
+            const systemPromptText = Object.values(systemPrompts)
+                .filter(p => p && p.trim())
+                .join('\n\n');
+
+            const response = await fetch('/api/agent/chat', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-AI-Model': document.getElementById('agentAIModelSelect')?.value || this.aiModel || 'grok:grok-3'
+                },
+                body: JSON.stringify({
+                    message: prompt,
+                    systemPrompt: systemPromptText,
+                    context: {
+                        currentView: currentContext.view,
+                        currentTab: currentContext.tab,
+                        currentSubTab: currentContext.subTab,
+                        currentModel: {
+                            id: currentContext.modelId,
+                            name: currentContext.modelName,
+                            inputs: inputs,
+                            valuationData: this.currentData
+                        },
+                        navigationHistory: this.navigationHistory.slice(-10)
+                    },
+                    history: [] // Don't include chat history for context change commentary
+                })
+            });
+
+            const result = await response.json();
+            
+            // Remove thinking message if it exists
+            if (thinkingMessageId) {
+                this.removeAgentMessage(thinkingMessageId);
+            }
+            
+            if (result.success && result.response && 
+                !result.response.toUpperCase().includes('SKIP') && 
+                result.response.trim().length > 10) {
+                // Parse and render commentary with clickable links
+                const commentaryWithLinks = this.parseCommentaryLinks(result.response.trim());
+                this.addAgentMessage(`💡 ${commentaryWithLinks}`, 'system');
+            } else if (result.success && result.response && result.response.toUpperCase().includes('SKIP')) {
+                // AI decided to skip - remove thinking message silently
+                console.log('⏭️ AI skipped commentary for this context change');
+            }
+        } catch (error) {
+            console.error('Error generating context change commentary:', error);
+            // Remove thinking message on error
+            if (thinkingMessageId) {
+                this.removeAgentMessage(thinkingMessageId);
+            }
+        }
     }
 
     async getAllModelsData() {
@@ -12132,17 +13295,131 @@ class ValuationApp {
 
         const messageId = `msg-${Date.now()}-${Math.random()}`;
         const messageDiv = document.createElement('div');
-        messageDiv.className = `agent-message agent-message-${sender}`;
+        
+        // Style system messages differently (context change commentary)
+        if (sender === 'system') {
+            messageDiv.className = 'agent-message agent-message-system';
+            messageDiv.style.cssText = `
+                background: var(--surface);
+                border-left: 3px solid var(--primary-color);
+                padding: 8px 12px;
+                margin: 8px 0;
+                border-radius: 4px;
+                font-size: 12px;
+                color: var(--text-secondary);
+                font-style: italic;
+            `;
+        } else {
+            messageDiv.className = `agent-message agent-message-${sender}`;
+        }
+        
         messageDiv.id = messageId;
+        // Content may already contain HTML from parseCommentaryLinks
         messageDiv.innerHTML = `
             <div class="message-content">
                 <p>${content.replace(/\n/g, '<br>')}</p>
             </div>
         `;
         messagesArea.appendChild(messageDiv);
+        
+        // Attach click handlers to internal navigation links
+        messageDiv.querySelectorAll('.agent-commentary-link[data-view]').forEach(link => {
+            link.addEventListener('click', (e) => {
+                e.preventDefault();
+                const viewName = link.getAttribute('data-view');
+                const subTab = link.getAttribute('data-subtab') || null;
+                this.navigateToView(viewName, subTab);
+            });
+        });
+        
         messagesArea.scrollTop = messagesArea.scrollHeight;
 
         return messageId;
+    }
+
+    /**
+     * Parse commentary text and convert link markers to clickable links
+     * Format: [link text|view:viewName] or [link text|view:viewName:subTab] or [link text|url:https://...]
+     */
+    parseCommentaryLinks(text) {
+        // Pattern to match [text|type:value] or [text|type:value:subValue]
+        const linkPattern = /\[([^\]]+)\|(view|url):([^\]]+)\]/g;
+        
+        return text.replace(linkPattern, (match, linkText, linkType, linkValue) => {
+            // Escape HTML in link text to prevent XSS
+            const escapedText = linkText.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            
+            if (linkType === 'view') {
+                // Internal navigation link - format: view:viewName or view:viewName:subTab
+                const parts = linkValue.split(':');
+                const viewName = parts[0];
+                const subTab = parts[1] || null;
+                
+                // Return HTML for internal navigation link
+                return `<span class="agent-commentary-link" data-view="${viewName}" data-subtab="${subTab || ''}" style="color: var(--primary-color); text-decoration: underline; cursor: pointer; font-weight: 500;">${escapedText}</span>`;
+            } else if (linkType === 'url') {
+                // External URL link - escape URL
+                const escapedUrl = linkValue.replace(/"/g, '&quot;');
+                return `<a href="${escapedUrl}" target="_blank" rel="noopener noreferrer" class="agent-commentary-link" style="color: var(--primary-color); text-decoration: underline; cursor: pointer; font-weight: 500;">${escapedText}</a>`;
+            }
+            return match; // Return original if pattern doesn't match expected format
+        });
+    }
+
+    /**
+     * Navigate to a specific view and optionally a sub-tab
+     */
+    navigateToView(viewName, subTab = null) {
+        // Switch to the view
+        this.switchView(viewName);
+        
+        // If sub-tab is specified, switch to it after a short delay
+        if (subTab) {
+            setTimeout(() => {
+                // Find and click the appropriate sub-tab button
+                let tabButton = null;
+                
+                if (viewName === 'insights') {
+                    tabButton = document.querySelector(`#insights .insights-tab[data-tab="${subTab}"]`);
+                } else if (viewName === 'earth') {
+                    tabButton = document.querySelector(`#earth .insights-tab[data-earth-tab="${subTab}"]`);
+                } else if (viewName === 'mars') {
+                    tabButton = document.querySelector(`#mars .insights-tab[data-mars-tab="${subTab}"]`);
+                }
+                
+                if (tabButton) {
+                    tabButton.click();
+                }
+            }, 300);
+        }
+    }
+
+    /**
+     * Toggle agent commentary on/off
+     */
+    toggleAgentCommentary() {
+        this.agentCommentaryEnabled = !this.agentCommentaryEnabled;
+        const toggleBtn = document.getElementById('agentCommentaryToggleBtn');
+        const icon = toggleBtn?.querySelector('i');
+        
+        if (toggleBtn && icon) {
+            if (this.agentCommentaryEnabled) {
+                icon.setAttribute('data-lucide', 'message-square');
+                toggleBtn.title = 'Disable Context Commentary';
+                toggleBtn.style.opacity = '1';
+                toggleBtn.style.color = 'var(--primary-color)';
+            } else {
+                icon.setAttribute('data-lucide', 'message-square');
+                toggleBtn.title = 'Enable Context Commentary';
+                toggleBtn.style.opacity = '0.4';
+                toggleBtn.style.color = 'var(--text-secondary)';
+            }
+            if (window.lucide) window.lucide.createIcons();
+        }
+        
+        // Save preference
+        localStorage.setItem('agentCommentaryEnabled', this.agentCommentaryEnabled.toString());
+        console.log(`💬 Agent commentary ${this.agentCommentaryEnabled ? 'enabled' : 'disabled'}`);
     }
 
     addAgentLoadingMessage() {
@@ -12158,6 +13435,46 @@ class ValuationApp {
                 <p><i data-lucide="loader" class="spinning"></i> Thinking...</p>
             </div>
         `;
+        messagesArea.appendChild(messageDiv);
+        messagesArea.scrollTop = messagesArea.scrollHeight;
+        if (window.lucide) window.lucide.createIcons();
+
+        return messageId;
+    }
+
+    /**
+     * Add a thinking animation message for context change detection
+     * Very subtle - just a spinning icon, no framing or boxes
+     */
+    addAgentThinkingMessage() {
+        const messagesArea = document.getElementById('agentChatMessages');
+        if (!messagesArea) return null;
+
+        const messageId = `thinking-${Date.now()}`;
+        const messageDiv = document.createElement('div');
+        messageDiv.className = 'agent-thinking-message';
+        messageDiv.id = messageId;
+        messageDiv.style.cssText = `
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 4px 0;
+            margin: 4px 0;
+            background: transparent;
+            border: none;
+        `;
+        const iconElement = document.createElement('i');
+        iconElement.setAttribute('data-lucide', 'loader');
+        iconElement.className = 'spinning';
+        iconElement.style.cssText = `
+            width: 16px;
+            height: 16px;
+            color: var(--text-secondary);
+            opacity: 0.6;
+            display: inline-block;
+            animation: spin 1s linear infinite;
+        `;
+        messageDiv.appendChild(iconElement);
         messagesArea.appendChild(messageDiv);
         messagesArea.scrollTop = messagesArea.scrollHeight;
         if (window.lucide) window.lucide.createIcons();

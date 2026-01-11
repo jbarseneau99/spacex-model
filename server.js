@@ -4727,6 +4727,17 @@ app.post('/api/agent/chat', async (req, res) => {
       contextMessage += `Current Tab: ${context.currentTab || 'N/A'}\n`;
       contextMessage += `Current Sub-Tab: ${context.currentSubTab || 'N/A'}\n\n`;
       
+      // Include navigation history if available
+      if (context.navigationHistory && Array.isArray(context.navigationHistory) && context.navigationHistory.length > 0) {
+        contextMessage += `=== NAVIGATION HISTORY (Recent Activity) ===\n`;
+        context.navigationHistory.slice(-10).forEach((entry, index) => {
+          const timeAgo = index === context.navigationHistory.length - 1 ? 'just now' : 
+                         `${context.navigationHistory.length - index - 1} steps ago`;
+          contextMessage += `${timeAgo}: ${entry.view}${entry.subTab ? ` > ${entry.subTab}` : ''}${entry.modelName ? ` (Model: ${entry.modelName})` : ''}\n`;
+        });
+        contextMessage += `\nUse this navigation history to understand what the user has been exploring and their likely intent.\n\n`;
+      }
+      
       // Current Model Information
       if (context.currentModel) {
         contextMessage += `=== CURRENT MODEL ===\n`;
