@@ -683,6 +683,18 @@ class ValuationApp {
                                     this.updateTechnologyTransitionChart(this.currentData.earth).then(() => {
                                         if (this.charts.technologyTransition) this.charts.technologyTransition.resize();
                                     }).catch(err => console.error('Technology transition chart error:', err));
+                                } else if (tabName === 'financials') {
+                                    // Update cash flow table when Financials tab is activated
+                                    console.log('📊 Financials tab activated, updating cash flow table');
+                                    this.updateEarthCashFlowTable(this.currentData.earth);
+                                    // Also update cash flow chart if it exists
+                                    if (this.currentData.earth.cashFlow && Array.isArray(this.currentData.earth.cashFlow)) {
+                                        try {
+                                            this.updateCashFlowTimelineChart(this.currentData);
+                                        } catch (err) {
+                                            console.error('Cash flow chart error:', err);
+                                        }
+                                    }
                                 }
                             }
                         }, 50);
