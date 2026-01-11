@@ -679,6 +679,24 @@
                         </div>
                     </div>
                 </div>
+
+                <!-- Bandwidth Economics -->
+                <div class="section" style="margin-bottom: var(--spacing-md);">
+                    <h3 style="margin: 0 0 12px 0; font-size: 16px;"><i data-lucide="signal"></i> Bandwidth Economics</h3>
+                    <div class="metrics-grid-small">
+                        <div class="metric-card-small">
+                            <span class="metric-label-small">Revenue per Gbps</span>
+                            <span class="metric-value-small" id="revenuePerGbps">--</span>
+                        </div>
+                        <div class="metric-card-small">
+                            <span class="metric-label-small">Bandwidth Utilization</span>
+                            <span class="metric-value-small" id="bandwidthUtilization">--</span>
+                        </div>
+                    </div>
+                    <div class="chart-container" style="height: 300px;">
+                        <canvas id="bandwidthEconomicsChart"></canvas>
+                    </div>
+                </div>
                 </div>
 
                 <!-- Technology Tab Content -->
@@ -721,25 +739,6 @@
                 </div>
                 </div>
             </div>
-
-                <!-- Bandwidth Economics -->
-                <div class="section" style="margin-bottom: var(--spacing-md);">
-                    <h3 style="margin: 0 0 12px 0; font-size: 16px;"><i data-lucide="signal"></i> Bandwidth Economics</h3>
-                    <div class="metrics-grid-small">
-                        <div class="metric-card-small">
-                            <span class="metric-label-small">Revenue per Gbps</span>
-                            <span class="metric-value-small" id="revenuePerGbps">--</span>
-                        </div>
-                        <div class="metric-card-small">
-                            <span class="metric-label-small">Bandwidth Utilization</span>
-                            <span class="metric-value-small" id="bandwidthUtilization">--</span>
-                        </div>
-                    </div>
-                    <div class="chart-container" style="height: 300px;">
-                        <canvas id="bandwidthEconomicsChart"></canvas>
-                    </div>
-                </div>
-                </div>
 
                 <!-- Launch Services Tab Content -->
                 <div id="earthTab-launch" class="insights-tab-content">
