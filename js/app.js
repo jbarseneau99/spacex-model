@@ -651,6 +651,25 @@ class ValuationApp {
                 if (contentEl) {
                     contentEl.classList.add('active');
                     contentEl.style.display = 'block';
+                    
+                    // Update charts when switching to specific tabs
+                    if (this.currentData && this.currentData.earth) {
+                        const inputs = this.getInputs();
+                        
+                        // Update charts based on which tab was clicked
+                        if (tabName === 'starlink') {
+                            this.updateStarlinkChart(this.currentData.earth, inputs).catch(err => console.error('Starlink chart error:', err));
+                            this.updateBandwidthEconomicsChart(this.currentData.earth).catch(err => console.error('Bandwidth economics chart error:', err));
+                        } else if (tabName === 'launch') {
+                            this.updateLaunchChart(this.currentData.earth, inputs).catch(err => console.error('Launch chart error:', err));
+                        } else if (tabName === 'utilization') {
+                            this.updateUtilizationChart(this.currentData.earth, inputs).catch(err => console.error('Utilization chart error:', err));
+                        } else if (tabName === 'cadence') {
+                            this.updateLaunchCadenceChart(this.currentData.earth, inputs).catch(err => console.error('Launch cadence chart error:', err));
+                        } else if (tabName === 'technology') {
+                            this.updateTechnologyTransitionChart(this.currentData.earth).catch(err => console.error('Technology transition chart error:', err));
+                        }
+                    }
                 }
                 
                 // Refresh icons
