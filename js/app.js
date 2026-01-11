@@ -100,7 +100,16 @@ class ValuationApp {
         // Initialize Monte Carlo empty state
         this.initMonteCarloView();
         
-        // Auto-load first model on startup
+        // Restore last view from application state
+        const lastView = await this.getAppState('lastView');
+        if (lastView && lastView !== 'dashboard') {
+            // Switch to last view after a short delay to ensure DOM is ready
+            setTimeout(() => {
+                this.switchView(lastView);
+            }, 100);
+        }
+        
+        // Auto-load last model on startup
         await this.autoLoadFirstModel();
         this.loadSavedInputs();
         
@@ -112,7 +121,24 @@ class ValuationApp {
         
         // Initialize ratios dashboard with data
         // Load comparables on startup so ratios dashboard is ready
-        this.loadComparables();
+        // Use setTimeout to ensure DOM is ready
+        setTimeout(() => {
+            console.log('🚀 Initializing comparables data on startup...');
+            this.loadComparables()
+                .then(() => {
+                    console.log('✅ Comparables initialized successfully on startup');
+                })
+                .catch(err => {
+                    console.error('❌ Error loading comparables on initialization:', err);
+                    // Try again after a delay
+                    setTimeout(() => {
+                        console.log('🔄 Retrying comparables load...');
+                        this.loadComparables().catch(retryErr => {
+                            console.error('❌ Retry failed:', retryErr);
+                        });
+                    }, 2000);
+                });
+        }, 500);
         
         // Run Monte Carlo simulation, VaR, and Attribution calculations on initialization (after model loads)
         // The model load will trigger auto-run, so we don't need to call it here
@@ -738,7 +764,15 @@ class ValuationApp {
 
         // Model management
         document.getElementById('saveCurrentModelBtn')?.addEventListener('click', () => {
-            this.openSaveModelModal();
+            this.openSaveModelModal('model'); // Always save as model
+        });
+        
+        document.getElementById('addModelBtn')?.addEventListener('click', () => {
+            this.openSaveModelModal('model');
+        });
+        
+        document.getElementById('addScenarioBtn')?.addEventListener('click', () => {
+            this.openSaveModelModal('scenario');
         });
 
         // Help modal
@@ -1084,6 +1118,25 @@ class ValuationApp {
         if (modelSort) modelSort.addEventListener('change', () => this.loadModels());
         if (showFavoritesOnly) showFavoritesOnly.addEventListener('change', () => this.loadModels());
 
+        // Scenario tab switching
+        const scenarioAnalysisTabBtn = document.getElementById('scenarioAnalysisTabBtn');
+        const savedScenariosTabBtn = document.getElementById('savedScenariosTabBtn');
+        if (scenarioAnalysisTabBtn) {
+            scenarioAnalysisTabBtn.addEventListener('click', () => this.switchScenarioTab('scenario-analysis-tab'));
+        }
+        if (savedScenariosTabBtn) {
+            savedScenariosTabBtn.addEventListener('click', () => this.switchScenarioTab('saved-scenarios-tab'));
+        }
+
+        // Scenario search/sort controls
+        const scenarioSearch = document.getElementById('scenarioSearch');
+        const scenarioSort = document.getElementById('scenarioSort');
+        const showFavoritesOnlyScenarios = document.getElementById('showFavoritesOnlyScenarios');
+        
+        if (scenarioSearch) scenarioSearch.addEventListener('input', () => this.loadScenarios());
+        if (scenarioSort) scenarioSort.addEventListener('change', () => this.loadScenarios());
+        if (showFavoritesOnlyScenarios) showFavoritesOnlyScenarios.addEventListener('change', () => this.loadScenarios());
+
         // Simulations table controls
         const simulationsSearch = document.getElementById('simulationsSearch');
         const simulationsPageSize = document.getElementById('simulationsPageSize');
@@ -1134,7 +1187,7 @@ class ValuationApp {
         });
     }
 
-    switchView(viewName) {
+    async switchView(viewName) {
         // Track navigation history
         const tabInfo = this.getCurrentTabInfo();
         const navigationEntry = {
@@ -1173,6 +1226,9 @@ class ValuationApp {
         const previousView = this.currentView;
         this.currentView = viewName;
         
+        // Save current view to application state
+        await this.saveAppState('lastView', viewName);
+        
         // Detect context change and trigger agent commentary
         this.detectAndCommentOnContextChange({
             type: 'view_change',
@@ -1210,21 +1266,106 @@ class ValuationApp {
 
         // Auto-calculate scenarios when switching to scenarios view
         if (viewName === 'scenarios') {
+            // Show Scenario Analysis tab by default
+            this.switchScenarioTab('scenario-analysis-tab');
             this.autoCalculateScenarios();
         }
 
         // Auto-load comparables when switching to ratios view
         if (viewName === 'ratios') {
-            // Load comparables if not already loaded
-            if (!this.currentComparablesData || this.currentComparablesData.length === 0) {
-                this.loadComparables();
-            } else {
-                // Update dashboard with existing comparables data
-                this.updateValuationMultiples(this.currentComparablesData);
-                const sector = document.getElementById('comparableSectorSelect')?.value || 'space';
-                this.updateSectorSummary(this.currentComparablesData, sector);
-                this.calculateImpliedValuations(this.currentComparablesData);
-            }
+            // CRITICAL: Ensure we have reference data (currentData) before calculating ratios
+            // Ratios NEED actual model data to work properly
+            const ensureReferenceData = async () => {
+                // If currentData is missing, trigger a calculation first
+                if (!this.currentData) {
+                    console.log('⚠️ currentData missing - REQUIRED for ratios. Triggering calculation...');
+                    try {
+                        const inputs = this.getInputs();
+                        const response = await fetch('/api/calculate', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(inputs)
+                        });
+                        const result = await response.json();
+                        if (result.success && result.data) {
+                            this.currentData = result.data;
+                            this.updateDashboard(result.data);
+                            console.log('✅ Loaded currentData for ratios view - reference data ready');
+                            return true;
+                        } else {
+                            console.error('❌ Failed to load currentData:', result.error);
+                            return false;
+                        }
+                    } catch (err) {
+                        console.error('❌ Error loading currentData for ratios:', err);
+                        return false;
+                    }
+                } else {
+                    console.log('✅ currentData already available for ratios');
+                    return true;
+                }
+            };
+            
+            // Wait for DOM to be ready, then ensure reference data, then load comparables
+            setTimeout(async () => {
+                // Ensure dashboard tab is visible and active
+                const dashboardTab = document.querySelector('#ratios .insights-tab[data-tab="dashboard"]');
+                const dashboardContent = document.getElementById('ratiosTab-dashboard');
+                if (dashboardTab && !dashboardTab.classList.contains('active')) {
+                    dashboardTab.classList.add('active');
+                }
+                if (dashboardContent) {
+                    dashboardContent.classList.add('active');
+                    dashboardContent.style.display = 'block';
+                }
+                
+                // CRITICAL: Wait for reference data to be loaded
+                const hasReferenceData = await ensureReferenceData();
+                
+                if (!hasReferenceData) {
+                    console.error('❌ Cannot calculate ratios without reference data');
+                    const container = document.getElementById('impliedValuationsContainer');
+                    if (container) {
+                        container.innerHTML = `
+                            <div style="padding: var(--spacing-lg); text-align: center;">
+                                <p style="color: var(--error-color); margin-bottom: var(--spacing-md);">
+                                    ⚠️ Reference data required for ratios calculation
+                                </p>
+                                <p style="font-size: 12px; color: var(--text-secondary);">
+                                    Please ensure inputs are set and try again.
+                                </p>
+                            </div>
+                        `;
+                    }
+                    return;
+                }
+                
+                // Now load comparables and calculate ratios with actual reference data
+                if (!this.currentComparablesData || this.currentComparablesData.length === 0) {
+                    // Load comparables - it will update dashboard automatically
+                    this.loadComparables().then(() => {
+                        // Ensure dashboard is updated after comparables load
+                        if (this.currentComparablesData && this.currentComparablesData.length > 0) {
+                            setTimeout(() => {
+                                this.updateValuationMultiples(this.currentComparablesData);
+                                const sector = document.getElementById('comparableSectorSelect')?.value || 'space';
+                                this.updateSectorSummary(this.currentComparablesData, sector);
+                                this.calculateImpliedValuations(this.currentComparablesData);
+                            }, 50);
+                        }
+                    }).catch(err => {
+                        console.error('Error loading comparables:', err);
+                    });
+                } else {
+                    // Update dashboard with existing comparables data
+                    setTimeout(() => {
+                        this.updateValuationMultiples(this.currentComparablesData);
+                        const sector = document.getElementById('comparableSectorSelect')?.value || 'space';
+                        this.updateSectorSummary(this.currentComparablesData, sector);
+                        this.calculateImpliedValuations(this.currentComparablesData);
+                    }, 50);
+                }
+            }, 100);
         }
 
         // Auto-run sensitivity analysis when switching to sensitivity view
@@ -1445,6 +1586,12 @@ class ValuationApp {
 
         // Store currentData BEFORE updating charts (charts may need it)
         this.currentData = data;
+
+        // Update ratios dashboard calculations if comparables are already loaded
+        // This ensures implied valuations update when model data changes
+        if (this.currentComparablesData && this.currentComparablesData.length > 0) {
+            this.calculateImpliedValuations(this.currentComparablesData);
+        }
 
         // Detect context change if data changed
         if (dataChanged) {
@@ -7180,9 +7327,55 @@ class ValuationApp {
                 this.displayMonteCarloResults(result.data, isAutoRun);
                 
                 // Always save simulation if we have a model loaded (for both auto and manual runs)
+                // BUT: Don't overwrite baseline models - they are reference points
                 if (this.currentModelId) {
-                    await this.autoSaveMonteCarloSimulation(result.data, baseInputs, runs);
-                    console.log('✅ Simulation saved successfully');
+                    // Check if this is a baseline model
+                    try {
+                        const modelResponse = await fetch(`/api/models/${this.currentModelId}`);
+                        const modelResult = await modelResponse.json();
+                        if (modelResult.success && modelResult.data.isBaseline) {
+                            console.warn('⚠️ Baseline model detected - skipping auto-save to preserve reference values');
+                            console.warn('   Baseline models should not have simulations run on them.');
+                            console.warn('   They are reference points from the spreadsheet.');
+                            // Show notification to user
+                            const notification = document.createElement('div');
+                            notification.style.cssText = `
+                                position: fixed;
+                                top: 100px;
+                                right: 20px;
+                                background: var(--warning-color);
+                                color: white;
+                                padding: 12px 20px;
+                                border-radius: 8px;
+                                box-shadow: var(--shadow-lg);
+                                z-index: 10000;
+                                display: flex;
+                                align-items: center;
+                                gap: 8px;
+                                font-size: 14px;
+                                max-width: 400px;
+                            `;
+                            notification.innerHTML = `
+                                <i data-lucide="alert-triangle"></i>
+                                <span>Baseline model: Simulation not saved to preserve spreadsheet reference values</span>
+                            `;
+                            document.body.appendChild(notification);
+                            if (window.lucide) window.lucide.createIcons();
+                            setTimeout(() => {
+                                notification.style.transition = 'opacity 0.3s';
+                                notification.style.opacity = '0';
+                                setTimeout(() => notification.remove(), 300);
+                            }, 5000);
+                        } else {
+                            await this.autoSaveMonteCarloSimulation(result.data, baseInputs, runs);
+                            console.log('✅ Simulation saved successfully');
+                        }
+                    } catch (error) {
+                        console.warn('⚠️ Could not check if baseline model:', error);
+                        // Proceed with save if check fails
+                        await this.autoSaveMonteCarloSimulation(result.data, baseInputs, runs);
+                        console.log('✅ Simulation saved successfully');
+                    }
                 } else {
                     console.warn('⚠️ No model loaded - simulation not saved. Please load a model to save simulations.');
                 }
@@ -7815,14 +8008,22 @@ class ValuationApp {
             this.openRatiosInfo();
         });
         
-        // Refresh comparables button
-        document.getElementById('refreshComparablesBtn')?.addEventListener('click', () => {
-            this.loadComparables();
-        });
+        // Refresh comparables button - force refresh from API
+        const refreshBtn = document.getElementById('refreshComparablesBtn');
+        if (refreshBtn) {
+            refreshBtn.addEventListener('click', (e) => {
+                e.preventDefault();
+                console.log('🔄 Refresh button clicked - forcing API refresh');
+                this.loadComparables(true); // Pass true to force refresh
+            });
+            console.log('✅ Refresh comparables button listener attached');
+        } else {
+            console.warn('⚠️ Refresh comparables button not found');
+        }
         
-        // Sector select change
+        // Sector select change - use cached data, don't force refresh
         document.getElementById('comparableSectorSelect')?.addEventListener('change', () => {
-            this.loadComparables();
+            this.loadComparables(false); // Don't force refresh on sector change
         });
         
         // Ratios tab switching
@@ -7859,6 +8060,19 @@ class ValuationApp {
                                 this.loadComparables();
                             }
                         }
+                        // Ensure dashboard calculations are updated when switching to dashboard tab
+                        if (tabName === 'dashboard') {
+                            if (this.currentComparablesData && this.currentComparablesData.length > 0) {
+                                // Re-run all dashboard calculations to ensure they're visible
+                                this.updateValuationMultiples(this.currentComparablesData);
+                                const sector = document.getElementById('comparableSectorSelect')?.value || 'space';
+                                this.updateSectorSummary(this.currentComparablesData, sector);
+                                this.calculateImpliedValuations(this.currentComparablesData);
+                            } else {
+                                // Load comparables if not loaded yet
+                                this.loadComparables();
+                            }
+                        }
                     }
                     
                     // Refresh icons
@@ -7883,13 +8097,31 @@ class ValuationApp {
             observer.observe(ratiosView, { attributes: true });
         }
         
-        // Initial load
-        this.loadComparables();
+        // Initial load - ensure it runs after DOM is ready
+        setTimeout(() => {
+            this.loadComparables().catch(err => {
+                console.error('Error loading comparables in setupRatiosListeners:', err);
+            });
+        }, 300);
     }
     
     updateSectorSummary(companies, sector) {
-        const summaryEl = document.getElementById('ratiosSectorSummary');
-        if (!summaryEl) return;
+        if (!companies || companies.length === 0) {
+            console.warn('updateSectorSummary: No companies data provided');
+            return;
+        }
+        
+        const dashboardContent = document.getElementById('ratiosTab-dashboard');
+        if (!dashboardContent) {
+            console.warn('updateSectorSummary: ratiosTab-dashboard not found');
+            return;
+        }
+        
+        const summaryEl = dashboardContent.querySelector('#ratiosSectorSummary') || document.getElementById('ratiosSectorSummary');
+        if (!summaryEl) {
+            console.warn('updateSectorSummary: ratiosSectorSummary not found');
+            return;
+        }
         
         const count = companies.length;
         const validEvRevenue = companies.filter(c => c.evRevenue).map(c => c.evRevenue);
@@ -8161,16 +8393,52 @@ class ValuationApp {
         }
     }
     
-    async loadComparables() {
+    updateComparablesTimestamp(fetchedAt, isCached) {
+        const timestampEl = document.getElementById('comparablesTimestamp');
+        if (!timestampEl) return;
+        
+        if (fetchedAt) {
+            const dateStr = fetchedAt.toLocaleString();
+            const source = isCached ? 'Cached' : 'API';
+            timestampEl.innerHTML = `
+                <i data-lucide="${isCached ? 'database' : 'cloud'}"></i>
+                <span>${source}: ${dateStr}</span>
+            `;
+            if (window.lucide) window.lucide.createIcons();
+        } else {
+            timestampEl.innerHTML = `
+                <i data-lucide="clock"></i>
+                <span>No data loaded</span>
+            `;
+            if (window.lucide) window.lucide.createIcons();
+        }
+    }
+    
+    async loadComparables(forceRefresh = false) {
+        const action = forceRefresh ? '🔄 Refreshing' : '📊 Loading';
+        console.log(`${action} comparable companies... (forceRefresh=${forceRefresh})`);
         const sector = document.getElementById('comparableSectorSelect')?.value || 'space';
         const tbody = document.getElementById('comparablesTableBody');
         
+        // Update timestamp to show refreshing
+        if (forceRefresh) {
+            const timestampEl = document.getElementById('comparablesTimestamp');
+            if (timestampEl) {
+                timestampEl.innerHTML = `
+                    <i data-lucide="loader" class="spinning"></i>
+                    <span>Refreshing from API...</span>
+                `;
+                if (window.lucide) window.lucide.createIcons();
+            }
+        }
+        
         // Show loading state only if table body exists (ratios view might not be visible)
         if (tbody) {
+            const loadingText = forceRefresh ? 'Refreshing from API...' : 'Loading comparable companies...';
             tbody.innerHTML = `
                 <tr>
                     <td colspan="8" style="text-align: center; padding: var(--spacing-lg); color: var(--text-secondary);">
-                        <i data-lucide="loader" class="spinning"></i> Loading comparable companies...
+                        <i data-lucide="loader" class="spinning"></i> ${loadingText}
                     </td>
                 </tr>
             `;
@@ -8178,35 +8446,163 @@ class ValuationApp {
         }
         
         try {
+            // Reload API keys from localStorage in case they were updated
+            this.alphaVantageApiKey = localStorage.getItem('alphaVantageApiKey') || '';
+            this.financialModelingPrepApiKey = localStorage.getItem('financialModelingPrepApiKey') || '';
+            this.financialApiProvider = localStorage.getItem('financialApiProvider') || 'yahoo-finance';
+            
             // Include API provider and keys in request
+            // Add forceRefresh=true only when refresh button is clicked
             const params = new URLSearchParams({
                 sector: sector,
-                apiProvider: this.financialApiProvider || 'sample-data',
+                apiProvider: this.financialApiProvider || 'yahoo-finance',
                 alphaVantageKey: this.alphaVantageApiKey || '',
-                fmpKey: this.financialModelingPrepApiKey || ''
+                fmpKey: this.financialModelingPrepApiKey || '',
+                forceRefresh: forceRefresh ? 'true' : 'false'
             });
             
-            const response = await fetch(`/api/comparables?${params.toString()}`);
-            const result = await response.json();
+            const apiUrl = `/api/comparables?${params.toString()}`;
+            console.log('📡 Fetching comparables from API:', apiUrl);
+            console.log('   forceRefresh:', forceRefresh);
+            console.log('   sector:', sector);
+            console.log('   apiProvider:', this.financialApiProvider);
+            console.log('   hasAlphaVantageKey:', !!this.alphaVantageApiKey);
+            console.log('   alphaVantageKey (first 8 chars):', this.alphaVantageApiKey ? this.alphaVantageApiKey.substring(0, 8) + '...' : 'NOT SET');
             
-            if (result.success && result.data && result.data.length > 0) {
+            const response = await fetch(apiUrl);
+            
+            if (!response.ok) {
+                const errorText = await response.text();
+                let errorData;
+                try {
+                    errorData = JSON.parse(errorText);
+                } catch (e) {
+                    errorData = { error: errorText };
+                }
+                
+                // Log error with helpful context
+                if (response.status === 400 && errorData.needsConfiguration) {
+                    console.warn('⚠️ API configuration needed:', errorData.message);
+                } else {
+                    console.error('❌ API error:', response.status, errorData);
+                }
+                
+                // Return error result - backend has already checked cache
+                return {
+                    success: false,
+                    error: errorData.error || errorData.message || `HTTP error! status: ${response.status}`,
+                    message: errorData.message,
+                    helpUrl: errorData.helpUrl,
+                    needsConfiguration: errorData.needsConfiguration || false,
+                    data: [],
+                    cached: false
+                };
+            }
+            
+            const result = await response.json();
+            console.log('✅ Comparables API response:', result);
+            console.log('   success:', result.success);
+            console.log('   cached:', result.cached);
+            console.log('   fetchedAt:', result.fetchedAt);
+            
+            if (!result.success) {
+                // Backend already checked for cached data - if success=false, there's no data available
+                if (result.needsConfiguration) {
+                    console.warn('⚠️ API configuration needed:', result.message);
+                } else {
+                    console.warn('⚠️ No comparables data available:', result.error);
+                }
+                
+                this.currentComparablesData = null;
+                this.updateComparablesTimestamp(null, false);
+                
+                // Show user-friendly error message
+                if (tbody) {
+                    const errorMsg = result.message || result.error || 'No comparables data available';
+                    const hasNoApiKey = result.needsConfiguration || (!this.alphaVantageApiKey && !this.financialModelingPrepApiKey);
+                    
+                    // Quick setup instructions if no API key
+                    const quickSetup = hasNoApiKey ? `
+                        <div style="background: #f0f9ff; border: 1px solid #0066cc; border-radius: 8px; padding: 15px; margin-top: 15px; text-align: left;">
+                            <strong style="color: #0066cc;">⚡ Quick Setup (Browser Console):</strong>
+                            <div style="margin-top: 10px; font-family: monospace; font-size: 11px; background: #fff; padding: 10px; border-radius: 4px; overflow-x: auto;">
+                                localStorage.setItem('alphaVantageApiKey', 'M2JTUA325Y4E94IY');<br>
+                                localStorage.setItem('financialApiProvider', 'alpha-vantage');<br>
+                                location.reload();
+                            </div>
+                            <div style="margin-top: 10px; font-size: 12px; color: #666;">
+                                Copy the code above, press F12 → Console, paste and press Enter
+                            </div>
+                        </div>
+                    ` : '';
+                    
+                    const apiKeyMessage = hasNoApiKey 
+                        ? `<div style="font-size: 12px; color: #999; margin-top: 15px;">
+                            <strong>Or configure via Settings:</strong><br>
+                            • Get a <strong>free Alpha Vantage API key</strong> (25 requests/day): <a href="https://www.alphavantage.co/support/#api-key" target="_blank" style="color: #0066cc;">https://www.alphavantage.co/support/#api-key</a><br>
+                            • Or get a <strong>premium Alpha Vantage key</strong>: <a href="https://www.alphavantage.co/premium/" target="_blank" style="color: #0066cc;">https://www.alphavantage.co/premium/</a><br>
+                            • Then enter your API key in <strong>Settings → Financial API Settings</strong>
+                        </div>`
+                        : `<div style="font-size: 12px; color: #999; margin-top: 15px;">
+                            API keys are configured. The error may be due to:<br>
+                            • API rate limits exceeded<br>
+                            • Invalid API key<br>
+                            • Network issues<br>
+                            Check Settings to verify your API keys are correct.
+                        </div>`;
+                    
+                    tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; color: #888; padding: 30px;">
+                        <div style="margin-bottom: 10px; font-size: 16px; color: #f59e0b;">⚠️ No Comparables Data Available</div>
+                        <div style="font-size: 13px; color: #666; margin-bottom: 15px;">${errorMsg}</div>
+                        ${quickSetup}
+                        ${apiKeyMessage}
+                    </td></tr>`;
+                }
+                
+                // Don't throw error - just return gracefully
+                return;
+            }
+            
+            if (result.data && result.data.length > 0) {
+                const isCached = result.cached === true;
+                const fetchedAt = result.fetchedAt ? new Date(result.fetchedAt) : null;
+                const dataSource = isCached ? 'cached' : 'API';
+                
+                console.log(`✅ Loaded ${result.data.length} comparable companies (${dataSource})`);
+                if (fetchedAt) {
+                    console.log(`   Fetched at: ${fetchedAt.toLocaleString()}`);
+                }
+                
                 // Store current comparables data for charts
                 this.currentComparablesData = result.data;
                 
+                // Update timestamp display
+                this.updateComparablesTimestamp(fetchedAt, isCached);
+                
                 // Update table if comparables tab is visible
                 if (tbody) {
-                    tbody.innerHTML = result.data.map(company => `
+                    tbody.innerHTML = result.data.map(company => {
+                        // Ensure we have valid data
+                        if (!company || !company.name) {
+                            console.warn('⚠️ Invalid company data:', company);
+                            return '';
+                        }
+                        
+                        return `
                         <tr>
                             <td><strong>${company.name}</strong></td>
                             <td>${company.ticker || '--'}</td>
-                            <td>${this.formatCurrency(company.marketCap)}</td>
+                            <td>${company.marketCap ? this.formatCurrency(company.marketCap) : '--'}</td>
                             <td>${company.evRevenue ? company.evRevenue.toFixed(2) + 'x' : '--'}</td>
                             <td>${company.evEbitda ? company.evEbitda.toFixed(2) + 'x' : '--'}</td>
                             <td>${company.peRatio ? company.peRatio.toFixed(2) + 'x' : '--'}</td>
                             <td>${company.pegRatio ? company.pegRatio.toFixed(2) : '--'}</td>
                             <td>${company.revenueGrowth ? (company.revenueGrowth * 100).toFixed(1) + '%' : '--'}</td>
                         </tr>
-                    `).join('');
+                    `;
+                    }).filter(row => row !== '').join('');
+                    
+                    console.log(`✅ Updated comparables table with ${result.data.length} companies`);
                 }
                 
                 // Always update dashboard sections, even if ratios view is not currently visible
@@ -8218,35 +8614,87 @@ class ValuationApp {
                 // This will update SpaceX current valuation, revenue, EBITDA if currentData exists
                 this.calculateImpliedValuations(result.data);
                 
-                // Update charts if on analysis tab
+                // Update charts and ensure dashboard is visible if ratios view is active
                 const ratiosView = document.getElementById('ratios');
                 if (ratiosView && ratiosView.classList.contains('active')) {
                     const activeTab = ratiosView.querySelector('.insights-tab.active')?.dataset.tab || 'dashboard';
+                    
+                    // Update charts if on analysis tab
                     if (activeTab === 'analysis') {
                         this.updateRatiosCharts(result.data);
                     }
+                    
+                    // Ensure dashboard tab is visible and calculations run
+                    // This fixes the issue where calculations don't show until comparables tab is viewed
+                    if (!activeTab || activeTab === 'dashboard') {
+                        // Make sure dashboard tab and content are visible
+                        const dashboardTab = ratiosView.querySelector('.insights-tab[data-tab="dashboard"]');
+                        const dashboardContent = document.getElementById('ratiosTab-dashboard');
+                        if (dashboardTab && !dashboardTab.classList.contains('active')) {
+                            ratiosView.querySelectorAll('.insights-tab').forEach(t => t.classList.remove('active'));
+                            ratiosView.querySelectorAll('.insights-tab-content').forEach(c => {
+                                c.classList.remove('active');
+                                c.style.display = 'none';
+                            });
+                            dashboardTab.classList.add('active');
+                            if (dashboardContent) {
+                                dashboardContent.classList.add('active');
+                                dashboardContent.style.display = 'block';
+                            }
+                        }
+                        
+                        // Force a re-render of dashboard elements to ensure they're visible
+                        setTimeout(() => {
+                            console.log('🔄 Re-running dashboard calculations after comparables load');
+                            this.updateValuationMultiples(result.data);
+                            this.updateSectorSummary(result.data, sector);
+                            this.calculateImpliedValuations(result.data);
+                        }, 150);
+                    }
                 }
             } else {
+                console.warn('⚠️ No comparable companies data in response:', result);
+                if (tbody) {
+                    const errorMsg = result.error || `No data available for ${sector} sector`;
+                    const errors = result.errors ? `<br><small style="color: var(--text-secondary);">${result.errors.join('; ')}</small>` : '';
+                    tbody.innerHTML = `
+                        <tr>
+                            <td colspan="8" style="text-align: center; padding: var(--spacing-lg); color: var(--error-color);">
+                                ${errorMsg}${errors}
+                                <br><br>
+                                <button class="btn btn-secondary" onclick="app.loadComparables(true)" style="margin-top: var(--spacing-sm);">
+                                    <i data-lucide="refresh-cw"></i> Refresh from API
+                                </button>
+                            </td>
+                        </tr>
+                    `;
+                    if (window.lucide) window.lucide.createIcons();
+                }
+                // Clear stale data
+                this.currentComparablesData = [];
+                return; // Don't update dashboard with empty data
+            }
+        } catch (error) {
+            console.error('❌ Error loading comparables:', error);
+            if (tbody) {
                 tbody.innerHTML = `
                     <tr>
-                        <td colspan="8" style="text-align: center; padding: var(--spacing-lg); color: var(--text-secondary);">
-                            No comparable companies found for ${sector} sector
+                        <td colspan="8" style="text-align: center; padding: var(--spacing-lg); color: var(--error-color);">
+                            Error loading comparable companies: ${error.message}<br>
+                            <button class="btn btn-secondary" onclick="app.loadComparables()" style="margin-top: var(--spacing-sm);">
+                                <i data-lucide="refresh-cw"></i> Retry
+                            </button>
                         </td>
                     </tr>
                 `;
+                if (window.lucide) window.lucide.createIcons();
             }
-        } catch (error) {
-            console.error('Error loading comparables:', error);
-            tbody.innerHTML = `
-                <tr>
-                    <td colspan="8" style="text-align: center; padding: var(--spacing-lg); color: var(--error-color);">
-                        Error loading comparable companies. Please try again.
-                    </td>
-                </tr>
-            `;
+            // Don't throw - allow initialization to continue
+            this.currentComparablesData = [];
         }
         
         if (window.lucide) window.lucide.createIcons();
+        console.log('✅ loadComparables completed. Data stored:', !!this.currentComparablesData, 'Count:', this.currentComparablesData?.length || 0);
     }
     
     formatCurrency(value) {
@@ -8259,6 +8707,18 @@ class ValuationApp {
     }
     
     calculateImpliedValuations(companies) {
+        if (!companies || companies.length === 0) {
+            console.warn('calculateImpliedValuations: No companies data provided');
+            return;
+        }
+        
+        // Check if dashboard elements exist
+        const dashboardContent = document.getElementById('ratiosTab-dashboard');
+        if (!dashboardContent) {
+            console.warn('calculateImpliedValuations: ratiosTab-dashboard not found');
+            return;
+        }
+        
         // Get SpaceX's current revenue and EBITDA from model
         // Estimate revenue from current model data
         let spacexRevenue = 0;
@@ -8280,53 +8740,175 @@ class ValuationApp {
             const earthData = this.currentData.earth;
             
             // Check if revenue is an array (from detailed calculation)
-            if (earthData.revenue && Array.isArray(earthData.revenue)) {
+            if (earthData.revenue && Array.isArray(earthData.revenue) && earthData.revenue.length > 0) {
                 const latestRevenue = earthData.revenue[earthData.revenue.length - 1];
                 if (latestRevenue && latestRevenue.total) {
                     spacexRevenue = latestRevenue.total / 1e9; // Convert to billions
+                    console.log('✅ Got revenue from currentData.earth.revenue:', spacexRevenue, 'B');
                 }
             }
             
-            // If no revenue array, estimate from valuation
-            // Use a rough EV/Revenue multiple of 10x as a default estimate
-            // This is a placeholder - in production, you'd want actual revenue data
+            // If no revenue array, try to calculate from inputs
+            if (spacexRevenue === 0) {
+                try {
+                    const inputs = this.getInputs();
+                    if (inputs && inputs.earth) {
+                        // Try to estimate revenue from Starlink penetration and capacity
+                        // This is a rough estimate based on typical Starlink revenue model
+                        const starlinkPenetration = inputs.earth.starlinkPenetration || 0.15;
+                        const launchVolume = inputs.earth.launchVolume || 100;
+                        
+                        // Rough estimate: Starlink revenue ~$10B/year at 15% penetration
+                        // Scale by penetration ratio
+                        const baseStarlinkRevenue = 10; // $10B base
+                        const penetrationMultiplier = starlinkPenetration / 0.15;
+                        
+                        // Launch revenue estimate: ~$100M per launch * volume
+                        const launchRevenue = (launchVolume * 0.1); // $100M per launch in billions
+                        
+                        // Total revenue estimate
+                        spacexRevenue = (baseStarlinkRevenue * penetrationMultiplier) + launchRevenue;
+                        console.log('✅ Estimated revenue from inputs:', spacexRevenue, 'B');
+                    }
+                } catch (err) {
+                    console.warn('⚠️ Could not get revenue from inputs:', err);
+                }
+            }
+            
+            // If still no revenue, estimate from valuation
             if (spacexRevenue === 0 && currentValuation > 0) {
                 // Estimate revenue from valuation using a reasonable multiple
                 // For SpaceX, EV/Revenue might be around 10-15x
                 spacexRevenue = currentValuation / 12; // Use 12x as estimate
+                console.log('⚠️ Estimated revenue from valuation (fallback):', spacexRevenue, 'B');
             }
             
             // Estimate EBITDA (simplified: assume 20% margin)
             spacexEbitda = spacexRevenue * 0.20;
-        } else if (currentValuation > 0) {
-            // Fallback: estimate revenue from valuation if no Earth data
-            spacexRevenue = currentValuation / 12; // Use 12x EV/Revenue as estimate
-            spacexEbitda = spacexRevenue * 0.20;
+        } else {
+            // No currentData - try to get from inputs or estimate from valuation
+            console.warn('⚠️ currentData not available, trying to estimate from inputs');
+            
+            if (currentValuation > 0) {
+                // Fallback: estimate revenue from valuation if no Earth data
+                spacexRevenue = currentValuation / 12; // Use 12x EV/Revenue as estimate
+                spacexEbitda = spacexRevenue * 0.20;
+                console.log('⚠️ Estimated revenue from valuation (no currentData):', spacexRevenue, 'B');
+            } else {
+                // Try to get from inputs as last resort
+                try {
+                    const inputs = this.getInputs();
+                    if (inputs && inputs.earth) {
+                        const starlinkPenetration = inputs.earth.starlinkPenetration || 0.15;
+                        const launchVolume = inputs.earth.launchVolume || 100;
+                        const baseStarlinkRevenue = 10;
+                        const penetrationMultiplier = starlinkPenetration / 0.15;
+                        const launchRevenue = (launchVolume * 0.1);
+                        spacexRevenue = (baseStarlinkRevenue * penetrationMultiplier) + launchRevenue;
+                        spacexEbitda = spacexRevenue * 0.20;
+                        console.log('✅ Estimated revenue from inputs (no currentData):', spacexRevenue, 'B');
+                    }
+                } catch (err) {
+                    console.warn('⚠️ Could not estimate revenue:', err);
+                }
+            }
         }
         
+        // CRITICAL: Ratios REQUIRE reference data - do not use estimates!
+        // If we don't have revenue from actual calculations, show error instead of estimating
+        if (spacexRevenue === 0) {
+            console.error('❌ CRITICAL: Cannot calculate ratios without reference data revenue!');
+            console.error('   currentData:', this.currentData);
+            console.error('   Please ensure model is calculated before viewing ratios');
+            
+            // Show error message instead of using estimates
+            const container = dashboardContent.querySelector('#impliedValuationsContainer') || document.getElementById('impliedValuationsContainer');
+            if (container) {
+                container.innerHTML = `
+                    <div style="padding: var(--spacing-lg); text-align: center;">
+                        <p style="color: var(--error-color); margin-bottom: var(--spacing-md); font-weight: 600;">
+                            ⚠️ Reference Data Required
+                        </p>
+                        <p style="color: var(--text-secondary); margin-bottom: var(--spacing-md);">
+                            Ratios calculation requires actual model revenue data.
+                        </p>
+                        <p style="font-size: 12px; color: var(--text-secondary);">
+                            Please calculate the model first, then return to ratios view.
+                        </p>
+                    </div>
+                `;
+            }
+            return; // Don't proceed with calculations without real data
+        }
+        
+        // Log final values for debugging
+        console.log('📊 Ratios calculation values:', {
+            currentValuation: currentValuation,
+            spacexRevenue: spacexRevenue,
+            spacexEbitda: spacexEbitda,
+            hasCurrentData: !!this.currentData,
+            hasEarthData: !!(this.currentData && this.currentData.earth),
+            hasRevenueArray: !!(this.currentData && this.currentData.earth && Array.isArray(this.currentData.earth.revenue))
+        });
+        
         // Update current valuation display
-        const valuationEl = document.getElementById('spacexCurrentValuation');
-        const revenueEl = document.getElementById('spacexRevenue');
-        const ebitdaEl = document.getElementById('spacexEbitda');
+        const valuationEl = dashboardContent.querySelector('#spacexCurrentValuation') || document.getElementById('spacexCurrentValuation');
+        const revenueEl = dashboardContent.querySelector('#spacexRevenue') || document.getElementById('spacexRevenue');
+        const ebitdaEl = dashboardContent.querySelector('#spacexEbitda') || document.getElementById('spacexEbitda');
         
         if (valuationEl) {
-            // currentValuation is already in billions
-            valuationEl.textContent = currentValuation > 0 ? this.formatCurrency(currentValuation * 1e9) : '--';
-            valuationEl.style.color = '';
+            // Use calculated valuation from model (NEVER read from spreadsheet)
+            // Spreadsheet is only used as test reference point
+            // If baseline model is loaded, use its Monte Carlo base value
+            let displayValuation = currentValuation;
+            
+            // Check if current model is baseline and has Monte Carlo results
+            if (this.currentData && this.currentData.monteCarlo && this.currentData.monteCarlo.base) {
+                displayValuation = this.currentData.monteCarlo.base;
+                console.log('✅ Using baseline model Monte Carlo base value:', displayValuation);
+            } else if (this.currentData && this.currentData.results && this.currentData.results.monteCarlo && this.currentData.results.monteCarlo.base) {
+                displayValuation = this.currentData.results.monteCarlo.base;
+                console.log('✅ Using model Monte Carlo base value:', displayValuation);
+            }
+            
+            if (displayValuation > 0) {
+                valuationEl.textContent = this.formatCurrency(displayValuation * 1e9);
+                valuationEl.style.color = '';
+                console.log('✅ Updated SpaceX Current Valuation:', valuationEl.textContent);
+            } else {
+                valuationEl.textContent = '--';
+                console.warn('⚠️ No valuation data available - load a model to see valuation');
+            }
+        } else {
+            console.warn('⚠️ valuationEl (spacexCurrentValuation) not found');
         }
         if (revenueEl) {
             // spacexRevenue is already in billions
             revenueEl.textContent = spacexRevenue > 0 ? this.formatCurrency(spacexRevenue * 1e9) : '--';
             revenueEl.style.color = '';
+            console.log('✅ Updated SpaceX Revenue:', revenueEl.textContent);
+        } else {
+            console.warn('⚠️ revenueEl (spacexRevenue) not found');
         }
         if (ebitdaEl) {
             // spacexEbitda is already in billions
             ebitdaEl.textContent = spacexEbitda > 0 ? this.formatCurrency(spacexEbitda * 1e9) : '--';
             ebitdaEl.style.color = '';
+            console.log('✅ Updated SpaceX EBITDA:', ebitdaEl.textContent);
+        } else {
+            console.warn('⚠️ ebitdaEl (spacexEbitda) not found');
         }
         
         // Calculate implied valuations using each comparable's multiples
         const impliedValuations = [];
+        
+        console.log('🔍 Calculating implied valuations:', {
+            companiesCount: companies.length,
+            spacexRevenue: spacexRevenue,
+            spacexEbitda: spacexEbitda,
+            companiesWithEvRevenue: companies.filter(c => c.evRevenue && c.name !== 'SpaceX').length,
+            companiesWithEvEbitda: companies.filter(c => c.evEbitda && c.name !== 'SpaceX').length
+        });
         
         companies.forEach(company => {
             if (company.name === 'SpaceX') return; // Skip SpaceX itself
@@ -8341,6 +8923,11 @@ class ValuationApp {
                     impliedValue: impliedEV,
                     company: company.name
                 };
+                console.log(`✅ ${company.name}: EV/Revenue ${company.evRevenue}x → Implied ${impliedEV.toFixed(2)}B`);
+            } else {
+                if (company.evRevenue) {
+                    console.log(`⚠️ ${company.name}: Has EV/Revenue ${company.evRevenue}x but SpaceX revenue is ${spacexRevenue}`);
+                }
             }
             
             // EV/EBITDA multiple
@@ -8351,6 +8938,7 @@ class ValuationApp {
                     impliedValue: impliedEV,
                     company: company.name
                 };
+                console.log(`✅ ${company.name}: EV/EBITDA ${company.evEbitda}x → Implied ${impliedEV.toFixed(2)}B`);
             }
             
             if (Object.keys(valuations).length > 0) {
@@ -8362,17 +8950,35 @@ class ValuationApp {
             }
         });
         
-        // Display implied valuations
-        const container = document.getElementById('impliedValuationsContainer');
-        if (!container) return;
+        console.log(`📊 Total implied valuations calculated: ${impliedValuations.length}`);
         
-        if (impliedValuations.length === 0 || spacexRevenue === 0) {
+        // Display implied valuations
+        const container = dashboardContent.querySelector('#impliedValuationsContainer') || document.getElementById('impliedValuationsContainer');
+        if (!container) {
+            console.warn('calculateImpliedValuations: impliedValuationsContainer not found');
+            return;
+        }
+        
+        // Always show something, even if we don't have perfect data
+        if (impliedValuations.length === 0) {
             container.innerHTML = `
-                <p style="color: var(--text-secondary); text-align: center; padding: var(--spacing-lg);">
-                    ${spacexRevenue === 0 ? 'Load a model to see implied valuations based on SpaceX revenue' : 'No comparable multiples available'}
-                </p>
+                <div style="padding: var(--spacing-lg); text-align: center;">
+                    <p style="color: var(--text-secondary); margin-bottom: var(--spacing-md);">
+                        No comparable multiples available for implied valuation calculation.
+                    </p>
+                    <p style="font-size: 12px; color: var(--text-secondary);">
+                        ${spacexRevenue > 0 
+                            ? `Using estimated revenue: ${this.formatCurrency(spacexRevenue * 1e9)}` 
+                            : 'Please load a model or ensure inputs are set to calculate implied valuations.'}
+                    </p>
+                </div>
             `;
             return;
+        }
+        
+        // If revenue is 0, we shouldn't get here (should have been caught above), but just in case
+        if (spacexRevenue === 0) {
+            console.warn('⚠️ Revenue is 0 but implied valuations exist - this should not happen');
         }
         
         // Calculate averages
@@ -8483,6 +9089,11 @@ class ValuationApp {
     }
     
     updateValuationMultiples(companies) {
+        if (!companies || companies.length === 0) {
+            console.warn('updateValuationMultiples: No companies data provided');
+            return;
+        }
+        
         // Calculate averages
         const validEvRevenue = companies.filter(c => c.evRevenue).map(c => c.evRevenue);
         const validEvEbitda = companies.filter(c => c.evEbitda).map(c => c.evEbitda);
@@ -8504,31 +9115,65 @@ class ValuationApp {
         
         // Update the metrics cards (if they exist)
         // The metrics are in the "Peer Multiples Summary" section within ratiosTab-dashboard
-        const metricsGrid = document.querySelector('#ratiosTab-dashboard .metrics-grid');
-        const evRevenueEl = metricsGrid ? metricsGrid.querySelector('.metric-card-small:nth-child(1) .metric-value-small') : null;
-        const evEbitdaEl = metricsGrid ? metricsGrid.querySelector('.metric-card-small:nth-child(2) .metric-value-small') : null;
-        const peRatioEl = metricsGrid ? metricsGrid.querySelector('.metric-card-small:nth-child(3) .metric-value-small') : null;
-        const pegRatioEl = metricsGrid ? metricsGrid.querySelector('.metric-card-small:nth-child(4) .metric-value-small') : null;
+        const dashboardContent = document.getElementById('ratiosTab-dashboard');
+        if (!dashboardContent) {
+            console.warn('updateValuationMultiples: ratiosTab-dashboard not found');
+            return;
+        }
+        
+        // Find the Peer Multiples Summary section (second metrics-grid in dashboard)
+        const sections = dashboardContent.querySelectorAll('.section');
+        let metricsGrid = null;
+        for (const section of sections) {
+            const heading = section.querySelector('h3');
+            if (heading && heading.textContent.includes('Peer Multiples Summary')) {
+                metricsGrid = section.querySelector('.metrics-grid');
+                break;
+            }
+        }
+        
+        if (!metricsGrid) {
+            console.warn('updateValuationMultiples: Peer Multiples Summary metrics-grid not found');
+            return;
+        }
+        
+        const metricCards = metricsGrid.querySelectorAll('.metric-card-small');
+        const evRevenueEl = metricCards.length > 0 ? metricCards[0].querySelector('.metric-value-small') : null;
+        const evEbitdaEl = metricCards.length > 1 ? metricCards[1].querySelector('.metric-value-small') : null;
+        const peRatioEl = metricCards.length > 2 ? metricCards[2].querySelector('.metric-value-small') : null;
+        const pegRatioEl = metricCards.length > 3 ? metricCards[3].querySelector('.metric-value-small') : null;
         
         if (evRevenueEl) {
             evRevenueEl.textContent = avgEvRevenue !== '--' ? avgEvRevenue + 'x' : '--';
             evRevenueEl.style.color = '';
+            console.log('✅ Updated Avg EV/Revenue:', avgEvRevenue + 'x');
+        } else {
+            console.warn('⚠️ evRevenueEl not found');
         }
         if (evEbitdaEl) {
             evEbitdaEl.textContent = avgEvEbitda !== '--' ? avgEvEbitda + 'x' : '--';
             evEbitdaEl.style.color = '';
+            console.log('✅ Updated Avg EV/EBITDA:', avgEvEbitda + 'x');
+        } else {
+            console.warn('⚠️ evEbitdaEl not found');
         }
         if (peRatioEl) {
             peRatioEl.textContent = avgPeRatio !== '--' ? avgPeRatio + 'x' : '--';
             peRatioEl.style.color = '';
+            console.log('✅ Updated Avg P/E Ratio:', avgPeRatio + 'x');
+        } else {
+            console.warn('⚠️ peRatioEl not found');
         }
         if (pegRatioEl) {
             pegRatioEl.textContent = avgPegRatio !== '--' ? avgPegRatio : '--';
             pegRatioEl.style.color = '';
+            console.log('✅ Updated Avg PEG Ratio:', avgPegRatio);
+        } else {
+            console.warn('⚠️ pegRatioEl not found');
         }
         
         // Update helper text
-        const helpers = metricsGrid ? metricsGrid.querySelectorAll('.metric-card-small div[style*="font-size: 11px"]') : [];
+        const helpers = metricsGrid.querySelectorAll('.metric-card-small div[style*="font-size: 11px"]');
         helpers.forEach(el => {
             if (el.textContent.includes('Requires public data') || el.textContent.includes('Peer average')) {
                 el.textContent = 'Peer average';
@@ -9152,6 +9797,62 @@ class ValuationApp {
             if (result.success) {
                 console.log('✅ Simulation auto-saved successfully');
                 
+                // Update model's results field with Monte Carlo statistics
+                if (this.currentModelId && data.statistics) {
+                    // Extract mean value from statistics - check multiple possible structures
+                    const meanValue = data.statistics.totalValue?.mean || 
+                                    data.statistics?.totalValue?.mean ||
+                                    data.statistics?.mean || 
+                                    null;
+                    
+                    if (meanValue !== null && meanValue > 0) {
+                        try {
+                            console.log('📊 Updating model results with Monte Carlo statistics:', {
+                                meanValue,
+                                totalStats: data.statistics.totalValue,
+                                earthStats: data.statistics.earthValue,
+                                marsStats: data.statistics.marsValue
+                            });
+                            
+                            // Update model with Monte Carlo results
+                            const updateResponse = await fetch(`/api/models/${this.currentModelId}`, {
+                                method: 'PUT',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({
+                                    results: {
+                                        total: {
+                                            value: meanValue, // Monte Carlo mean value (in billions)
+                                            breakdown: {
+                                                earth: data.statistics.earthValue?.mean || data.statistics?.earthValue?.mean || null,
+                                                mars: data.statistics.marsValue?.mean || data.statistics?.marsValue?.mean || null
+                                            }
+                                        },
+                                        monteCarlo: {
+                                            bear: data.statistics.totalValue?.p25 || data.statistics.totalValue?.min || data.statistics?.p25 || null,
+                                            base: meanValue,
+                                            optimistic: data.statistics.totalValue?.p75 || data.statistics.totalValue?.max || data.statistics?.p75 || null,
+                                            statistics: data.statistics,
+                                            runs: data.runs || runs
+                                        },
+                                        updatedAt: new Date().toISOString()
+                                    },
+                                })
+                            });
+                            
+                            const updateResult = await updateResponse.json();
+                            if (updateResponse.ok && updateResult.success) {
+                                console.log('✅ Updated model results with Monte Carlo statistics');
+                            } else {
+                                console.warn('⚠️ Failed to update model results:', updateResult.error || await updateResponse.text());
+                            }
+                        } catch (updateError) {
+                            console.warn('⚠️ Error updating model results:', updateError);
+                        }
+                    } else {
+                        console.warn('⚠️ Cannot update model: meanValue is null or invalid:', meanValue);
+                    }
+                }
+                
                 // Show brief notification that simulation was saved
                 const notification = document.createElement('div');
                 notification.style.cssText = `
@@ -9183,9 +9884,14 @@ class ValuationApp {
                     setTimeout(() => notification.remove(), 300);
                 }, 3000);
                 
-                // Reload models to update simulation counts
+                // Reload models to update cards with new data
                 if (this.currentView === 'models') {
                     this.loadModels();
+                } else {
+                    // Even if not on models view, refresh in background so cards update when user navigates
+                    setTimeout(() => {
+                        this.loadModels();
+                    }, 1000);
                 }
             } else {
                 console.warn('Failed to auto-save simulation:', result.error);
@@ -9911,50 +10617,123 @@ class ValuationApp {
         }
     }
 
-    // Auto-load first model on startup
+    // Auto-load last model on startup
     async autoLoadFirstModel() {
         try {
-            console.log('📦 Auto-loading first model...');
-            const response = await fetch('/api/models?limit=1&sortBy=createdAt&sortOrder=desc');
-            const result = await response.json();
+            console.log('📦 Loading last loaded model from application state...');
             
-            if (result.success && result.data && result.data.length > 0) {
-                const firstModel = result.data[0];
-                console.log('✅ Found first model:', firstModel.name);
-                // Load model silently (no notifications)
-                await this.loadModel(firstModel._id, true);
-            } else {
-                console.log('ℹ️ No models found - starting with empty inputs');
+            // Get last loaded model ID from application state
+            const stateResponse = await fetch('/api/app-state/lastModelId');
+            const stateResult = await stateResponse.json();
+            
+            if (stateResult.success && stateResult.data) {
+                const lastModelId = stateResult.data;
+                console.log('✅ Found last loaded model ID:', lastModelId);
+                
+                // Try to load the last model
+                try {
+                    await this.loadModel(lastModelId, true);
+                    console.log('✅ Loaded last model successfully');
+                    return;
+                } catch (loadError) {
+                    console.warn('⚠️ Failed to load last model, trying to find it:', loadError);
+                    // Model might have been deleted, fall through to find another
+                }
+            }
+            
+            // Fallback: Load baseline model if no last model found
+            console.log('📦 No last model found, loading baseline model...');
+            try {
+                const baselineResponse = await fetch('/api/models/baseline');
+                const baselineResult = await baselineResponse.json();
+                
+                if (baselineResult.success && baselineResult.data) {
+                    console.log('✅ Found baseline model:', baselineResult.data.name);
+                    await this.loadModel(baselineResult.data._id, true);
+                    return;
+                } else {
+                    console.log('⚠️ Baseline model not found:', baselineResult.error || 'Unknown error');
+                }
+            } catch (baselineError) {
+                console.warn('⚠️ Failed to fetch baseline model:', baselineError);
+            }
+            
+            // If baseline fetch failed, try loading first available model
+            {
+                // Last fallback: Load first available model
+                console.log('📦 No baseline found, loading first available model...');
+                const response = await fetch('/api/models?limit=1&sortBy=createdAt&sortOrder=desc');
+                const result = await response.json();
+                
+                if (result.success && result.data && result.data.length > 0) {
+                    const firstModel = result.data[0];
+                    console.log('✅ Found first model:', firstModel.name);
+                    await this.loadModel(firstModel._id, true);
+                } else {
+                    console.log('ℹ️ No models found - starting with empty inputs');
+                }
             }
         } catch (error) {
-            console.error('❌ Failed to auto-load first model:', error);
+            console.error('❌ Failed to auto-load model:', error);
             // Continue without auto-loading if it fails
         }
+    }
+    
+    // Save application state
+    async saveAppState(key, value) {
+        try {
+            await fetch(`/api/app-state/${key}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ value })
+            });
+            console.log(`✅ Saved app state: ${key}`);
+        } catch (error) {
+            console.warn(`⚠️ Failed to save app state ${key}:`, error);
+        }
+    }
+    
+    // Get application state
+    async getAppState(key) {
+        try {
+            const response = await fetch(`/api/app-state/${key}`);
+            const result = await response.json();
+            if (result.success) {
+                return result.data;
+            }
+        } catch (error) {
+            console.warn(`⚠️ Failed to get app state ${key}:`, error);
+        }
+        return null;
     }
 
     // Model Management
     async loadModels(page = 1) {
         try {
-            const search = document.getElementById('modelSearch').value;
-            const sort = document.getElementById('modelSort').value.split('-');
-            const favoriteOnly = document.getElementById('showFavoritesOnly').checked;
+            const search = document.getElementById('modelSearch')?.value || '';
+            const sort = document.getElementById('modelSort')?.value.split('-') || ['createdAt', 'desc'];
+            const favoriteOnly = document.getElementById('showFavoritesOnly')?.checked || false;
 
             const params = new URLSearchParams({
                 page: page.toString(),
                 limit: '12',
                 sortBy: sort[0],
-                sortOrder: sort[1]
+                sortOrder: sort[1],
+                type: 'model', // Only load models, not scenarios
+                isBaseline: 'true' // Only show baseline model
             });
 
             if (search) params.append('search', search);
             if (favoriteOnly) params.append('favorite', 'true');
 
-            const response = await fetch(`/api/models?${params}`);
+            const url = `/api/models?${params}`;
+            console.log('📊 Loading models with filter:', url);
+            const response = await fetch(url);
             const result = await response.json();
 
             if (result.success) {
                 this.renderModels(result.data);
-                this.renderPagination(result.pagination, page);
+                this.renderPagination(result.pagination || { pages: 1, total: 0 }, page);
             } else {
                 console.error('API error:', result.error);
                 const grid = document.getElementById('modelsGrid');
@@ -9971,20 +10750,96 @@ class ValuationApp {
         }
     }
 
-    renderModels(models) {
-        const grid = document.getElementById('modelsGrid');
+    switchScenarioTab(tabName) {
+        // Hide all tab contents
+        document.querySelectorAll('.models-tab-content').forEach(tab => {
+            tab.classList.remove('active');
+        });
+        
+        // Remove active class from all tabs
+        document.querySelectorAll('.models-tab').forEach(tab => {
+            tab.classList.remove('active');
+        });
+        
+        // Show selected tab content
+        const tabContent = document.getElementById(tabName);
+        if (tabContent) {
+            tabContent.classList.add('active');
+        }
+        
+        // Add active class to clicked tab
+        const tabBtn = document.querySelector(`[data-tab="${tabName}"]`);
+        if (tabBtn) {
+            tabBtn.classList.add('active');
+        }
+        
+        // Load scenarios if switching to saved scenarios tab
+        if (tabName === 'saved-scenarios-tab') {
+            this.loadScenarios();
+        }
+        
+        // Refresh icons
+        if (window.lucide) window.lucide.createIcons();
+    }
+
+    async loadScenarios(page = 1) {
+        try {
+            const search = document.getElementById('scenarioSearch')?.value || '';
+            const sort = document.getElementById('scenarioSort')?.value.split('-') || ['createdAt', 'desc'];
+            const favoriteOnly = document.getElementById('showFavoritesOnlyScenarios')?.checked || false;
+
+            const params = new URLSearchParams({
+                page: page.toString(),
+                limit: '12',
+                sortBy: sort[0],
+                sortOrder: sort[1],
+                type: 'scenario' // Only load scenarios
+            });
+
+            if (search) params.append('search', search);
+            if (favoriteOnly) params.append('favorite', 'true');
+
+            const response = await fetch(`/api/models?${params}`);
+            const result = await response.json();
+
+            if (result.success) {
+                this.renderModels(result.data, 'savedScenariosGrid');
+                this.renderPagination(result.pagination || { pages: 1, total: 0 }, page, 'scenariosPagination');
+            } else {
+                console.error('API error:', result.error);
+                const grid = document.getElementById('savedScenariosGrid');
+                if (grid) {
+                    grid.innerHTML = `<div class="empty-state">Error loading scenarios: ${result.error || 'Unknown error'}</div>`;
+                }
+            }
+        } catch (error) {
+            console.error('Failed to load scenarios:', error);
+            const grid = document.getElementById('savedScenariosGrid');
+            if (grid) {
+                grid.innerHTML = `<div class="empty-state">Failed to load scenarios. Check console for details.<br>Error: ${error.message}</div>`;
+            }
+        }
+    }
+
+    renderModels(models, gridId = 'modelsGrid') {
+        const grid = document.getElementById(gridId);
         if (!grid) return;
 
         grid.innerHTML = '';
 
         if (models.length === 0) {
-            grid.innerHTML = '<div class="empty-state">No models found. Create your first model by calculating a valuation and saving it.</div>';
+            const isScenariosGrid = gridId === 'savedScenariosGrid';
+            const message = isScenariosGrid 
+                ? 'No scenarios found. Create your first scenario by calculating a valuation and saving it as a scenario.'
+                : 'No models found. Create your first model by calculating a valuation and saving it.';
+            grid.innerHTML = `<div class="empty-state">${message}</div>`;
             return;
         }
 
         models.forEach(model => {
+            const isActive = model._id === this.currentModelId;
             const card = document.createElement('div');
-            card.className = `model-card ${model.isFavorite ? 'favorite' : ''}`;
+            card.className = `model-card ${model.isFavorite ? 'favorite' : ''} ${isActive ? 'active' : ''}`;
             
             const tagsHtml = model.tags && model.tags.length > 0
                 ? `<div class="model-tags">${model.tags.map(tag => `<span class="tag">${tag}</span>`).join('')}</div>`
@@ -9993,7 +10848,10 @@ class ValuationApp {
             card.innerHTML = `
                 <div class="model-header">
                     <div>
-                        <div class="model-name">${model.name}</div>
+                        <div class="model-name">
+                            ${model.name}
+                            ${isActive ? '<span class="current-model-badge">Current</span>' : ''}
+                        </div>
                         <div class="model-description">${model.description || 'No description'}</div>
                     </div>
                     <button class="btn-icon favorite-btn ${model.isFavorite ? 'active' : ''}" 
@@ -10047,8 +10905,8 @@ class ValuationApp {
         lucide.createIcons();
     }
 
-    renderPagination(pagination, currentPage) {
-        const paginationEl = document.getElementById('modelsPagination');
+    renderPagination(pagination, currentPage, paginationId = 'modelsPagination') {
+        const paginationEl = document.getElementById(paginationId);
         if (!paginationEl) return;
 
         if (pagination.pages <= 1) {
@@ -10057,25 +10915,31 @@ class ValuationApp {
         }
 
         let html = '';
+        const isScenarios = paginationId === 'scenariosPagination';
+        const loadFunction = isScenarios ? 'loadScenarios' : 'loadModels';
+        
         if (currentPage > 1) {
-            html += `<button onclick="app.loadModels(${currentPage - 1})">Previous</button>`;
+            html += `<button onclick="app.${loadFunction}(${currentPage - 1})">Previous</button>`;
         }
 
-        html += `<span class="page-info">Page ${currentPage} of ${pagination.pages}</span>`;
+        html += `<span class="page-info">Page ${currentPage} of ${pagination.pages || pagination.totalPages || 1}</span>`;
 
-        if (currentPage < pagination.pages) {
-            html += `<button onclick="app.loadModels(${currentPage + 1})">Next</button>`;
+        if (currentPage < (pagination.pages || pagination.totalPages || 1)) {
+            html += `<button onclick="app.${loadFunction}(${currentPage + 1})">Next</button>`;
         }
 
         paginationEl.innerHTML = html;
     }
 
-    openSaveModelModal() {
+    openSaveModelModal(modelType = 'model') {
         if (!this.currentData) {
             alert('Please calculate a valuation first');
             return;
         }
 
+        // Store the model type for when saving
+        this.pendingModelType = modelType;
+        
         document.getElementById('saveModelName').value = '';
         document.getElementById('saveModelDescription').value = '';
         document.getElementById('saveModelTags').value = '';
@@ -10103,6 +10967,12 @@ class ValuationApp {
             distributions: null
         };
 
+        // Use pendingModelType if set (from Add Model/Add Scenario button), otherwise default to 'model'
+        const modelType = this.pendingModelType || 'model';
+        
+        // Clear pending type
+        this.pendingModelType = null;
+
         try {
             const response = await fetch('/api/models', {
                 method: 'POST',
@@ -10113,16 +10983,23 @@ class ValuationApp {
                     inputs,
                     tags,
                     isFavorite,
-                    monteCarloConfig
+                    monteCarloConfig,
+                    type: modelType // Set type based on which button was clicked
                 })
             });
 
             const result = await response.json();
             if (result.success) {
                 document.getElementById('saveModelModal').classList.remove('active');
-                alert('Model saved successfully!');
+                alert(modelType === 'scenario' ? 'Scenario saved successfully!' : 'Model saved successfully!');
                 if (this.currentView === 'models') {
                     this.loadModels();
+                } else if (this.currentView === 'scenarios') {
+                    // If we're in scenarios view and saved a scenario, reload scenarios
+                    const activeTab = document.querySelector('.models-tab-content.active')?.id;
+                    if (activeTab === 'saved-scenarios-tab') {
+                        this.loadScenarios();
+                    }
                 }
             } else {
                 alert('Error: ' + result.error);
@@ -10136,6 +11013,9 @@ class ValuationApp {
     async loadModel(id, silent = false) {
         const previousModelId = this.currentModelId;
         this.currentModelId = id; // Store current model ID for saving simulations
+        
+        // Save last loaded model ID to application state
+        await this.saveAppState('lastModelId', id);
         
         try {
             const response = await fetch(`/api/models/${id}`);
@@ -12588,7 +13468,7 @@ class ValuationApp {
 
     // ==================== DESKTOP AGENT WINDOW ====================
 
-    toggleAIAgent() {
+    async toggleAIAgent() {
         const agentWindow = document.getElementById('aiAgentWindow');
         if (!agentWindow) {
             console.error('Desktop Agent window not found in DOM');
@@ -12605,12 +13485,21 @@ class ValuationApp {
             agentWindow.style.display = 'flex';
             agentWindow.style.position = 'fixed';
             agentWindow.style.zIndex = '10000';
-            // Set initial position if not already set
-            if (!agentWindow.style.left && !agentWindow.style.top) {
-                agentWindow.style.left = '100px';
-                agentWindow.style.top = '100px';
-                agentWindow.style.width = '500px';
-                agentWindow.style.height = '600px';
+            // Restore position from application state
+            const agentPosition = await this.getAppState('agentPosition');
+            if (agentPosition) {
+                agentWindow.style.left = agentPosition.left || '100px';
+                agentWindow.style.top = agentPosition.top || '100px';
+                agentWindow.style.width = agentPosition.width || '500px';
+                agentWindow.style.height = agentPosition.height || '600px';
+            } else {
+                // Set initial position if not already set
+                if (!agentWindow.style.left && !agentWindow.style.top) {
+                    agentWindow.style.left = '100px';
+                    agentWindow.style.top = '100px';
+                    agentWindow.style.width = '500px';
+                    agentWindow.style.height = '600px';
+                }
             }
             console.log('✅ Desktop Agent window opened at:', {
                 left: agentWindow.style.left,
@@ -12785,6 +13674,16 @@ class ValuationApp {
             if (isDragging) {
                 isDragging = false;
                 header.style.cursor = 'grab';
+                // Save agent position to application state (fire and forget)
+                const agentPosition = {
+                    left: window.style.left,
+                    top: window.style.top,
+                    width: window.style.width,
+                    height: window.style.height
+                };
+                this.saveAppState('agentPosition', agentPosition).catch(err => {
+                    console.warn('Failed to save agent position:', err);
+                });
             }
         });
     }
@@ -12815,7 +13714,19 @@ class ValuationApp {
         });
 
         document.addEventListener('mouseup', () => {
-            isResizing = false;
+            if (isResizing) {
+                isResizing = false;
+                // Save agent position and size to application state (fire and forget)
+                const agentPosition = {
+                    left: window.style.left,
+                    top: window.style.top,
+                    width: window.style.width,
+                    height: window.style.height
+                };
+                this.saveAppState('agentPosition', agentPosition).catch(err => {
+                    console.warn('Failed to save agent position:', err);
+                });
+            }
         });
     }
 

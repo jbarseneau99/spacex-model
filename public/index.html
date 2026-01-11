@@ -41,6 +41,10 @@
         <aside class="sidebar">
             <nav class="nav-menu">
                 <!-- Main Views Group -->
+                <a href="#models" class="nav-item" data-view="models">
+                    <i data-lucide="database"></i>
+                    <span>Saved Models</span>
+                </a>
                 <a href="#dashboard" class="nav-item active" data-view="dashboard">
                     <i data-lucide="layout-dashboard"></i>
                     <span>Model Valuation</span>
@@ -115,10 +119,6 @@
                 <a href="#inputs" class="nav-item" data-view="inputs">
                     <i data-lucide="database"></i>
                     <span>Reference Data</span>
-                </a>
-                <a href="#models" class="nav-item" data-view="models">
-                    <i data-lucide="database"></i>
-                    <span>Saved Models</span>
                 </a>
             </nav>
         </aside>
@@ -943,42 +943,96 @@
             <!-- Scenarios View -->
             <div id="scenarios" class="view">
                 <div class="view-header">
-                    <h2>Scenario Analysis</h2>
-                    <button class="btn btn-secondary btn-sm" id="runScenariosBtn">
-                        <i data-lucide="refresh-cw"></i>
-                        Recalculate
+                    <h2>Scenarios</h2>
+                </div>
+
+                <!-- Tabs for Scenario Analysis and Saved Scenarios -->
+                <div class="models-tabs">
+                    <button class="models-tab active" data-tab="scenario-analysis-tab" id="scenarioAnalysisTabBtn">
+                        <i data-lucide="layers"></i>
+                        Scenario Analysis
+                    </button>
+                    <button class="models-tab" data-tab="saved-scenarios-tab" id="savedScenariosTabBtn">
+                        <i data-lucide="flask-conical"></i>
+                        Saved Scenarios
                     </button>
                 </div>
 
-                <!-- Multiple Scenario Comparison -->
-                <div class="section" style="margin-bottom: var(--spacing-md);">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-                        <h3 style="margin: 0;"><i data-lucide="layers"></i> Scenario Comparison</h3>
-                    </div>
-                    <div class="scenarios-comparison-grid" id="scenariosComparisonGrid">
-                        <!-- Will be populated dynamically -->
-                    </div>
-                </div>
-
-                <!-- Scenario Distribution Comparison -->
-                <div class="section">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-                        <h3 style="margin: 0;"><i data-lucide="trending-up"></i> Distribution Comparison</h3>
-                        <button class="btn btn-secondary btn-sm" id="runScenarioMonteCarloBtn">
+                <!-- Scenario Analysis Tab Content -->
+                <div id="scenario-analysis-tab" class="models-tab-content active">
+                    <div class="view-header" style="margin-top: 0;">
+                        <h3>Scenario Analysis</h3>
+                        <button class="btn btn-secondary btn-sm" id="runScenariosBtn">
                             <i data-lucide="refresh-cw"></i>
                             Recalculate
                         </button>
                     </div>
-                    <div class="chart-container" style="height: 400px;">
-                        <canvas id="scenarioDistributionChart"></canvas>
+
+                    <!-- Multiple Scenario Comparison -->
+                    <div class="section" style="margin-bottom: var(--spacing-md);">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                            <h3 style="margin: 0;"><i data-lucide="layers"></i> Scenario Comparison</h3>
+                        </div>
+                        <div class="scenarios-comparison-grid" id="scenariosComparisonGrid">
+                            <!-- Will be populated dynamically -->
+                        </div>
+                    </div>
+
+                    <!-- Scenario Distribution Comparison -->
+                    <div class="section">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                            <h3 style="margin: 0;"><i data-lucide="trending-up"></i> Distribution Comparison</h3>
+                            <button class="btn btn-secondary btn-sm" id="runScenarioMonteCarloBtn">
+                                <i data-lucide="refresh-cw"></i>
+                                Recalculate
+                            </button>
+                        </div>
+                        <div class="chart-container" style="height: 400px;">
+                            <canvas id="scenarioDistributionChart"></canvas>
+                        </div>
+                    </div>
+
+                    <!-- Preset Scenarios -->
+                    <div class="section">
+                        <h3><i data-lucide="bookmark"></i> Preset Scenarios</h3>
+                        <div class="scenarios-grid" id="scenariosGrid">
+                            <!-- Scenarios will be loaded dynamically -->
+                        </div>
                     </div>
                 </div>
 
-                <!-- Preset Scenarios -->
-                <div class="section">
-                    <h3><i data-lucide="bookmark"></i> Preset Scenarios</h3>
-                    <div class="scenarios-grid" id="scenariosGrid">
-                        <!-- Scenarios will be loaded dynamically -->
+                <!-- Saved Scenarios Tab Content -->
+                <div id="saved-scenarios-tab" class="models-tab-content">
+                    <div class="section">
+                        <div class="models-toolbar">
+                            <div class="models-toolbar-left">
+                                <input type="text" id="scenarioSearch" placeholder="Search scenarios..." class="search-input">
+                                <select id="scenarioSort" class="select-input">
+                                    <option value="createdAt-desc">Newest First</option>
+                                    <option value="createdAt-asc">Oldest First</option>
+                                    <option value="name-asc">Name A-Z</option>
+                                    <option value="name-desc">Name Z-A</option>
+                                </select>
+                                <label class="checkbox-label">
+                                    <input type="checkbox" id="showFavoritesOnlyScenarios">
+                                    Favorites Only
+                                </label>
+                            </div>
+                            <div class="models-toolbar-right">
+                                <button class="btn btn-secondary btn-sm" id="addScenarioBtn">
+                                    <i data-lucide="plus"></i>
+                                    Add Scenario
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="models-grid" id="savedScenariosGrid">
+                            <!-- Saved scenarios will be loaded dynamically -->
+                        </div>
+
+                        <div class="pagination" id="scenariosPagination">
+                            <!-- Pagination will be added dynamically -->
+                        </div>
                     </div>
                 </div>
             </div>
@@ -2622,17 +2676,20 @@
                             <i data-lucide="info"></i>
                         </button>
                     </h2>
-                    <div style="display: flex; gap: var(--spacing-sm); align-items: center;">
+                    <div style="display: flex; gap: var(--spacing-sm); align-items: center; flex-wrap: wrap;">
                         <select id="comparableSectorSelect" class="input-field" style="min-width: 200px;">
                             <option value="space">Space Companies</option>
                             <option value="tech">Tech Companies</option>
                             <option value="telecom">Telecom</option>
                             <option value="aerospace">Aerospace & Defense</option>
                         </select>
-                        <button class="btn btn-secondary" id="refreshComparablesBtn" title="Refresh comparable company data">
+                        <button class="btn btn-secondary" id="refreshComparablesBtn" title="Refresh comparable company data from API">
                             <i data-lucide="refresh-cw"></i>
                             Refresh Data
                         </button>
+                        <div id="comparablesTimestamp" style="font-size: 12px; color: var(--text-secondary); padding: var(--spacing-xs) var(--spacing-sm); background: var(--bg-secondary); border-radius: var(--radius);">
+                            <i data-lucide="clock"></i> <span>Loading...</span>
+                        </div>
                     </div>
                 </div>
 
@@ -2731,20 +2788,20 @@
                     <div class="section" style="background: rgba(0, 102, 204, 0.05); border-left: 3px solid var(--primary-color);">
                         <h3><i data-lucide="target"></i> SpaceX Current Valuation</h3>
                         <div class="metrics-grid">
-                            <div class="metric-card-small">
-                                <div class="metric-label-small">Model Valuation</div>
-                                <div class="metric-value-small" id="spacexCurrentValuation">--</div>
-                                <div style="font-size: 11px; color: var(--text-secondary);">From DCF model</div>
+                            <div class="metric-card-small" style="padding: var(--spacing-lg); min-height: 140px;">
+                                <div class="metric-label-small" style="font-size: 14px; font-weight: 600; margin-bottom: var(--spacing-sm);">Model Valuation</div>
+                                <div class="metric-value-small" id="spacexCurrentValuation" style="font-size: 32px; font-weight: 700; line-height: 1.2; margin: var(--spacing-sm) 0;">--</div>
+                                <div style="font-size: 12px; color: var(--text-secondary); margin-top: var(--spacing-xs);">From DCF model</div>
                             </div>
-                            <div class="metric-card-small">
-                                <div class="metric-label-small">Revenue (Est.)</div>
-                                <div class="metric-value-small" id="spacexRevenue">--</div>
-                                <div style="font-size: 11px; color: var(--text-secondary);">Annual revenue</div>
+                            <div class="metric-card-small" style="padding: var(--spacing-lg); min-height: 140px;">
+                                <div class="metric-label-small" style="font-size: 14px; font-weight: 600; margin-bottom: var(--spacing-sm);">Revenue (Est.)</div>
+                                <div class="metric-value-small" id="spacexRevenue" style="font-size: 32px; font-weight: 700; line-height: 1.2; margin: var(--spacing-sm) 0;">--</div>
+                                <div style="font-size: 12px; color: var(--text-secondary); margin-top: var(--spacing-xs);">Annual revenue</div>
                             </div>
-                            <div class="metric-card-small">
-                                <div class="metric-label-small">EBITDA (Est.)</div>
-                                <div class="metric-value-small" id="spacexEbitda">--</div>
-                                <div style="font-size: 11px; color: var(--text-secondary);">Operating profit</div>
+                            <div class="metric-card-small" style="padding: var(--spacing-lg); min-height: 140px;">
+                                <div class="metric-label-small" style="font-size: 14px; font-weight: 600; margin-bottom: var(--spacing-sm);">EBITDA (Est.)</div>
+                                <div class="metric-value-small" id="spacexEbitda" style="font-size: 32px; font-weight: 700; line-height: 1.2; margin: var(--spacing-sm) 0;">--</div>
+                                <div style="font-size: 12px; color: var(--text-secondary); margin-top: var(--spacing-xs);">Operating profit</div>
                             </div>
                         </div>
                     </div>
@@ -2853,26 +2910,34 @@
             <div id="models" class="view">
                 <div class="view-header">
                     <h2>Saved Valuation Models</h2>
-                    <button class="btn btn-primary" id="saveCurrentModelBtn">
-                        <i data-lucide="save"></i>
-                        Save Current Model
-                    </button>
                 </div>
 
                 <!-- Model List -->
                 <div class="section">
                     <div class="models-toolbar">
-                        <input type="text" id="modelSearch" placeholder="Search models..." class="search-input">
-                        <select id="modelSort" class="select-input">
-                            <option value="createdAt-desc">Newest First</option>
-                            <option value="createdAt-asc">Oldest First</option>
-                            <option value="name-asc">Name A-Z</option>
-                            <option value="name-desc">Name Z-A</option>
-                        </select>
-                        <label class="checkbox-label">
-                            <input type="checkbox" id="showFavoritesOnly">
-                            Favorites Only
-                        </label>
+                        <div class="models-toolbar-left">
+                            <input type="text" id="modelSearch" placeholder="Search models..." class="search-input">
+                            <select id="modelSort" class="select-input">
+                                <option value="createdAt-desc">Newest First</option>
+                                <option value="createdAt-asc">Oldest First</option>
+                                <option value="name-asc">Name A-Z</option>
+                                <option value="name-desc">Name Z-A</option>
+                            </select>
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="showFavoritesOnly">
+                                Favorites Only
+                            </label>
+                        </div>
+                        <div class="models-toolbar-right">
+                            <button class="btn btn-secondary btn-sm" id="addModelBtn">
+                                <i data-lucide="plus"></i>
+                                Add Model
+                            </button>
+                            <button class="btn btn-primary btn-sm" id="saveCurrentModelBtn">
+                                <i data-lucide="save"></i>
+                                Save Current Model
+                            </button>
+                        </div>
                     </div>
 
                     <div class="models-grid" id="modelsGrid">
@@ -2884,6 +2949,7 @@
                     </div>
                 </div>
             </div>
+
         </div>
     </main>
 

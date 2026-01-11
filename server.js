@@ -636,12 +636,20 @@ app.get('/api/scenarios/:key', async (req, res) => {
 // Model Schema
 const modelSchema = new mongoose.Schema({
   name: String,
+  description: String,
   inputs: mongoose.Schema.Types.Mixed,
   results: mongoose.Schema.Types.Mixed,
   createdAt: { type: Date, default: Date.now },
   updatedAt: { type: Date, default: Date.now },
-  favorite: { type: Boolean, default: false }
+  favorite: { type: Boolean, default: false },
+  isBaseline: { type: Boolean, default: false }, // Mark as baseline/reference model for reconciliation
+  baselineSource: { type: String }, // 'spreadsheet', 'monte-carlo', etc.
+  type: { type: String, enum: ['model', 'scenario'], default: 'model' }, // 'model' = actual market conditions, 'scenario' = what-if/stress test
+  tags: [String]
 });
+
+// Index for baseline lookup
+modelSchema.index({ isBaseline: 1 });
 
 // TAM Reference Data Schema
 const tamDataSchema = new mongoose.Schema({
@@ -668,6 +676,62 @@ tamDataSchema.index({ 'data.key': 1 });
 
 // Use valuation_models collection (plural) from spacex_valuation database
 const ValuationModel = mongoose.models.ValuationModel || mongoose.model('ValuationModel', modelSchema, 'valuation_models');
+
+// Application State Schema - stores last loaded model, agent position, etc.
+const appStateSchema = new mongoose.Schema({
+  key: { type: String, required: true, unique: true }, // e.g., 'lastModelId', 'agentPosition', etc.
+  value: mongoose.Schema.Types.Mixed, // Can store any value
+  updatedAt: { type: Date, default: Date.now }
+}, {
+  timestamps: true
+});
+
+appStateSchema.index({ key: 1 }); // Index for quick lookups
+
+const AppState = mongoose.models.AppState || mongoose.model('AppState', appStateSchema, 'app_state');
+
+// Application State API endpoints
+app.get('/api/app-state/:key', async (req, res) => {
+  try {
+    const state = await AppState.findOne({ key: req.params.key }).lean();
+    if (!state) {
+      return res.json({ success: true, data: null });
+    }
+    res.json({ success: true, data: state.value });
+  } catch (error) {
+    console.error('Error fetching app state:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.post('/api/app-state/:key', async (req, res) => {
+  try {
+    const { value } = req.body;
+    const state = await AppState.findOneAndUpdate(
+      { key: req.params.key },
+      { value, updatedAt: new Date() },
+      { upsert: true, new: true }
+    );
+    res.json({ success: true, data: state.value });
+  } catch (error) {
+    console.error('Error saving app state:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.get('/api/app-state', async (req, res) => {
+  try {
+    const allStates = await AppState.find({}).lean();
+    const stateMap = {};
+    allStates.forEach(state => {
+      stateMap[state.key] = state.value;
+    });
+    res.json({ success: true, data: stateMap });
+  } catch (error) {
+    console.error('Error fetching all app state:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
 
 // TAM Data model - use tam_reference_data collection
 const TAMData = mongoose.models.TAMData || mongoose.model('TAMData', tamDataSchema, 'tam_reference_data');
@@ -706,6 +770,35 @@ const scenarioSchema = new mongoose.Schema({
 scenarioSchema.index({ key: 1, isActive: 1 });
 scenarioSchema.index({ isDefault: 1 });
 
+// Comparables Data Schema - cache API responses to save API calls
+const comparablesDataSchema = new mongoose.Schema({
+  sector: { type: String, required: true }, // 'space', 'tech', 'telecom', 'aerospace'
+  apiProvider: { type: String, required: true }, // 'alpha-vantage', 'financial-modeling-prep', 'yahoo-finance'
+  data: [{
+    name: String,
+    ticker: String,
+    marketCap: Number,
+    evRevenue: Number,
+    evEbitda: Number,
+    peRatio: Number,
+    pegRatio: Number,
+    revenueGrowth: Number
+  }],
+  fetchedAt: { type: Date, default: Date.now }, // Timestamp when data was fetched
+  expiresAt: { type: Date }, // When this data expires (24 hours from fetch)
+  fetched: Number, // Number of companies fetched
+  total: Number, // Total companies attempted
+  errors: [String] // Any errors from API
+}, {
+  timestamps: true // Adds createdAt and updatedAt
+});
+
+// Index for quick lookups by sector and provider
+comparablesDataSchema.index({ sector: 1, apiProvider: 1 });
+comparablesDataSchema.index({ expiresAt: 1 }); // For cleanup of expired data
+
+const ComparablesData = mongoose.models.ComparablesData || mongoose.model('ComparablesData', comparablesDataSchema, 'comparables_data');
+
 const Scenario = mongoose.models.Scenario || mongoose.model('Scenario', scenarioSchema, 'scenarios');
 
 // Get models
@@ -717,6 +810,15 @@ app.get('/api/models', async (req, res) => {
     const sortOrder = req.query.sortOrder || 'desc';
     const search = req.query.search || '';
     const favoriteOnly = req.query.favoriteOnly === 'true';
+    const isBaseline = req.query.isBaseline === 'true';
+    const type = req.query.type;
+    
+    console.log('📊 API /models request:', { 
+      isBaseline: req.query.isBaseline, 
+      isBaselineBool: isBaseline,
+      type: type,
+      search: search 
+    });
     
     const query = {};
     if (search) {
@@ -725,6 +827,22 @@ app.get('/api/models', async (req, res) => {
     if (favoriteOnly) {
       query.favorite = true;
     }
+    // Filter by baseline FIRST if specified (most restrictive)
+    if (isBaseline) {
+      query.isBaseline = true;
+      query.type = 'model'; // Baseline must be a model
+      console.log('✅ Filtering for baseline model only');
+    } else {
+      // Filter by type if specified
+      if (type) {
+        query.type = type;
+      } else {
+        // Default to 'model' if no type specified (for backward compatibility)
+        query.type = { $in: ['model', null, undefined] };
+      }
+    }
+    
+    console.log('📊 Final query:', JSON.stringify(query, null, 2));
     
     const skip = (page - 1) * limit;
     const sort = { [sortBy]: sortOrder === 'desc' ? -1 : 1 };
@@ -733,6 +851,8 @@ app.get('/api/models', async (req, res) => {
       ValuationModel.find(query).sort(sort).limit(limit).skip(skip).lean(),
       ValuationModel.countDocuments(query)
     ]);
+    
+    console.log(`📊 Returning ${data.length} models:`, data.map(m => m.name));
     
     res.json({
       success: true,
@@ -746,6 +866,29 @@ app.get('/api/models', async (req, res) => {
     });
   } catch (error) {
     console.error('Error fetching models:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// Get baseline model (MUST be before /api/models/:id route)
+app.get('/api/models/baseline', async (req, res) => {
+  try {
+    const baseline = await ValuationModel.findOne({ isBaseline: true }).lean();
+    if (!baseline) {
+      return res.status(404).json({
+        success: false,
+        error: 'No baseline model found'
+      });
+    }
+    res.json({
+      success: true,
+      data: baseline
+    });
+  } catch (error) {
+    console.error('Error fetching baseline model:', error);
     res.status(500).json({
       success: false,
       error: error.message
@@ -2902,11 +3045,24 @@ app.post('/api/scenarios/calculate', async (req, res) => {
 // Model management endpoints
 app.post('/api/models', async (req, res) => {
   try {
-    const model = new ValuationModel({
+    // If marking as baseline, unset other baseline models
+    if (req.body.isBaseline) {
+      await ValuationModel.updateMany(
+        { isBaseline: true },
+        { $set: { isBaseline: false } }
+      );
+      console.log('✅ Unset previous baseline models');
+    }
+    
+    // Set default type to 'model' if not specified
+    const modelData = {
       ...req.body,
+      type: req.body.type || 'model', // Default to 'model' if not specified
       createdAt: new Date(),
       updatedAt: new Date()
-    });
+    };
+    
+    const model = new ValuationModel(modelData);
     const saved = await model.save();
     res.json({
       success: true,
@@ -2921,11 +3077,90 @@ app.post('/api/models', async (req, res) => {
   }
 });
 
+// Compare model to baseline
+app.get('/api/models/:id/compare-baseline', async (req, res) => {
+  try {
+    const model = await ValuationModel.findById(req.params.id).lean();
+    const baseline = await ValuationModel.findOne({ isBaseline: true }).lean();
+    
+    if (!model) {
+      return res.status(404).json({
+        success: false,
+        error: 'Model not found'
+      });
+    }
+    
+    if (!baseline) {
+      return res.status(404).json({
+        success: false,
+        error: 'No baseline model found'
+      });
+    }
+    
+    const baselineBear = baseline.results?.monteCarlo?.bear || baseline.results?.total?.breakdown?.bear;
+    const baselineBase = baseline.results?.monteCarlo?.base || baseline.results?.total?.value;
+    const baselineOptimistic = baseline.results?.monteCarlo?.optimistic || baseline.results?.total?.breakdown?.optimistic;
+    
+    const modelBear = model.results?.monteCarlo?.bear || model.results?.total?.breakdown?.bear;
+    const modelBase = model.results?.monteCarlo?.base || model.results?.total?.value;
+    const modelOptimistic = model.results?.monteCarlo?.optimistic || model.results?.total?.breakdown?.optimistic;
+    
+    const comparison = {
+      baseline: {
+        bear: baselineBear,
+        base: baselineBase,
+        optimistic: baselineOptimistic
+      },
+      model: {
+        bear: modelBear,
+        base: modelBase,
+        optimistic: modelOptimistic
+      },
+      differences: {
+        bear: modelBear && baselineBear ? {
+          absolute: modelBear - baselineBear,
+          percent: ((modelBear - baselineBear) / baselineBear) * 100
+        } : null,
+        base: modelBase && baselineBase ? {
+          absolute: modelBase - baselineBase,
+          percent: ((modelBase - baselineBase) / baselineBase) * 100
+        } : null,
+        optimistic: modelOptimistic && baselineOptimistic ? {
+          absolute: modelOptimistic - baselineOptimistic,
+          percent: ((modelOptimistic - baselineOptimistic) / baselineOptimistic) * 100
+        } : null
+      }
+    };
+    
+    res.json({
+      success: true,
+      data: comparison
+    });
+  } catch (error) {
+    console.error('Error comparing to baseline:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
 app.put('/api/models/:id', async (req, res) => {
   try {
+    const updateData = { ...req.body, updatedAt: new Date() };
+    
+    // Handle simulationCount increment if results.monteCarlo is being updated
+    if (updateData.results && updateData.results.monteCarlo) {
+      // Increment simulationCount when Monte Carlo results are saved
+      const currentModel = await ValuationModel.findById(req.params.id);
+      if (currentModel) {
+        updateData.simulationCount = (currentModel.simulationCount || 0) + 1;
+      }
+    }
+    
     const model = await ValuationModel.findByIdAndUpdate(
       req.params.id,
-      { ...req.body, updatedAt: new Date() },
+      updateData,
       { new: true }
     );
     if (!model) {
@@ -3022,52 +3257,64 @@ async function fetchAlphaVantageData(ticker, apiKey) {
 
 // Helper function to fetch company data from Yahoo Finance
 async function fetchYahooFinanceData(ticker) {
+  const timeout = 10000; // 10 second timeout
+  
   try {
-    // Yahoo Finance doesn't have an official API, but we can use yahoo-finance2 npm package
-    // For now, we'll use a simple fetch to Yahoo Finance's quote endpoint
-    // Note: Yahoo Finance may block requests, so this is a basic implementation
-    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d&range=1d`;
-    const response = await fetch(url);
-    const data = await response.json();
+    // Create timeout promise
+    const timeoutPromise = new Promise((_, reject) => 
+      setTimeout(() => reject(new Error('Yahoo Finance request timeout')), timeout)
+    );
     
-    if (data.chart && data.chart.result && data.chart.result.length > 0) {
-      const result = data.chart.result[0];
-      const meta = result.meta || {};
-      
-      // Get market cap and other data from quote summary
-      const quoteUrl = `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${ticker}?modules=summaryProfile,financialData,defaultKeyStatistics`;
-      const quoteResponse = await fetch(quoteUrl);
-      const quoteData = await quoteResponse.json();
-      
-      let marketCap = null;
-      let peRatio = null;
-      let revenueGrowth = null;
-      
-      if (quoteData.quoteSummary && quoteData.quoteSummary.result && quoteData.quoteSummary.result.length > 0) {
-        const summary = quoteData.quoteSummary.result[0];
-        if (summary.defaultKeyStatistics) {
-          marketCap = summary.defaultKeyStatistics.marketCap?.raw || null;
-          peRatio = summary.defaultKeyStatistics.trailingPE?.raw || null;
-        }
-        if (summary.financialData) {
-          revenueGrowth = summary.financialData.revenueGrowth?.raw || null;
-        }
+    // Yahoo Finance quote summary endpoint
+    const quoteUrl = `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${ticker}?modules=summaryProfile,financialData,defaultKeyStatistics,keyStatistics`;
+    
+    const fetchPromise = fetch(quoteUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'application/json',
+        'Referer': 'https://finance.yahoo.com/'
       }
+    });
+    
+    const response = await Promise.race([fetchPromise, timeoutPromise]);
+    
+    // Yahoo Finance now returns 401 Unauthorized - they've blocked direct API access
+    if (response.status === 401) {
+      throw new Error('Yahoo Finance API requires authentication (401 Unauthorized). Please use Alpha Vantage or Financial Modeling Prep API instead.');
+    }
+    
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
+    
+    const quoteData = await response.json();
+    
+    if (quoteData.quoteSummary && quoteData.quoteSummary.result && quoteData.quoteSummary.result.length > 0) {
+      const summary = quoteData.quoteSummary.result[0];
+      const profile = summary.summaryProfile || {};
+      const keyStats = summary.defaultKeyStatistics || summary.keyStatistics || {};
+      const financial = summary.financialData || {};
       
       return {
-        name: meta.longName || ticker,
-        ticker: meta.symbol || ticker,
-        marketCap: marketCap,
-        evRevenue: null, // Yahoo Finance doesn't provide EV/Revenue directly
-        evEbitda: null, // Yahoo Finance doesn't provide EV/EBITDA directly
-        peRatio: peRatio,
-        pegRatio: null,
-        revenueGrowth: revenueGrowth
+        name: profile.longName || profile.name || ticker,
+        ticker: ticker,
+        marketCap: keyStats.marketCap?.raw || null,
+        evRevenue: keyStats.enterpriseToRevenue?.raw || null,
+        evEbitda: keyStats.enterpriseToEbitda?.raw || null,
+        peRatio: keyStats.trailingPE?.raw || keyStats.forwardPE?.raw || null,
+        pegRatio: keyStats.pegRatio?.raw || null,
+        revenueGrowth: financial.revenueGrowth?.raw || null
       };
     }
-    return null;
+    
+    throw new Error('No data in Yahoo Finance response');
   } catch (error) {
-    console.error(`Error fetching Yahoo Finance data for ${ticker}:`, error.message);
+    // Fail fast - don't hang
+    if (error.message.includes('401') || error.message.includes('Unauthorized')) {
+      console.error(`❌ Yahoo Finance blocked (401): ${ticker} - Use Alpha Vantage or FMP instead`);
+    } else {
+      console.error(`Error fetching Yahoo Finance data for ${ticker}:`, error.message);
+    }
     return null;
   }
 }
@@ -3076,21 +3323,35 @@ async function fetchYahooFinanceData(ticker) {
 async function fetchFinancialModelingPrepData(ticker, apiKey) {
   try {
     // FMP free tier: 250 requests/day
-    const url = `https://financialmodelingprep.com/api/v3/profile/${ticker}?apikey=${apiKey}`;
-    const response = await fetch(url);
-    const data = await response.json();
+    // Fetch multiple endpoints to get complete data
+    const profileUrl = `https://financialmodelingprep.com/api/v3/profile/${ticker}?apikey=${apiKey}`;
+    const keyMetricsUrl = `https://financialmodelingprep.com/api/v3/key-metrics/${ticker}?period=annual&limit=1&apikey=${apiKey}`;
+    const ratiosUrl = `https://financialmodelingprep.com/api/v3/ratios/${ticker}?period=annual&limit=1&apikey=${apiKey}`;
     
-    if (Array.isArray(data) && data.length > 0) {
-      const company = data[0];
+    const [profileRes, keyMetricsRes, ratiosRes] = await Promise.all([
+      fetch(profileUrl),
+      fetch(keyMetricsUrl),
+      fetch(ratiosUrl)
+    ]);
+    
+    const profileData = await profileRes.json();
+    const keyMetricsData = await keyMetricsRes.json();
+    const ratiosData = await ratiosRes.json();
+    
+    if (Array.isArray(profileData) && profileData.length > 0) {
+      const company = profileData[0];
+      const metrics = Array.isArray(keyMetricsData) && keyMetricsData.length > 0 ? keyMetricsData[0] : {};
+      const ratios = Array.isArray(ratiosData) && ratiosData.length > 0 ? ratiosData[0] : {};
+      
       return {
         name: company.companyName || ticker,
         ticker: company.symbol,
         marketCap: company.mktCap ? parseFloat(company.mktCap) : null,
-        evRevenue: null, // FMP profile doesn't include EV/Revenue directly
-        evEbitda: null, // FMP profile doesn't include EV/EBITDA directly
+        evRevenue: ratios.enterpriseValueMultiple ? parseFloat(ratios.enterpriseValueMultiple) : null,
+        evEbitda: ratios.evToEBITDA ? parseFloat(ratios.evToEBITDA) : null,
         peRatio: company.priceEarnings ? parseFloat(company.priceEarnings) : null,
-        pegRatio: null,
-        revenueGrowth: null
+        pegRatio: ratios.priceEarningsToGrowthRatio ? parseFloat(ratios.priceEarningsToGrowthRatio) : null,
+        revenueGrowth: company.revenueGrowth ? parseFloat(company.revenueGrowth) / 100 : null
       };
     }
     return null;
@@ -3103,278 +3364,367 @@ async function fetchFinancialModelingPrepData(ticker, apiKey) {
 app.get('/api/comparables', async (req, res) => {
   try {
     const sector = req.query.sector || 'space';
-    const apiProvider = req.query.apiProvider || 'yahoo-finance'; // Default to Yahoo Finance
+    const requestedApiProvider = req.query.apiProvider || 'yahoo-finance';
     const alphaVantageKey = req.query.alphaVantageKey || '';
     const fmpKey = req.query.fmpKey || '';
+    const forceRefresh = req.query.forceRefresh === 'true'; // Only fetch from API if refresh button clicked
     
-    // Sample comparable companies data (fallback)
-    const comparablesData = {
-      space: [
-        {
-          name: 'SpaceX',
-          ticker: 'SPACEX (Private)',
-          marketCap: 180e9, // $180B estimated valuation
-          evRevenue: 10.5, // Estimated based on ~$17B revenue
-          evEbitda: 25.0, // Estimated - SpaceX is profitable
-          peRatio: null, // Not public
-          pegRatio: null,
-          revenueGrowth: 0.40 // 40% estimated growth
-        },
-        {
-          name: 'Rocket Lab',
-          ticker: 'RKLB',
-          marketCap: 2.1e9, // $2.1B
-          evRevenue: 8.5,
-          evEbitda: null, // Not profitable yet
-          peRatio: null,
-          pegRatio: null,
-          revenueGrowth: 0.35 // 35%
-        },
-        {
-          name: 'Astra Space',
-          ticker: 'ASTR',
-          marketCap: 0.3e9, // $300M
-          evRevenue: 12.0,
-          evEbitda: null,
-          peRatio: null,
-          pegRatio: null,
-          revenueGrowth: 0.20
-        },
-        {
-          name: 'Virgin Galactic',
-          ticker: 'SPCE',
-          marketCap: 0.8e9, // $800M
-          evRevenue: 15.0,
-          evEbitda: null,
-          peRatio: null,
-          pegRatio: null,
-          revenueGrowth: 0.10
-        },
-        {
-          name: 'Planet Labs',
-          ticker: 'PL',
-          marketCap: 0.6e9, // $600M
-          evRevenue: 6.5,
-          evEbitda: null,
-          peRatio: null,
-          pegRatio: null,
-          revenueGrowth: 0.25
+    // Determine which API provider will be used (for database lookup)
+    let apiProviderToUse = requestedApiProvider;
+    if (alphaVantageKey) {
+      apiProviderToUse = 'alpha-vantage'; // Prioritize paid API
+    } else if (fmpKey && requestedApiProvider === 'financial-modeling-prep') {
+      apiProviderToUse = 'financial-modeling-prep';
+    }
+    
+    // Check database first (unless force refresh)
+    if (!forceRefresh) {
+      try {
+        const cachedData = await ComparablesData.findOne({
+          sector: sector,
+          apiProvider: apiProviderToUse,
+          expiresAt: { $gt: new Date() } // Not expired
+        }).sort({ fetchedAt: -1 }); // Get most recent
+        
+        if (cachedData && cachedData.data && cachedData.data.length > 0) {
+          console.log(`✅ Using cached comparables data for ${sector} (${apiProviderToUse})`);
+          console.log(`   Fetched at: ${cachedData.fetchedAt}`);
+          console.log(`   Expires at: ${cachedData.expiresAt}`);
+          console.log(`   Companies: ${cachedData.data.length}`);
+          
+          return res.json({
+            success: true,
+            data: cachedData.data,
+            sector: sector,
+            apiProvider: cachedData.apiProvider,
+            fetched: cachedData.fetched,
+            total: cachedData.total,
+            fetchedAt: cachedData.fetchedAt,
+            expiresAt: cachedData.expiresAt,
+            cached: true,
+            note: `Using cached data from ${cachedData.fetchedAt.toISOString()}. Click Refresh to fetch new data.`
+          });
+        } else {
+          console.log(`⚠️ No valid cached data found for ${sector} (${apiProviderToUse})`);
         }
-      ],
-      tech: [
-        {
-          name: 'Tesla',
-          ticker: 'TSLA',
-          marketCap: 800e9, // $800B
-          evRevenue: 8.2,
-          evEbitda: 35.5,
-          peRatio: 65.0,
-          pegRatio: 1.8,
-          revenueGrowth: 0.25
-        },
-        {
-          name: 'Amazon',
-          ticker: 'AMZN',
-          marketCap: 1500e9, // $1.5T
-          evRevenue: 2.8,
-          evEbitda: 18.5,
-          peRatio: 45.0,
-          pegRatio: 1.2,
-          revenueGrowth: 0.12
-        },
-        {
-          name: 'Alphabet',
-          ticker: 'GOOGL',
-          marketCap: 1600e9, // $1.6T
-          evRevenue: 5.2,
-          evEbitda: 12.5,
-          peRatio: 24.0,
-          pegRatio: 1.0,
-          revenueGrowth: 0.10
-        },
-        {
-          name: 'Microsoft',
-          ticker: 'MSFT',
-          marketCap: 2800e9, // $2.8T
-          evRevenue: 10.5,
-          evEbitda: 20.0,
-          peRatio: 32.0,
-          pegRatio: 1.5,
-          revenueGrowth: 0.15
-        },
-        {
-          name: 'Apple',
-          ticker: 'AAPL',
-          marketCap: 3000e9, // $3T
-          evRevenue: 7.5,
-          evEbitda: 22.0,
-          peRatio: 28.0,
-          pegRatio: 1.3,
-          revenueGrowth: 0.08
-        }
-      ],
-      telecom: [
-        {
-          name: 'Viasat',
-          ticker: 'VSAT',
-          marketCap: 2.5e9, // $2.5B
-          evRevenue: 3.2,
-          evEbitda: 8.5,
-          peRatio: 15.0,
-          pegRatio: 0.9,
-          revenueGrowth: 0.05
-        },
-        {
-          name: 'Eutelsat',
-          ticker: 'ETL.PA',
-          marketCap: 1.8e9, // $1.8B
-          evRevenue: 2.8,
-          evEbitda: 7.2,
-          peRatio: 12.0,
-          pegRatio: 0.8,
-          revenueGrowth: 0.03
-        },
-        {
-          name: 'Telesat',
-          ticker: 'TSAT',
-          marketCap: 0.9e9, // $900M
-          evRevenue: 4.5,
-          evEbitda: 10.0,
-          peRatio: 18.0,
-          pegRatio: 1.1,
-          revenueGrowth: 0.08
-        },
-        {
-          name: 'Iridium',
-          ticker: 'IRDM',
-          marketCap: 4.2e9, // $4.2B
-          evRevenue: 5.5,
-          evEbitda: 12.0,
-          peRatio: 22.0,
-          pegRatio: 1.2,
-          revenueGrowth: 0.12
-        }
-      ],
-      aerospace: [
-        {
-          name: 'Boeing',
-          ticker: 'BA',
-          marketCap: 120e9, // $120B
-          evRevenue: 1.8,
-          evEbitda: 25.0,
-          peRatio: null, // Negative earnings
-          pegRatio: null,
-          revenueGrowth: -0.05
-        },
-        {
-          name: 'Lockheed Martin',
-          ticker: 'LMT',
-          marketCap: 110e9, // $110B
-          evRevenue: 1.5,
-          evEbitda: 12.5,
-          peRatio: 18.0,
-          pegRatio: 1.5,
-          revenueGrowth: 0.04
-        },
-        {
-          name: 'Northrop Grumman',
-          ticker: 'NOC',
-          marketCap: 70e9, // $70B
-          evRevenue: 1.8,
-          evEbitda: 13.0,
-          peRatio: 19.0,
-          pegRatio: 1.6,
-          revenueGrowth: 0.05
-        },
-        {
-          name: 'Raytheon',
-          ticker: 'RTX',
-          marketCap: 140e9, // $140B
-          evRevenue: 2.0,
-          evEbitda: 15.0,
-          peRatio: 20.0,
-          pegRatio: 1.4,
-          revenueGrowth: 0.06
-        },
-        {
-          name: 'General Dynamics',
-          ticker: 'GD',
-          marketCap: 75e9, // $75B
-          evRevenue: 1.6,
-          evEbitda: 11.5,
-          peRatio: 17.0,
-          pegRatio: 1.3,
-          revenueGrowth: 0.03
-        }
-      ]
+      } catch (dbError) {
+        console.error('⚠️ Database lookup error (continuing to API):', dbError.message);
+      }
+    } else {
+      console.log(`🔄 Force refresh requested - fetching from API...`);
+    }
+    
+    // Map of tickers by sector (excluding SpaceX which is private)
+    const tickerMap = {
+      space: ['RKLB', 'ASTR', 'SPCE', 'PL'],
+      tech: ['TSLA', 'AMZN', 'GOOGL', 'MSFT', 'AAPL'],
+      telecom: ['VSAT', 'IRDM', 'TSAT'],
+      aerospace: ['BA', 'LMT', 'NOC', 'RTX', 'GD']
     };
     
-    let companies = comparablesData[sector] || comparablesData.space;
+    const tickers = tickerMap[sector] || [];
     
-    // If API provider is selected and API key is provided, try to fetch real data
-    if (apiProvider !== 'sample-data') {
-      // Map of tickers by sector (excluding SpaceX which is private)
-      const tickerMap = {
-        space: ['RKLB', 'ASTR', 'SPCE', 'PL'],
-        tech: ['TSLA', 'AMZN', 'GOOGL', 'MSFT', 'AAPL'],
-        telecom: ['VSAT', 'IRDM', 'TSAT'],
-        aerospace: ['BA', 'LMT', 'NOC', 'RTX', 'GD']
-      };
-      
-      const tickers = tickerMap[sector] || [];
-      const fetchedCompanies = [];
-      
-      // Fetch data for each ticker
-      for (const ticker of tickers) {
-        let companyData = null;
-        
-        if (apiProvider === 'yahoo-finance') {
-          companyData = await fetchYahooFinanceData(ticker);
-          // Small delay to avoid rate limiting
-          if (tickers.indexOf(ticker) < tickers.length - 1) {
-            await new Promise(resolve => setTimeout(resolve, 500));
-          }
-        } else if (apiProvider === 'alpha-vantage' && alphaVantageKey) {
-          companyData = await fetchAlphaVantageData(ticker, alphaVantageKey);
-          // Rate limit: wait 12 seconds between calls (5 calls/min = 1 call per 12 seconds)
-          if (tickers.indexOf(ticker) < tickers.length - 1) {
-            await new Promise(resolve => setTimeout(resolve, 12000));
-          }
-        } else if (apiProvider === 'financial-modeling-prep' && fmpKey) {
-          companyData = await fetchFinancialModelingPrepData(ticker, fmpKey);
-        }
-        
-        if (companyData) {
-          fetchedCompanies.push(companyData);
-        }
-      }
-      
-      // Merge fetched data with sample data (use fetched if available, otherwise sample)
-      if (fetchedCompanies.length > 0) {
-        companies = companies.map(sampleCompany => {
-          const fetched = fetchedCompanies.find(f => 
-            f.ticker === sampleCompany.ticker || 
-            f.name.toLowerCase().includes(sampleCompany.name.toLowerCase())
-          );
-          return fetched || sampleCompany;
-        });
+    if (tickers.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: `No tickers configured for sector: ${sector}`
+      });
+    }
+    
+    // Try APIs in order until one works
+    // PRIORITY: If Alpha Vantage key is provided, try it FIRST (paid API)
+    const apiProvidersToTry = [];
+    
+    console.log(`🔑 API Keys provided:`, {
+      alphaVantage: alphaVantageKey ? `${alphaVantageKey.substring(0, 8)}...` : 'NOT PROVIDED',
+      fmp: fmpKey ? `${fmpKey.substring(0, 8)}...` : 'NOT PROVIDED',
+      requestedProvider: requestedApiProvider
+    });
+    
+    // If Alpha Vantage key is provided, prioritize it (paid API or free tier)
+    if (alphaVantageKey && alphaVantageKey.trim()) {
+      apiProvidersToTry.push({ name: 'alpha-vantage', key: alphaVantageKey.trim() });
+      console.log('✅ Alpha Vantage API key detected - prioritizing Alpha Vantage');
+    }
+    
+    // Add Financial Modeling Prep if key is provided
+    if (fmpKey && fmpKey.trim()) {
+      if (!apiProvidersToTry.find(p => p.name === 'financial-modeling-prep')) {
+        apiProvidersToTry.push({ name: 'financial-modeling-prep', key: fmpKey.trim() });
       }
     }
     
-    res.json({
-      success: true,
-      data: companies,
-      sector: sector,
-      apiProvider: apiProvider,
-      note: apiProvider === 'sample-data' 
-        ? 'Using sample data. Configure an API provider in Settings to fetch real-time data.'
-        : `Using ${apiProvider} API. Some data may fall back to sample values if API limits are reached.`
+    // Only add requested provider if it's not already in the list
+    if (requestedApiProvider === 'alpha-vantage' && alphaVantageKey && alphaVantageKey.trim()) {
+      // Already added above
+    } else if (requestedApiProvider === 'financial-modeling-prep' && fmpKey && fmpKey.trim()) {
+      // Already added above
+    } else if (requestedApiProvider === 'yahoo-finance') {
+      // Only try Yahoo Finance if NO paid API keys are available (it's blocked anyway)
+      if (!alphaVantageKey && !fmpKey) {
+        apiProvidersToTry.push({ name: 'yahoo-finance', key: null });
+        console.log('⚠️ No API keys provided - trying Yahoo Finance (likely blocked)');
+      } else {
+        console.log('⚠️ Skipping Yahoo Finance - paid API keys available');
+      }
+    }
+    
+    // If no providers added, return error immediately
+    if (apiProvidersToTry.length === 0) {
+      console.log('❌ No API providers configured');
+      return res.status(400).json({
+        success: false,
+        error: 'No API provider configured',
+        message: 'Please configure an API provider in Settings:\n• Alpha Vantage (free tier: 25 requests/day, or premium)\n• Financial Modeling Prep (free tier available)\n\nGet your Alpha Vantage API key (free): https://www.alphavantage.co/support/#api-key',
+        helpUrl: 'https://www.alphavantage.co/support/#api-key'
+      });
+    }
+    
+    console.log(`📡 Fetching REAL data from API for ${tickers.length} companies in ${sector} sector`);
+    console.log(`   Trying APIs in order: ${apiProvidersToTry.map(p => p.name).join(' -> ')}`);
+    
+    let fetchedCompanies = [];
+    let workingProvider = null;
+    const allErrors = [];
+    
+    // Try each API provider until one works
+    for (const provider of apiProvidersToTry) {
+      console.log(`\n🔄 Trying ${provider.name}...`);
+      const errors = [];
+      const companies = [];
+      
+      try {
+        // Add overall timeout for this API provider
+        // Alpha Vantage needs 12 seconds between calls, so for 5 companies: 5 * 12 = 60 seconds max
+        // Other APIs are faster, so use shorter timeout
+        const timeoutMs = provider.name === 'alpha-vantage' 
+          ? (tickers.length * 15 * 1000) // 15 seconds per ticker for Alpha Vantage
+          : (tickers.length * 2 * 1000); // 2 seconds per ticker for others
+        const providerTimeout = new Promise((_, reject) => 
+          setTimeout(() => reject(new Error(`Provider ${provider.name} timed out after ${timeoutMs/1000} seconds`)), timeoutMs)
+        );
+        
+        console.log(`   Timeout set to ${timeoutMs/1000} seconds for ${tickers.length} tickers`);
+        
+        const fetchAllCompanies = async () => {
+          // For Yahoo Finance, try just first ticker to see if it works
+          // If it fails immediately, skip the rest
+          if (provider.name === 'yahoo-finance' && tickers.length > 0) {
+            const testTicker = tickers[0];
+            try {
+              console.log(`   Testing ${testTicker} from Yahoo Finance...`);
+              const testData = await fetchYahooFinanceData(testTicker);
+              if (!testData) {
+                throw new Error('Yahoo Finance returned no data (likely blocked)');
+              }
+              console.log(`   ✅ Yahoo Finance works, fetching all tickers...`);
+            } catch (err) {
+              throw new Error(`Yahoo Finance blocked: ${err.message}`);
+            }
+          }
+          
+          for (const ticker of tickers) {
+            let companyData = null;
+            
+            try {
+              if (provider.name === 'yahoo-finance') {
+                console.log(`   Fetching ${ticker}...`);
+                const startTime = Date.now();
+                companyData = await fetchYahooFinanceData(ticker);
+                const duration = Date.now() - startTime;
+                console.log(`   ${ticker}: ${companyData ? '✅ Got data' : '❌ No data'} (${duration}ms)`);
+                // Small delay to avoid rate limiting
+                if (tickers.indexOf(ticker) < tickers.length - 1) {
+                  await new Promise(resolve => setTimeout(resolve, 500));
+                }
+              } else if (provider.name === 'alpha-vantage' && provider.key) {
+                console.log(`   Fetching ${ticker} from Alpha Vantage...`);
+                try {
+                  companyData = await fetchAlphaVantageData(ticker, provider.key);
+                  if (companyData) {
+                    console.log(`   ${ticker}: ✅ Got data - ${companyData.name || ticker}`);
+                  } else {
+                    console.log(`   ${ticker}: ⚠️ No data returned (may be rate limited)`);
+                  }
+                } catch (avError) {
+                  console.log(`   ${ticker}: ❌ Error - ${avError.message}`);
+                  errors.push(`${ticker}: ${avError.message}`);
+                }
+                // Rate limit: Alpha Vantage free tier allows 5 calls per minute
+                // Wait 12 seconds between calls to stay within limits
+                if (tickers.indexOf(ticker) < tickers.length - 1) {
+                  console.log(`   ⏳ Waiting 12 seconds before next call (Alpha Vantage rate limit)...`);
+                  await new Promise(resolve => setTimeout(resolve, 12000));
+                }
+              } else if (provider.name === 'financial-modeling-prep' && provider.key) {
+                console.log(`   Fetching ${ticker}...`);
+                companyData = await fetchFinancialModelingPrepData(ticker, provider.key);
+                console.log(`   ${ticker}: ${companyData ? '✅ Got data' : '❌ No data'}`);
+                // Small delay for FMP
+                if (tickers.indexOf(ticker) < tickers.length - 1) {
+                  await new Promise(resolve => setTimeout(resolve, 500));
+                }
+              } else {
+                errors.push(`${ticker}: API key missing for ${provider.name}`);
+                continue;
+              }
+              
+              // Only add if companyData has valid values
+              if (companyData && companyData.ticker && (companyData.marketCap || companyData.evRevenue || companyData.evEbitda || companyData.peRatio)) {
+                companies.push(companyData);
+                console.log(`   ✅ ${ticker}: ${companyData.name} - Market Cap: ${companyData.marketCap ? `$${(companyData.marketCap / 1e9).toFixed(2)}B` : 'N/A'}`);
+              } else {
+                errors.push(`${ticker}: No valid data returned`);
+              }
+            } catch (err) {
+              errors.push(`${ticker}: ${err.message}`);
+              console.log(`   ⚠️ ${ticker}: ${err.message}`);
+              // If Yahoo Finance fails on first ticker, break early
+              if (provider.name === 'yahoo-finance' && tickers.indexOf(ticker) === 0 && err.message.includes('401')) {
+                throw new Error('Yahoo Finance blocked (401)');
+              }
+            }
+          }
+        };
+        
+        await Promise.race([fetchAllCompanies(), providerTimeout]);
+        
+        // If we got at least 1 company, consider this API working (for paid API, even 1 is valuable)
+        // For free APIs, require at least 2
+        const minCompanies = provider.name === 'alpha-vantage' ? 1 : 2;
+        
+        if (companies.length >= minCompanies) {
+          fetchedCompanies = companies;
+          workingProvider = provider.name;
+          console.log(`\n✅ ${provider.name} WORKED! Got ${companies.length} companies`);
+          break;
+        } else {
+          console.log(`\n⚠️ ${provider.name} only returned ${companies.length} companies (need ${minCompanies}), trying next API...`);
+          allErrors.push(`${provider.name}: Only ${companies.length}/${tickers.length} companies loaded (need ${minCompanies})`);
+        }
+      } catch (err) {
+        console.log(`\n❌ ${provider.name} failed: ${err.message}`);
+        allErrors.push(`${provider.name}: ${err.message}`);
+      }
+    }
+    
+    // If we got data, save to database and return it
+    if (fetchedCompanies.length > 0) {
+      console.log(`\n✅ SUCCESS! Using ${workingProvider} - ${fetchedCompanies.length} companies loaded`);
+      
+      // Save to database with timestamp
+      try {
+        const fetchedAt = new Date();
+        const expiresAt = new Date(fetchedAt.getTime() + 24 * 60 * 60 * 1000); // 24 hours from now
+        
+        // Remove old cached data for this sector/provider
+        await ComparablesData.deleteMany({
+          sector: sector,
+          apiProvider: workingProvider
+        });
+        
+        // Save new data
+        await ComparablesData.create({
+          sector: sector,
+          apiProvider: workingProvider,
+          data: fetchedCompanies,
+          fetchedAt: fetchedAt,
+          expiresAt: expiresAt,
+          fetched: fetchedCompanies.length,
+          total: tickers.length,
+          errors: allErrors.length > 0 ? allErrors : []
+        });
+        
+        console.log(`💾 Saved ${fetchedCompanies.length} companies to database`);
+        console.log(`   Fetched at: ${fetchedAt.toISOString()}`);
+        console.log(`   Expires at: ${expiresAt.toISOString()}`);
+      } catch (dbError) {
+        console.error('⚠️ Failed to save to database (data still returned):', dbError.message);
+      }
+      
+      return res.json({
+        success: true,
+        data: fetchedCompanies,
+        sector: sector,
+        apiProvider: workingProvider,
+        fetched: fetchedCompanies.length,
+        total: tickers.length,
+        fetchedAt: new Date().toISOString(),
+        errors: allErrors.length > 0 ? allErrors : undefined,
+        cached: false,
+        note: `Fetched ${fetchedCompanies.length} companies using ${workingProvider} API${allErrors.length > 0 ? `. Some APIs failed: ${allErrors.join('; ')}` : ''}`
+      });
+    }
+    
+    // All APIs failed - check for cached data before returning error
+    console.log(`\n❌ ALL APIs FAILED - checking for cached data...`);
+    
+    try {
+      // First try non-expired cache
+      let cachedData = await ComparablesData.findOne({
+        sector: sector,
+        apiProvider: { $in: ['alpha-vantage', 'financial-modeling-prep', 'yahoo-finance'] },
+        expiresAt: { $gt: new Date() } // Not expired
+      }).sort({ fetchedAt: -1 });
+      
+      // If no non-expired cache, try expired cache as last resort
+      if (!cachedData || !cachedData.data || cachedData.data.length === 0) {
+        console.log(`⚠️ No non-expired cache found, checking expired cache...`);
+        cachedData = await ComparablesData.findOne({
+          sector: sector,
+          apiProvider: { $in: ['alpha-vantage', 'financial-modeling-prep', 'yahoo-finance'] }
+        }).sort({ fetchedAt: -1 }); // Get most recent, even if expired
+      }
+      
+      if (cachedData && cachedData.data && cachedData.data.length > 0) {
+        const isExpired = cachedData.expiresAt && cachedData.expiresAt < new Date();
+        console.log(`✅ Found cached comparables data (${cachedData.apiProvider})${isExpired ? ' [EXPIRED]' : ''} - using as fallback`);
+        console.log(`   Fetched at: ${cachedData.fetchedAt}`);
+        console.log(`   Expires at: ${cachedData.expiresAt}`);
+        console.log(`   Companies: ${cachedData.data.length}`);
+        
+        return res.json({
+          success: true,
+          data: cachedData.data,
+          sector: sector,
+          apiProvider: cachedData.apiProvider,
+          fetched: cachedData.fetched,
+          total: cachedData.total,
+          fetchedAt: cachedData.fetchedAt,
+          expiresAt: cachedData.expiresAt,
+          cached: true,
+          expired: isExpired,
+          note: `Using ${isExpired ? 'expired ' : ''}cached data from ${cachedData.fetchedAt.toISOString()} (APIs failed). Click Refresh to try fetching new data.`
+        });
+      } else {
+        console.log(`⚠️ No cached data found in database`);
+      }
+    } catch (cacheError) {
+      console.error('⚠️ Error checking cache:', cacheError.message);
+    }
+    
+    // No cached data available - return helpful error (not 500, use 400 for client configuration issues)
+    const hasApiKeys = alphaVantageKey || fmpKey;
+    const statusCode = hasApiKeys ? 500 : 400; // 400 if no keys configured, 500 if keys failed
+    
+    return res.status(statusCode).json({
+      success: false,
+      error: hasApiKeys 
+        ? `Failed to fetch data from any API. Tried: ${apiProvidersToTry.map(p => p.name).join(', ')}`
+        : 'No API provider configured',
+      errors: allErrors,
+      triedProviders: apiProvidersToTry.map(p => p.name),
+      message: hasApiKeys
+        ? 'API calls failed. Please check your API keys in Settings and try again.'
+        : 'Please configure an API provider in Settings:\n• Alpha Vantage (free tier: 25 requests/day)\n• Financial Modeling Prep (free tier available)\n\nGet your Alpha Vantage API key (free): https://www.alphavantage.co/support/#api-key',
+      helpUrl: 'https://www.alphavantage.co/support/#api-key',
+      needsConfiguration: !hasApiKeys
     });
   } catch (error) {
-    console.error('Error fetching comparables:', error);
+    console.error('Error in /api/comparables:', error);
     res.status(500).json({
       success: false,
-      error: error.message
+      error: error.message || 'Failed to fetch comparables data'
     });
   }
 });

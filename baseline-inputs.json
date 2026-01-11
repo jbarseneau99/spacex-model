@@ -1,0 +1,36 @@
+{
+  "earth": {
+    "starlinkPenetration": 0.15,
+    "bandwidthPriceDecline": 0.1,
+    "launchVolume": 100,
+    "launchPriceDecline": 0.05,
+    "starshipReusabilityYear": 2026,
+    "starshipCommercialViabilityYear": 2025,
+    "starshipPayloadCapacity": 75000,
+    "maxRocketProductionIncrease": 0.25,
+    "wrightsLawTurnaroundTime": 0.05,
+    "wrightsLawLaunchCost": 0.05,
+    "wrightsLawSatelliteGBPS": 0.07,
+    "realizedBandwidthTAMMultiplier": 0.5,
+    "starshipLaunchesForStarlink": 0.9,
+    "nonStarlinkLaunchMarketGrowth": 0.01,
+    "irrThresholdEarthToMars": 0,
+    "cashBufferPercent": 0.1
+  },
+  "mars": {
+    "firstColonyYear": 2030,
+    "transportCostDecline": 0.2,
+    "populationGrowth": 0.15,
+    "industrialBootstrap": true,
+    "optimusCost2026": 50000,
+    "optimusAnnualCostDecline": 0.05,
+    "optimusProductivityMultiplier": 0.25,
+    "optimusLearningRate": 0.05,
+    "marsPayloadOptimusVsTooling": 0.01
+  },
+  "financial": {
+    "discountRate": 0.12,
+    "dilutionFactor": 0.15,
+    "terminalGrowth": 0.03
+  }
+}
