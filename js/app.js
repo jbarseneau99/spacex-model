@@ -27,7 +27,9 @@ class ValuationApp {
         this.autoRunningAttribution = false; // Flag to track Attribution auto-runs
         this.attributionDebounceTimer = null; // Debounce timer for Attribution input changes
         this.currentComparablesData = null; // Store current comparables data for charts
-        this.aiModel = localStorage.getItem('aiModel') || 'claude-opus-4-1-20250805'; // Default AI model
+        // Prefer Grok for X feed access, fallback to Claude
+        const savedModel = localStorage.getItem('aiModel');
+        this.aiModel = savedModel || 'grok:grok-3'; // Default to Grok-3 (latest with X feed access)
         this.financialApiProvider = localStorage.getItem('financialApiProvider') || 'yahoo-finance'; // Default financial API
         this.alphaVantageApiKey = localStorage.getItem('alphaVantageApiKey') || '';
         this.financialModelingPrepApiKey = localStorage.getItem('financialModelingPrepApiKey') || '';
@@ -2418,8 +2420,10 @@ class ValuationApp {
         const insightsModelEl = document.getElementById('insightsCurrentModel');
         if (insightsModelEl) insightsModelEl.textContent = modelName;
         
-        // Generate text-based insights (no charts)
-        this.generateKeyInsights(data, this.getInputs());
+        // Generate enhanced tile-based insights with Grok, web search, and RAG
+        await this.generateEnhancedInsightTiles(data, this.getInputs());
+        
+        // Also generate traditional insights for other tabs
         this.generateValueDrivers(data, this.getInputs());
         this.generateRiskAssessment(data, this.getInputs());
     }
@@ -2495,9 +2499,18 @@ class ValuationApp {
         console.log('Charts view updated. Active tab:', activeTab, 'Has earth data:', !!data.earth);
     }
 
-    generateKeyInsights(data, inputs) {
+    async generateEnhancedInsightTiles(data, inputs) {
         const container = document.getElementById('keyInsightsContent');
         if (!container) return;
+
+        // Show loading state
+        container.innerHTML = `
+            <div style="grid-column: 1 / -1; text-align: center; padding: var(--spacing-xl);">
+                <i data-lucide="loader" class="spinning" style="width: 32px; height: 32px; margin: 0 auto 16px; display: block;"></i>
+                <p style="color: var(--text-secondary);">Generating enhanced insights with Grok AI, X feeds, and RAG...</p>
+            </div>
+        `;
+        if (window.lucide) window.lucide.createIcons();
 
         const totalValue = data.total?.value || 0;
         const earthValue = data.earth?.adjustedValue || 0;
@@ -2510,98 +2523,274 @@ class ValuationApp {
             return `$${value.toFixed(1)}B`;
         };
 
-        const insights = [];
-
-        // Valuation insight
-        if (totalValue >= 2000) {
-            insights.push({
+        // Define insight tiles to generate
+        const insightTiles = [
+            {
+                id: 'total-valuation',
                 icon: 'zap',
-                title: 'Trillion-Dollar Valuation',
-                content: `This model projects a ${formatBillion(totalValue)} enterprise value, positioning SpaceX among the world's most valuable companies.`,
-                color: '#0066cc'
-            });
-        }
-
-        // Earth vs Mars balance
-        if (earthPercent > 80) {
-            insights.push({
+                title: 'Total Enterprise Value',
+                value: formatBillion(totalValue),
+                insightType: 'valuation',
+                color: '#0066cc',
+                data: { totalValue, earthValue, marsValue }
+            },
+            {
+                id: 'earth-operations',
                 icon: 'globe',
-                title: 'Earth-Dominant Value',
-                content: `${earthPercent.toFixed(0)}% of value comes from Earth operations (Starlink + Launch), indicating strong near-term cash generation.`,
-                color: '#10b981'
-            });
-        } else if (marsPercent > 30) {
-            insights.push({
+                title: 'Earth Operations',
+                value: `${earthPercent.toFixed(1)}%`,
+                subtitle: formatBillion(earthValue),
+                insightType: 'starlink-earth',
+                color: '#10b981',
+                data: { earthValue, earthPercent }
+            },
+            {
+                id: 'mars-operations',
                 icon: 'rocket',
-                title: 'Mars Optionality Significant',
-                content: `Mars operations represent ${marsPercent.toFixed(0)}% of total value, showing meaningful long-term optionality.`,
-                color: '#f59e0b'
-            });
-        }
-
-        // Starlink penetration insight
-        const penetration = inputs.earth?.starlinkPenetration || 0;
-        if (penetration > 0.20) {
-            insights.push({
+                title: 'Mars Operations',
+                value: `${marsPercent.toFixed(1)}%`,
+                subtitle: formatBillion(marsValue),
+                insightType: 'mars',
+                color: '#f59e0b',
+                data: { marsValue, marsPercent }
+            },
+            {
+                id: 'starlink-penetration',
                 icon: 'trending-up',
-                title: 'Aggressive Penetration',
-                content: `${(penetration * 100).toFixed(1)}% Starlink penetration suggests ambitious market capture assumptions.`,
-                color: '#10b981'
-            });
-        } else if (penetration < 0.10) {
-            insights.push({
-                icon: 'alert-circle',
-                title: 'Conservative Penetration',
-                content: `${(penetration * 100).toFixed(1)}% penetration reflects conservative market assumptions.`,
-                color: '#f59e0b'
-            });
-        }
-
-        // Mars timing insight
-        const firstColonyYear = inputs.mars?.firstColonyYear || 2030;
-        const currentYear = new Date().getFullYear();
-        const yearsToColony = firstColonyYear - currentYear;
-        if (yearsToColony <= 5) {
-            insights.push({
-                icon: 'calendar',
-                title: 'Aggressive Mars Timeline',
-                content: `First colony targeted for ${firstColonyYear} (${yearsToColony} years) - an ambitious timeline requiring rapid Starship development.`,
-                color: '#f59e0b'
-            });
-        }
-
-        // Discount rate insight
-        const discountRate = inputs.financial?.discountRate || 0.12;
-        if (discountRate < 0.10) {
-            insights.push({
+                title: 'Starlink Penetration',
+                value: `${((inputs?.earth?.starlinkPenetration || 0) * 100).toFixed(1)}%`,
+                insightType: 'starlink-earth',
+                color: '#10b981',
+                data: { penetration: inputs?.earth?.starlinkPenetration || 0 }
+            },
+            {
+                id: 'launch-volume',
+                icon: 'rocket',
+                title: 'Launch Volume',
+                value: `${inputs?.earth?.launchVolume || 0}/year`,
+                insightType: 'launch',
+                color: '#0066cc',
+                data: { launchVolume: inputs?.earth?.launchVolume || 0 }
+            },
+            {
+                id: 'discount-rate',
                 icon: 'percent',
-                title: 'Low Discount Rate',
-                content: `${(discountRate * 100).toFixed(1)}% discount rate suggests high confidence in execution and low perceived risk.`,
-                color: '#10b981'
-            });
-        } else if (discountRate > 0.15) {
-            insights.push({
-                icon: 'percent',
-                title: 'High Discount Rate',
-                content: `${(discountRate * 100).toFixed(1)}% discount rate reflects higher risk assumptions or uncertainty.`,
-                color: '#ef4444'
-            });
+                title: 'Discount Rate',
+                value: `${((inputs?.financial?.discountRate || 0.12) * 100).toFixed(1)}%`,
+                insightType: 'risk',
+                color: inputs?.financial?.discountRate < 0.10 ? '#10b981' : inputs?.financial?.discountRate > 0.15 ? '#ef4444' : '#f59e0b',
+                data: { discountRate: inputs?.financial?.discountRate || 0.12 }
+            }
+        ];
+
+        // Generate tiles with AI insights
+        const tilesHTML = [];
+        
+        for (const tile of insightTiles) {
+            try {
+                // Fetch enhanced insight from API
+                const response = await fetch('/api/insights/enhanced', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-AI-Model': this.getAIModel()
+                    },
+                    body: JSON.stringify({
+                        data: { ...data, ...tile.data },
+                        inputs,
+                        insightType: tile.insightType
+                    })
+                });
+
+                const result = await response.json();
+                const insightData = result.success ? result.data : null;
+
+                // Render tile with AI overlay
+                tilesHTML.push(this.renderInsightTile(tile, insightData));
+            } catch (error) {
+                console.error(`Error generating insight for ${tile.id}:`, error);
+                // Render tile without AI overlay if API fails
+                tilesHTML.push(this.renderInsightTile(tile, null));
+            }
         }
 
-        // Render insights
-        container.innerHTML = insights.map(insight => `
-            <div class="insight-card" style="border-left: 3px solid ${insight.color}; padding: var(--spacing-md); background: var(--surface); border-radius: var(--radius);">
-                <div style="display: flex; align-items: start; gap: var(--spacing-sm);">
-                    <i data-lucide="${insight.icon}" style="width: 20px; height: 20px; color: ${insight.color}; flex-shrink: 0; margin-top: 2px;"></i>
-                    <div style="flex: 1;">
-                        <h4 style="margin: 0 0 8px 0; font-size: 14px; font-weight: 600; color: var(--text-primary);">${insight.title}</h4>
-                        <p style="margin: 0; font-size: 13px; color: var(--text-secondary); line-height: 1.5;">${insight.content}</p>
-                    </div>
-                </div>
+        // Update container with tiles
+        container.innerHTML = `
+            <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: var(--spacing-md);">
+                ${tilesHTML.join('')}
             </div>
-        `).join('');
+        `;
 
         if (window.lucide) window.lucide.createIcons();
+    }
+
+    renderInsightTile(tile, aiData) {
+        const hasAI = aiData && aiData.insight;
+        // Normalize xFeeds - handle both array of strings and array of objects
+        const xFeeds = (aiData?.xFeeds || []).map(feed => {
+            if (typeof feed === 'object' && feed !== null) {
+                return feed;
+            }
+            // If string, try to detect key accounts
+            const accountMatch = typeof feed === 'string' ? feed.match(/@(\w+)/) : null;
+            const account = accountMatch ? accountMatch[0] : '@unknown';
+            const isKeyAccount = account === '@elonmusk' || account === '@CathieDWood' || 
+                               (typeof feed === 'string' && (feed.toLowerCase().includes('cathie') || feed.toLowerCase().includes('wood')));
+            
+            return {
+                account: account,
+                content: feed,
+                isKeyAccount: isKeyAccount,
+                accountName: account === '@elonmusk' ? 'Elon Musk' : 
+                            account === '@CathieDWood' ? 'Cathie Wood' : 
+                            account.replace('@', '')
+            };
+        });
+        const risks = aiData?.risks || [];
+        const opportunities = aiData?.opportunities || [];
+
+        return `
+            <div class="insight-tile" style="
+                background: var(--surface);
+                border-radius: var(--radius);
+                border: 1px solid var(--border-color);
+                padding: var(--spacing-md);
+                position: relative;
+                transition: all 0.2s;
+                cursor: pointer;
+            " onmouseover="this.style.boxShadow='0 4px 12px rgba(0,0,0,0.15)'" onmouseout="this.style.boxShadow='none'">
+                <!-- Data Display -->
+                <div style="display: flex; align-items: start; gap: var(--spacing-sm); margin-bottom: var(--spacing-md);">
+                    <div style="
+                        width: 48px;
+                        height: 48px;
+                        border-radius: 8px;
+                        background: ${tile.color}20;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        flex-shrink: 0;
+                    ">
+                        <i data-lucide="${tile.icon}" style="width: 24px; height: 24px; color: ${tile.color};"></i>
+                    </div>
+                    <div style="flex: 1;">
+                        <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 4px;">${tile.title}</div>
+                        <div style="font-size: 24px; font-weight: 700; color: var(--text-primary); line-height: 1.2;">
+                            ${tile.value}
+                            ${tile.subtitle ? `<div style="font-size: 14px; font-weight: 400; color: var(--text-secondary); margin-top: 2px;">${tile.subtitle}</div>` : ''}
+                        </div>
+                    </div>
+                </div>
+
+                <!-- AI Insight Overlay -->
+                ${hasAI ? `
+                    <div style="
+                        margin-top: var(--spacing-md);
+                        padding-top: var(--spacing-md);
+                        border-top: 1px solid var(--border-color);
+                    ">
+                        <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 8px;">
+                            <i data-lucide="sparkles" style="width: 16px; height: 16px; color: ${tile.color};"></i>
+                            <span style="font-size: 12px; font-weight: 600; color: var(--text-primary);">AI Insight</span>
+                        </div>
+                        <p style="font-size: 13px; color: var(--text-secondary); line-height: 1.5; margin: 0 0 12px 0;">
+                            ${aiData.insight}
+                        </p>
+
+                        ${xFeeds.length > 0 ? `
+                            <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border-color);">
+                                <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 8px;">
+                                    <i data-lucide="twitter" style="width: 16px; height: 16px; color: #1DA1F2;"></i>
+                                    <span style="font-size: 12px; font-weight: 600; color: var(--text-primary);">X Feed Context</span>
+                                </div>
+                                <ul style="margin: 0; padding-left: 20px; font-size: 12px; color: var(--text-secondary); line-height: 1.6;">
+                                    ${xFeeds.map(feed => {
+                                        // Handle both object format and string format
+                                        const feedObj = typeof feed === 'object' && feed !== null ? feed : {
+                                            account: feed.match(/@(\w+)/)?.[0] || '@unknown',
+                                            content: feed,
+                                            isKeyAccount: feed.includes('@elonmusk') || feed.includes('@CathieDWood') || feed.toLowerCase().includes('cathie') || feed.toLowerCase().includes('wood'),
+                                            accountName: feed.includes('@elonmusk') ? 'Elon Musk' : feed.includes('@CathieDWood') ? 'Cathie Wood' : feed.match(/@(\w+)/)?.[1] || 'Unknown'
+                                        };
+                                        
+                                        const accountColor = feedObj.isKeyAccount ? '#0066cc' : '#666666';
+                                        const accountBg = feedObj.isKeyAccount ? 'rgba(0, 102, 204, 0.1)' : 'transparent';
+                                        const accountBorder = feedObj.isKeyAccount ? '1px solid rgba(0, 102, 204, 0.3)' : 'none';
+                                        const badgeIcon = feedObj.account === '@elonmusk' ? 'zap' : feedObj.account === '@CathieDWood' ? 'trending-up' : 'user';
+                                        
+                                        return `
+                                            <li style="margin-bottom: 8px; padding: 8px; background: ${accountBg}; border-left: ${accountBorder}; border-radius: 4px;">
+                                                ${feedObj.isKeyAccount ? `
+                                                    <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 4px;">
+                                                        <i data-lucide="${badgeIcon}" style="width: 14px; height: 14px; color: ${accountColor};"></i>
+                                                        <span style="font-weight: 600; color: ${accountColor}; font-size: 11px;">
+                                                            ${feedObj.accountName || feedObj.account}
+                                                        </span>
+                                                        <span style="font-size: 10px; color: var(--text-secondary); background: rgba(0, 102, 204, 0.15); padding: 2px 6px; border-radius: 3px; font-weight: 500;">
+                                                            KEY ACCOUNT
+                                                        </span>
+                                                    </div>
+                                                ` : `
+                                                    <div style="display: flex; align-items: center; gap: 4px; margin-bottom: 4px;">
+                                                        <span style="font-weight: 500; color: ${accountColor}; font-size: 11px;">
+                                                            ${feedObj.account}
+                                                        </span>
+                                                    </div>
+                                                `}
+                                                <div style="color: var(--text-secondary); line-height: 1.5; margin-left: ${feedObj.isKeyAccount ? '20px' : '0'};">
+                                                    ${feedObj.content || feed}
+                                                </div>
+                                            </li>
+                                        `;
+                                    }).join('')}
+                                </ul>
+                            </div>
+                        ` : ''}
+
+                        ${risks.length > 0 ? `
+                            <div style="margin-top: 12px;">
+                                <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 8px;">
+                                    <i data-lucide="alert-triangle" style="width: 16px; height: 16px; color: #ef4444;"></i>
+                                    <span style="font-size: 12px; font-weight: 600; color: var(--text-primary);">Risks</span>
+                                </div>
+                                <ul style="margin: 0; padding-left: 20px; font-size: 12px; color: #ef4444; line-height: 1.6;">
+                                    ${risks.map(risk => `<li style="margin-bottom: 4px;">${risk}</li>`).join('')}
+                                </ul>
+                            </div>
+                        ` : ''}
+
+                        ${opportunities.length > 0 ? `
+                            <div style="margin-top: 12px;">
+                                <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 8px;">
+                                    <i data-lucide="trending-up" style="width: 16px; height: 16px; color: #10b981;"></i>
+                                    <span style="font-size: 12px; font-weight: 600; color: var(--text-primary);">Opportunities</span>
+                                </div>
+                                <ul style="margin: 0; padding-left: 20px; font-size: 12px; color: #10b981; line-height: 1.6;">
+                                    ${opportunities.map(opp => `<li style="margin-bottom: 4px;">${opp}</li>`).join('')}
+                                </ul>
+                            </div>
+                        ` : ''}
+                    </div>
+                ` : `
+                    <div style="
+                        margin-top: var(--spacing-md);
+                        padding-top: var(--spacing-md);
+                        border-top: 1px solid var(--border-color);
+                        text-align: center;
+                        font-size: 12px;
+                        color: var(--text-secondary);
+                    ">
+                        <i data-lucide="loader" class="spinning" style="width: 16px; height: 16px; display: inline-block; margin-right: 6px;"></i>
+                        Generating AI insights...
+                    </div>
+                `}
+            </div>
+        `;
+    }
+
+    generateKeyInsights(data, inputs) {
+        // Legacy function kept for compatibility - now calls enhanced version
+        this.generateEnhancedInsightTiles(data, inputs);
     }
 
     generateValueDrivers(data, inputs) {
@@ -10498,8 +10687,9 @@ class ValuationApp {
                 'openai:gpt-4-turbo': 'GPT-4 Turbo',
                 'openai:gpt-4': 'GPT-4',
                 'openai:gpt-3.5-turbo': 'GPT-3.5 Turbo',
-                'grok:grok-2': 'Grok-2',
-                'grok:grok-beta': 'Grok Beta'
+                'grok:grok-3': 'Grok-3',
+                'grok:grok-2': 'Grok-2 (Deprecated)',
+                'grok:grok-beta': 'Grok Beta (Deprecated)'
             };
             currentDisplay.textContent = modelNames[this.aiModel] || this.aiModel;
         }

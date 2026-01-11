@@ -3892,6 +3892,237 @@ app.post('/api/insights/bandwidth-economics', (req, res) => {
   }
 });
 
+// Enhanced insights endpoint with Grok, web search, and X feed access
+app.post('/api/insights/enhanced', async (req, res) => {
+  try {
+    const { data, inputs, insightType } = req.body;
+    // Use grok-3 as default (grok-beta and grok-2 were deprecated)
+    let requestedModel = req.headers['x-ai-model'] || 'grok:grok-3';
+    
+    // Map deprecated models to grok-3
+    if (requestedModel === 'grok:grok-2' || requestedModel === 'grok:grok-beta') {
+      requestedModel = 'grok:grok-3';
+    }
+    
+    // Extract key metrics from data
+    const totalValue = data?.total?.value || 0;
+    const earthValue = data?.earth?.adjustedValue || 0;
+    const marsValue = data?.mars?.adjustedValue || 0;
+    const earthPercent = totalValue > 0 ? (earthValue / totalValue) * 100 : 0;
+    const marsPercent = totalValue > 0 ? (marsValue / totalValue) * 100 : 0;
+    
+    // Build context for RAG from documentation
+    const ragContext = await getRAGContext(insightType, data, inputs);
+    
+    // Create prompt for Grok with X feed access
+    const prompt = `You are analyzing SpaceX valuation data. Use your access to X (Twitter) feeds to provide real-time insights.
+
+Valuation Data:
+- Total Enterprise Value: $${(totalValue / 1000).toFixed(1)}T
+- Earth Operations Value: $${(earthValue / 1000).toFixed(1)}T (${earthPercent.toFixed(1)}%)
+- Mars Operations Value: $${(marsValue / 1000).toFixed(1)}T (${marsPercent.toFixed(1)}%)
+
+Key Inputs:
+- Starlink Penetration: ${((inputs?.earth?.starlinkPenetration || 0) * 100).toFixed(1)}%
+- Launch Volume: ${inputs?.earth?.launchVolume || 0}/year
+- Discount Rate: ${((inputs?.financial?.discountRate || 0.12) * 100).toFixed(1)}%
+- First Colony Year: ${inputs?.mars?.firstColonyYear || 2030}
+
+Relevant Context from Documentation:
+${ragContext}
+
+Please provide:
+1. A concise insight about this data point (2-3 sentences)
+2. Real-time context from X feeds about SpaceX, Starlink, or related topics
+   - PRIORITIZE and HIGHLIGHT posts from key accounts: @elonmusk (SpaceX CEO), @CathieDWood (ARK Invest CEO), and other influential SpaceX investors/analysts
+   - Include the account handle and indicate if it's from a key account
+3. Market sentiment or recent developments that might affect this valuation
+4. Any risks or opportunities highlighted by current discussions
+
+Format your response as JSON with:
+{
+  "insight": "main insight text",
+  "xFeeds": [
+    {
+      "account": "@elonmusk",
+      "content": "tweet content",
+      "isKeyAccount": true,
+      "accountName": "Elon Musk"
+    },
+    {
+      "account": "@CathieDWood",
+      "content": "tweet content",
+      "isKeyAccount": true,
+      "accountName": "Cathie Wood"
+    },
+    {
+      "account": "@username",
+      "content": "tweet content",
+      "isKeyAccount": false,
+      "accountName": "Account Name"
+    }
+  ],
+  "marketContext": "broader market context",
+  "risks": ["risk 1", "risk 2"],
+  "opportunities": ["opportunity 1", "opportunity 2"]
+}`;
+
+    // Call Grok API with X feed access, with fallback to Claude if Grok fails
+    let aiResponse;
+    let insightData;
+    
+    try {
+      aiResponse = await callAIAPI(requestedModel, prompt, 1000);
+    } catch (grokError) {
+      console.warn('Grok API failed, falling back to Claude:', grokError.message);
+      // Fallback to Claude if Grok fails
+      const fallbackModel = process.env.ANTHROPIC_DEFAULT_MODEL || 'claude-opus-4-1-20250805';
+      try {
+        aiResponse = await callAIAPI(fallbackModel, prompt, 1000);
+      } catch (claudeError) {
+        // If both fail, return a basic response
+        console.error('Both Grok and Claude failed:', claudeError.message);
+        insightData = {
+          insight: 'Unable to generate AI insights at this time. Please check your API configuration.',
+          xFeeds: [],
+          marketContext: 'AI service unavailable',
+          risks: [],
+          opportunities: []
+        };
+      }
+    }
+    
+    // Parse AI response (handle both JSON and text)
+    if (aiResponse && !insightData) {
+      try {
+        // Try to extract JSON from response
+        const jsonMatch = aiResponse.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          insightData = JSON.parse(jsonMatch[0]);
+          
+          // Normalize xFeeds format - handle both array of strings and array of objects
+          if (insightData.xFeeds && Array.isArray(insightData.xFeeds)) {
+            insightData.xFeeds = insightData.xFeeds.map(feed => {
+              // If it's already an object, return as-is
+              if (typeof feed === 'object' && feed !== null) {
+                return feed;
+              }
+              // If it's a string, try to parse it or create object
+              if (typeof feed === 'string') {
+                // Try to extract account handle
+                const accountMatch = feed.match(/@(\w+)/);
+                const account = accountMatch ? `@${accountMatch[1]}` : '@unknown';
+                const isKeyAccount = account === '@elonmusk' || account === '@CathieDWood' || 
+                                   account.toLowerCase().includes('cathie') || 
+                                   account.toLowerCase().includes('wood');
+                
+                return {
+                  account: account,
+                  content: feed,
+                  isKeyAccount: isKeyAccount,
+                  accountName: account === '@elonmusk' ? 'Elon Musk' : 
+                              account === '@CathieDWood' ? 'Cathie Wood' : 
+                              account.replace('@', '')
+                };
+              }
+              return feed;
+            });
+          }
+        } else {
+          // Fallback: create structured response from text
+          insightData = {
+            insight: aiResponse,
+            xFeeds: [],
+            marketContext: '',
+            risks: [],
+            opportunities: []
+          };
+        }
+      } catch (parseError) {
+        // If parsing fails, use the raw response
+        insightData = {
+          insight: aiResponse,
+          xFeeds: [],
+          marketContext: '',
+          risks: [],
+          opportunities: []
+        };
+      }
+    }
+    
+    res.json({
+      success: true,
+      data: {
+        ...insightData,
+        metrics: {
+          totalValue,
+          earthValue,
+          marsValue,
+          earthPercent,
+          marsPercent
+        },
+        ragContext: ragContext.substring(0, 500) // Include snippet of RAG context
+      }
+    });
+  } catch (error) {
+    console.error('Enhanced insights error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// RAG function to pull context from documentation
+async function getRAGContext(insightType, data, inputs) {
+  const fs = require('fs');
+  const path = require('path');
+  const docsPath = path.join(__dirname, 'docs');
+  
+  let context = '';
+  
+  try {
+    // Read relevant documentation files based on insight type
+    const relevantDocs = [];
+    
+    if (insightType?.includes('valuation') || insightType?.includes('enterprise')) {
+      relevantDocs.push('SPACEX_RISK_FRAMEWORK.md', 'BUSINESS_ALGORITHMS_COMPLETE.md');
+    }
+    if (insightType?.includes('starlink') || insightType?.includes('earth')) {
+      relevantDocs.push('SYSTEM_ANALYSIS.md', 'BUSINESS_ALGORITHMS_COMPLETE.md');
+    }
+    if (insightType?.includes('mars')) {
+      relevantDocs.push('SPACEX_RISK_FRAMEWORK.md');
+    }
+    if (insightType?.includes('risk')) {
+      relevantDocs.push('SPACEX_RISK_FRAMEWORK.md', 'FACTOR_RISK_COMPLETE.md');
+    }
+    
+    // Default: include key docs
+    if (relevantDocs.length === 0) {
+      relevantDocs.push('SPACEX_RISK_FRAMEWORK.md', 'SYSTEM_ANALYSIS.md', 'BUSINESS_ALGORITHMS_COMPLETE.md');
+    }
+    
+    // Read and combine documentation
+    for (const doc of relevantDocs) {
+      const docPath = path.join(docsPath, doc);
+      if (fs.existsSync(docPath)) {
+        const content = fs.readFileSync(docPath, 'utf8');
+        // Extract relevant sections (first 2000 chars per doc)
+        context += `\n\n=== ${doc} ===\n${content.substring(0, 2000)}`;
+      }
+    }
+    
+    // Add model structure context if available
+    if (modelStructure) {
+      context += `\n\n=== Model Structure ===\n${JSON.stringify(modelStructure).substring(0, 1000)}`;
+    }
+    
+  } catch (error) {
+    console.error('RAG context error:', error);
+    context = 'Documentation context unavailable.';
+  }
+  
+  return context || 'No relevant context found.';
+}
+
 function calculateInsights() {
   const insights = [];
   

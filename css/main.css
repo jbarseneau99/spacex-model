@@ -2264,3 +2264,50 @@ textarea:focus {
     overflow-y: auto;
     flex: 1;
 }
+
+/* Enhanced Insight Tiles */
+.insight-tile {
+    background: var(--surface);
+    border-radius: var(--radius);
+    border: 1px solid var(--border-color);
+    padding: var(--spacing-md);
+    position: relative;
+    transition: all 0.2s ease;
+    cursor: pointer;
+    min-height: 200px;
+}
+
+.insight-tile:hover {
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    transform: translateY(-2px);
+    border-color: var(--primary-color);
+}
+
+.insight-tile .spinning {
+    animation: spin 1s linear infinite;
+}
+
+.insight-tile ul {
+    list-style-type: disc;
+    margin: 0;
+    padding-left: 20px;
+}
+
+.insight-tile li {
+    margin-bottom: 4px;
+    line-height: 1.6;
+}
+
+/* Insight Card (legacy support) */
+.insight-card {
+    background: var(--surface);
+    border-radius: var(--radius);
+    border-left: 3px solid var(--primary-color);
+    padding: var(--spacing-md);
+    transition: all 0.2s ease;
+}
+
+.insight-card:hover {
+    box-shadow: var(--shadow-md);
+    transform: translateX(2px);
+}
