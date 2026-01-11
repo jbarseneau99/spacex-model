@@ -29,6 +29,10 @@ class ValuationApp {
         this.currentComparablesData = null; // Store current comparables data for charts
         this.aiModel = localStorage.getItem('aiModel') || 'claude-opus-4-1-20250805'; // Default AI model
         this.financialApiProvider = localStorage.getItem('financialApiProvider') || 'yahoo-finance'; // Default financial API
+        this.cachedAIInsights = {}; // Cache AI insights by model ID
+        this.generatingAIInsights = false; // Flag to prevent duplicate generation
+        this.agentSystemPrompts = null; // Will be loaded on demand
+        this.agentChatHistory = []; // Store chat history for context
         this.alphaVantageApiKey = localStorage.getItem('alphaVantageApiKey') || '';
         this.financialModelingPrepApiKey = localStorage.getItem('financialModelingPrepApiKey') || '';
         this.tamData = null; // Earth Bandwidth TAM lookup table
@@ -374,6 +378,65 @@ class ValuationApp {
             this.refreshDashboardInsights();
         });
 
+        // Monte Carlo Progress Modal Close Button
+        document.getElementById('closeMonteCarloProgressBtn')?.addEventListener('click', () => {
+            this.closeMonteCarloProgress();
+        });
+
+        // AI Agent Window
+        document.getElementById('agentSettingsBtn')?.addEventListener('click', () => {
+            this.openAgentSettings();
+        });
+        document.getElementById('agentCollapseBtn')?.addEventListener('click', () => {
+            this.toggleAIAgentCollapse();
+        });
+        document.getElementById('agentCloseBtn')?.addEventListener('click', () => {
+            this.closeAIAgent();
+        });
+        
+        // Agent Settings Modal Buttons
+        document.getElementById('saveAgentSettingsBtn')?.addEventListener('click', () => {
+            this.saveAgentSystemPrompts();
+        });
+        document.getElementById('resetAgentSettingsBtn')?.addEventListener('click', () => {
+            this.resetAgentSystemPrompts();
+        });
+        document.getElementById('agentSendBtn')?.addEventListener('click', () => {
+            const input = document.getElementById('agentChatInput') || document.getElementById('agentInput');
+            if (input && input.value.trim()) {
+                this.sendAgentMessage(input.value.trim());
+                input.value = '';
+            }
+        });
+        const agentInput = document.getElementById('agentChatInput') || document.getElementById('agentInput');
+        if (agentInput) {
+            agentInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    if (e.target.value.trim()) {
+                        this.sendAgentMessage(e.target.value.trim());
+                        e.target.value = '';
+                    }
+                }
+            });
+        }
+        
+        // Initialize agent window if AI icon is clicked
+        const aiIcon = document.querySelector('[data-view="insights"] .nav-item-icon, .nav-item[data-view="insights"]');
+        if (aiIcon) {
+            aiIcon.addEventListener('click', () => {
+                // Don't toggle on main nav click, only on dedicated AI button
+            });
+        }
+        
+        // Check for dedicated AI agent button
+        const dedicatedAIBtn = document.getElementById('aiAgentBtn');
+        if (dedicatedAIBtn) {
+            dedicatedAIBtn.addEventListener('click', () => {
+                this.toggleAIAgent();
+            });
+        }
+
         // TAM regeneration
         document.getElementById('regenerateTAMBtn')?.addEventListener('click', () => {
             this.regenerateTAMData();
@@ -706,6 +769,9 @@ class ValuationApp {
                             console.error('Error loading launch data:', err);
                         });
                     }
+                    
+                    // Update agent context badge when switching tabs
+                    this.updateAgentContextBadge();
                 }
                 
                 // Update chart if switching to a chart tab
@@ -820,6 +886,9 @@ class ValuationApp {
         }
 
         this.currentView = viewName;
+        
+        // Update agent context badge if agent window is open
+        this.updateAgentContextBadge();
 
         // Update actions bar visibility for Reference Data view
         if (viewName === 'inputs') {
@@ -1072,6 +1141,9 @@ class ValuationApp {
             marsPercentEl.textContent = `${data.total.breakdown.marsPercent.toFixed(1)}%`;
         }
 
+        // Store currentData BEFORE updating charts (charts may need it)
+        this.currentData = data;
+
         // Update charts (only if data has required structure)
         try {
             this.updateValuationChart(data);
@@ -1107,6 +1179,13 @@ class ValuationApp {
         }
         if (this.currentView === 'mars' && data.mars) {
             this.updateMarsView(data);
+        }
+        
+        // Auto-generate AI insights in background when model is loaded/changed
+        if (this.currentModelId && !this.generatingAIInsights) {
+            this.generateAndCacheAIInsights(data).catch(err => {
+                console.error('Error generating AI insights:', err);
+            });
         }
     }
 
@@ -2274,10 +2353,26 @@ class ValuationApp {
         const insightsModelEl = document.getElementById('insightsCurrentModel');
         if (insightsModelEl) insightsModelEl.textContent = modelName;
         
-        // Generate text-based insights (no charts)
-        this.generateKeyInsights(data, this.getInputs());
-        this.generateValueDrivers(data, this.getInputs());
-        this.generateRiskAssessment(data, this.getInputs());
+        // Check if we have cached insights
+        const cached = this.currentModelId && this.cachedAIInsights[this.currentModelId];
+        const inputs = this.getInputs();
+        
+        if (cached) {
+            console.log('✅ Using cached insights for display');
+        } else {
+            console.log('⏳ Generating insights (not yet cached)');
+            // Trigger background generation if not already generating
+            if (!this.generatingAIInsights) {
+                this.generateAndCacheAIInsights(data).catch(err => {
+                    console.error('Error generating insights:', err);
+                });
+            }
+        }
+        
+        // Generate text-based insights (no charts) - will use cached data if available
+        this.generateKeyInsights(data, inputs);
+        this.generateValueDrivers(data, inputs);
+        this.generateRiskAssessment(data, inputs);
     }
 
     async updateChartsView(data) {
@@ -6466,22 +6561,34 @@ class ValuationApp {
                 } else {
                     console.warn('⚠️ No model loaded - simulation not saved. Please load a model to save simulations.');
                 }
+                
+                // Show completion UI - user must dismiss manually
+                this.showMonteCarloProgressComplete();
             } else {
-                alert('Simulation failed: ' + result.error);
+                // Show error and allow dismissal
+                if (progressText) {
+                    progressText.textContent = 'Simulation failed: ' + result.error;
+                    progressText.style.color = 'var(--error-color)';
+                }
+                this.showMonteCarloProgressComplete(true);
             }
         } catch (error) {
             console.error('Monte Carlo error:', error);
-            alert('Failed to run Monte Carlo simulation');
+            // Show error and allow dismissal
+            if (progressText) {
+                progressText.textContent = 'Failed to run Monte Carlo simulation: ' + error.message;
+                progressText.style.color = 'var(--error-color)';
+            }
+            this.showMonteCarloProgressComplete(true);
         } finally {
             // Clear auto-run flag AFTER results are displayed
             if (this.autoRunningMonteCarlo) {
                 this.autoRunningMonteCarlo = false;
             }
             
-            // Hide progress modal
-            if (progressModal) {
-                progressModal.classList.remove('active');
-            }
+            // DON'T automatically close modal - user must dismiss it
+            // Modal will remain open until user clicks close button
+            
             clearInterval(progressInterval);
             
             // Restore button
@@ -6489,6 +6596,75 @@ class ValuationApp {
             btn.innerHTML = originalText;
             lucide.createIcons();
         }
+    }
+
+    showMonteCarloProgressComplete(isError = false) {
+        const progressModal = document.getElementById('monteCarloProgressModal');
+        const spinner = document.getElementById('monteCarloProgressSpinner');
+        const title = document.getElementById('monteCarloProgressTitle');
+        const description = document.getElementById('monteCarloProgressDescription');
+        const progressText = document.getElementById('monteCarloProgressText');
+        const completeDiv = document.getElementById('monteCarloProgressComplete');
+        const closeBtn = document.getElementById('closeMonteCarloProgressBtn');
+        
+        if (spinner) spinner.style.display = 'none';
+        if (title) {
+            title.textContent = isError ? 'Simulation Failed' : 'Simulation Complete!';
+            title.style.color = isError ? 'var(--error-color)' : 'var(--success-color)';
+        }
+        if (description) {
+            description.textContent = isError 
+                ? 'The simulation encountered an error. Please check the error message above and try again.'
+                : 'The Monte Carlo simulation has completed successfully. Results have been updated.';
+        }
+        if (completeDiv) completeDiv.style.display = 'block';
+        if (closeBtn) closeBtn.style.display = 'block';
+        
+        // Add success icon
+        if (!isError && spinner) {
+            spinner.innerHTML = '<i data-lucide="check-circle" style="width: 48px; height: 48px; color: var(--success-color);"></i>';
+            if (window.lucide) window.lucide.createIcons();
+        } else if (isError && spinner) {
+            spinner.innerHTML = '<i data-lucide="x-circle" style="width: 48px; height: 48px; color: var(--error-color);"></i>';
+            if (window.lucide) window.lucide.createIcons();
+        }
+    }
+
+    closeMonteCarloProgress() {
+        const progressModal = document.getElementById('monteCarloProgressModal');
+        const progressBar = document.getElementById('monteCarloProgressBar');
+        const progressText = document.getElementById('monteCarloProgressText');
+        const spinner = document.getElementById('monteCarloProgressSpinner');
+        const title = document.getElementById('monteCarloProgressTitle');
+        const description = document.getElementById('monteCarloProgressDescription');
+        const completeDiv = document.getElementById('monteCarloProgressComplete');
+        const closeBtn = document.getElementById('closeMonteCarloProgressBtn');
+        
+        if (progressModal) {
+            progressModal.classList.remove('active');
+        }
+        
+        // Reset UI for next run
+        if (progressBar) progressBar.style.width = '0%';
+        if (progressText) {
+            progressText.textContent = 'Initializing simulation...';
+            progressText.style.color = 'var(--text-secondary)';
+        }
+        if (spinner) {
+            spinner.innerHTML = '<i data-lucide="loader-2" style="width: 48px; height: 48px; animation: spin 1s linear infinite;"></i>';
+            spinner.style.display = 'block';
+        }
+        if (title) {
+            title.textContent = 'Parameters Have Changed';
+            title.style.color = 'var(--text-primary)';
+        }
+        if (description) {
+            description.textContent = 'Monte Carlo is calculating new simulations based on the updated parameters.\nThis may take a few moments...';
+        }
+        if (completeDiv) completeDiv.style.display = 'none';
+        if (closeBtn) closeBtn.style.display = 'none';
+        
+        if (window.lucide) window.lucide.createIcons();
     }
 
     displayMonteCarloResults(data, isAutoRun = false) {
@@ -6643,9 +6819,6 @@ class ValuationApp {
             // Mark as allowed since this is Monte Carlo data
             dashboardData._allowDeterministic = false; // This is Monte Carlo, not deterministic
             this.updateDashboard(dashboardData);
-            
-            // Store Monte Carlo results as the primary valuation data
-            this.currentData = dashboardData;
             
             // Update ratios dashboard if comparables are loaded
             if (this.currentComparablesData && this.currentComparablesData.length > 0) {
@@ -9384,6 +9557,14 @@ class ValuationApp {
                 // Store model name for dashboard title
                 this.currentModelName = model.name;
 
+                // Clear cached AI insights when switching models
+                if (previousModelId && previousModelId !== id) {
+                    console.log('🔄 Switched models - clearing cached AI insights');
+                    delete this.cachedAIInsights[previousModelId];
+                }
+                // Clear insights cache for current model to force regeneration
+                delete this.cachedAIInsights[id];
+
                 // Clear any previous model's simulations when switching models
                 if (previousModelId && previousModelId !== id) {
                     console.log('🔄 Switched models - clearing previous model simulations');
@@ -9573,6 +9754,42 @@ class ValuationApp {
             }
         } else {
             section.style.display = 'none';
+        }
+    }
+
+    async generateAndCacheAIInsights(data) {
+        if (!this.currentModelId || !data) return;
+        
+        // Check if already cached
+        if (this.cachedAIInsights[this.currentModelId]) {
+            console.log('✅ Using cached AI insights for model:', this.currentModelName);
+            return;
+        }
+
+        // Prevent duplicate generation
+        if (this.generatingAIInsights) {
+            console.log('⏸️ AI insights generation already in progress');
+            return;
+        }
+
+        this.generatingAIInsights = true;
+        console.log('🤖 Generating AI insights in background for model:', this.currentModelName);
+
+        try {
+            const inputs = this.getInputs();
+            
+            // Cache the data structure (insights are generated on-demand when views are displayed)
+            this.cachedAIInsights[this.currentModelId] = {
+                data,
+                inputs,
+                timestamp: Date.now()
+            };
+
+            console.log('✅ AI insights data cached successfully for model:', this.currentModelName);
+        } catch (error) {
+            console.error('Error generating and caching AI insights:', error);
+        } finally {
+            this.generatingAIInsights = false;
         }
     }
 
@@ -11396,7 +11613,563 @@ class ValuationApp {
         if (!gridContainer) return;
         
         // Clear cached insights by regenerating layout
+        if (this.currentModelId && this.cachedAIInsights[this.currentModelId]) {
+            delete this.cachedAIInsights[this.currentModelId];
+        }
         await this.generateDashboardLayout(this.currentData, this.getInputs());
+    }
+
+    // ==================== AI AGENT WINDOW ====================
+
+    toggleAIAgent() {
+        const agentWindow = document.getElementById('aiAgentWindow');
+        if (!agentWindow) {
+            console.error('AI Agent window not found in DOM');
+            return;
+        }
+        
+        const computedStyle = window.getComputedStyle(agentWindow);
+        const isHidden = agentWindow.style.display === 'none' || 
+                         !agentWindow.style.display || 
+                         computedStyle.display === 'none';
+        
+        if (isHidden) {
+            this.initializeAgentWindow();
+            agentWindow.style.display = 'flex';
+            agentWindow.style.position = 'fixed';
+            agentWindow.style.zIndex = '10000';
+            // Set initial position if not already set
+            if (!agentWindow.style.left && !agentWindow.style.top) {
+                agentWindow.style.left = '100px';
+                agentWindow.style.top = '100px';
+                agentWindow.style.width = '500px';
+                agentWindow.style.height = '600px';
+            }
+            console.log('✅ AI Agent window opened at:', {
+                left: agentWindow.style.left,
+                top: agentWindow.style.top,
+                display: agentWindow.style.display,
+                position: agentWindow.style.position
+            });
+        } else {
+            this.closeAIAgent();
+        }
+    }
+
+    initializeAgentWindow() {
+        const window = document.getElementById('aiAgentWindow');
+        if (!window) return;
+
+        // Load system prompts
+        this.loadAgentSystemPrompts();
+
+        // Initialize draggable functionality
+        this.setupAgentDraggable();
+
+        // Initialize resizable functionality
+        this.setupAgentResizable();
+
+        // Update context badge
+        this.updateAgentContextBadge();
+
+        // Refresh icons
+        if (window.lucide) window.lucide.createIcons();
+    }
+
+    updateAgentContextBadge() {
+        const badge = document.getElementById('agentContextBadge');
+        if (!badge) return;
+
+        const tabInfo = this.getCurrentTabInfo();
+        let contextText = '';
+        
+        // Format context text based on current view
+        const viewNames = {
+            'dashboard': 'Dashboard',
+            'insights': 'Insights',
+            'earth': 'Earth Operations',
+            'mars': 'Mars Operations',
+            'charts': 'Charts',
+            'models': 'Models',
+            'scenarios': 'Scenarios',
+            'sensitivity': 'Sensitivity',
+            'stress': 'Stress Testing',
+            'greeks': 'Greeks',
+            'factor-risk': 'Factor Risk',
+            'attribution': 'Attribution',
+            'ratios': 'Ratios',
+            'inputs': 'Reference Data'
+        };
+
+        contextText = viewNames[tabInfo.tab] || tabInfo.tab || 'Dashboard';
+        
+        if (tabInfo.subTab) {
+            // Format sub-tab names
+            const subTabNames = {
+                'insights': 'Key Insights',
+                'drivers': 'Value Drivers',
+                'risks': 'Risk Assessment',
+                'real-time': 'Real-Time Data',
+                'dashboard': 'Terminal',
+                'starlink': 'Starlink',
+                'launch': 'Launch Services',
+                'utilization': 'Utilization',
+                'cadence': 'Launch Cadence',
+                'technology': 'Technology',
+                'financials': 'Financials'
+            };
+            const subTabName = subTabNames[tabInfo.subTab] || tabInfo.subTab;
+            contextText += ` > ${subTabName}`;
+        }
+
+        badge.textContent = contextText;
+    }
+
+    switchAgentSettingsTab(tabName) {
+        // Update tab buttons
+        document.querySelectorAll('[data-agent-tab]').forEach(btn => {
+            btn.classList.remove('active');
+        });
+        const activeBtn = document.querySelector(`[data-agent-tab="${tabName}"]`);
+        if (activeBtn) activeBtn.classList.add('active');
+
+        // Update tab content
+        document.querySelectorAll('.agent-settings-tab-content').forEach(content => {
+            content.style.display = 'none';
+        });
+        const activeContent = document.getElementById(`agentSettingsTab-${tabName}`);
+        if (activeContent) {
+            activeContent.style.display = 'block';
+        }
+
+        if (window.lucide) window.lucide.createIcons();
+    }
+
+    setupAgentDraggable() {
+        const window = document.getElementById('aiAgentWindow');
+        const header = document.getElementById('agentHeader');
+        if (!window || !header) return;
+
+        let isDragging = false;
+        let startX, startY, startLeft, startTop;
+
+        header.addEventListener('mousedown', (e) => {
+            if (e.target.closest('.agent-header-btn')) return; // Don't drag when clicking buttons
+            isDragging = true;
+            startX = e.clientX;
+            startY = e.clientY;
+            startLeft = parseInt(window.style.left) || 100;
+            startTop = parseInt(window.style.top) || 100;
+            header.style.cursor = 'grabbing';
+            e.preventDefault();
+        });
+
+        document.addEventListener('mousemove', (e) => {
+            if (!isDragging) return;
+            const deltaX = e.clientX - startX;
+            const deltaY = e.clientY - startY;
+            window.style.left = `${startLeft + deltaX}px`;
+            window.style.top = `${startTop + deltaY}px`;
+        });
+
+        document.addEventListener('mouseup', () => {
+            if (isDragging) {
+                isDragging = false;
+                header.style.cursor = 'grab';
+            }
+        });
+    }
+
+    setupAgentResizable() {
+        const window = document.getElementById('aiAgentWindow');
+        const resizeHandle = window?.querySelector('.agent-resize-handle');
+        if (!window || !resizeHandle) return;
+
+        let isResizing = false;
+        let startX, startY, startWidth, startHeight;
+
+        resizeHandle.addEventListener('mousedown', (e) => {
+            isResizing = true;
+            startX = e.clientX;
+            startY = e.clientY;
+            startWidth = parseInt(window.style.width) || 500;
+            startHeight = parseInt(window.style.height) || 600;
+            e.preventDefault();
+        });
+
+        document.addEventListener('mousemove', (e) => {
+            if (!isResizing) return;
+            const deltaX = e.clientX - startX;
+            const deltaY = e.clientY - startY;
+            window.style.width = `${Math.max(400, startWidth + deltaX)}px`;
+            window.style.height = `${Math.max(300, startHeight + deltaY)}px`;
+        });
+
+        document.addEventListener('mouseup', () => {
+            isResizing = false;
+        });
+    }
+
+    toggleAIAgentCollapse() {
+        const content = document.getElementById('agentContent');
+        const collapseBtn = document.getElementById('agentCollapseBtn');
+        if (!content || !collapseBtn) return;
+
+        const isCollapsed = content.style.display === 'none';
+        content.style.display = isCollapsed ? 'block' : 'none';
+        
+        const icon = collapseBtn.querySelector('i');
+        if (icon) {
+            icon.setAttribute('data-lucide', isCollapsed ? 'chevron-down' : 'chevron-up');
+            if (window.lucide) window.lucide.createIcons();
+        }
+    }
+
+    closeAIAgent() {
+        const agentWindow = document.getElementById('aiAgentWindow');
+        if (agentWindow) {
+            agentWindow.style.display = 'none';
+            console.log('✅ AI Agent window closed');
+        }
+    }
+
+    openAgentSettings() {
+        const modal = document.getElementById('agentSettingsModal');
+        if (modal) {
+            modal.style.display = 'block';
+            this.loadAgentSystemPrompts(); // Ensure prompts are loaded
+            this.updateAgentSystemPromptDisplay();
+            
+            // Load saved AI model selection
+            const modelSelect = document.getElementById('agentAIModelSelect');
+            if (modelSelect) {
+                const savedModel = localStorage.getItem('agentAIModel') || 'grok:grok-3';
+                modelSelect.value = savedModel;
+            }
+            
+            if (window.lucide) window.lucide.createIcons();
+        }
+    }
+
+    closeAgentSettings() {
+        const modal = document.getElementById('agentSettingsModal');
+        if (modal) {
+            modal.style.display = 'none';
+        }
+    }
+
+    loadAgentSystemPrompts() {
+        const stored = localStorage.getItem('agentSystemPrompts');
+        if (stored) {
+            try {
+                this.agentSystemPrompts = JSON.parse(stored);
+            } catch (e) {
+                this.agentSystemPrompts = this.getDefaultAgentSystemPrompts();
+            }
+        } else {
+            this.agentSystemPrompts = this.getDefaultAgentSystemPrompts();
+        }
+        this.updateAgentSystemPromptDisplay();
+    }
+
+    getDefaultAgentSystemPrompts() {
+        return {
+            level1: 'You are an AI assistant specialized in analyzing SpaceX valuation models and financial data.',
+            level2: 'You have deep expertise in space industry economics, satellite communications, launch services, and Mars colonization economics.',
+            level3: 'You understand valuation methodologies including DCF, real options theory, and Monte Carlo simulations.',
+            level4: 'You can analyze financial metrics, cash flows, revenue projections, and risk factors.',
+            level5: 'You provide clear, actionable insights and recommendations based on data analysis.',
+            level6: 'You consider both near-term Earth operations (Starlink, Launch Services) and long-term Mars optionality.',
+            level7: 'You understand the relationship between technical milestones, market dynamics, and valuation outcomes.',
+            level8: 'You can compare scenarios, identify key value drivers, and assess risk factors.',
+            level9: 'You provide context-aware responses based on the current model, inputs, and valuation results.',
+            level10: 'You maintain a professional, analytical tone while being accessible and helpful.'
+        };
+    }
+
+    updateAgentSystemPromptDisplay() {
+        const container = document.getElementById('agentSystemPromptInputs');
+        if (!container) {
+            console.warn('agentSystemPromptInputs container not found');
+            return;
+        }
+
+        // Ensure prompts are loaded
+        if (!this.agentSystemPrompts) {
+            this.loadAgentSystemPrompts();
+        }
+
+        container.innerHTML = '';
+        for (let i = 1; i <= 10; i++) {
+            const level = `level${i}`;
+            const promptValue = this.agentSystemPrompts[level] || '';
+            const div = document.createElement('div');
+            div.className = 'form-group';
+            div.style.marginBottom = 'var(--spacing-md)';
+            div.innerHTML = `
+                <label for="agentPrompt${i}" style="display: block; margin-bottom: var(--spacing-xs); font-weight: 600; color: var(--text-primary);">
+                    Level ${i} ${i === 1 ? '(Most General)' : i === 10 ? '(Most Specific)' : ''}
+                </label>
+                <textarea 
+                    id="agentPrompt${i}" 
+                    class="input-full" 
+                    rows="${i <= 3 ? 2 : i <= 6 ? 3 : 4}" 
+                    placeholder="Enter Level ${i} system prompt..."
+                    style="width: 100%; padding: var(--spacing-sm); border: 1px solid var(--border-color); border-radius: var(--radius); font-family: inherit; font-size: 14px; resize: vertical;"
+                >${promptValue}</textarea>
+                <div style="display: flex; justify-content: space-between; margin-top: 4px;">
+                    <span class="input-hint" style="font-size: 12px; color: var(--text-secondary);">
+                        ${promptValue.length} characters
+                    </span>
+                    <button class="btn btn-sm btn-secondary" onclick="app.clearAgentPrompt(${i})" style="padding: 2px 8px; font-size: 12px;">
+                        <i data-lucide="x"></i> Clear
+                    </button>
+                </div>
+            `;
+            container.appendChild(div);
+            
+            // Add character counter update
+            const textarea = div.querySelector(`#agentPrompt${i}`);
+            const counter = div.querySelector('.input-hint');
+            if (textarea && counter) {
+                textarea.addEventListener('input', () => {
+                    counter.textContent = `${textarea.value.length} characters`;
+                });
+            }
+        }
+        
+        if (window.lucide) window.lucide.createIcons();
+    }
+
+    clearAgentPrompt(level) {
+        const input = document.getElementById(`agentPrompt${level}`);
+        if (input) {
+            input.value = '';
+            const counter = input.parentElement.querySelector('.input-hint');
+            if (counter) counter.textContent = '0 characters';
+        }
+    }
+
+    saveAgentSystemPrompts() {
+        const prompts = {};
+        for (let i = 1; i <= 10; i++) {
+            const input = document.getElementById(`agentPrompt${i}`);
+            if (input) {
+                prompts[`level${i}`] = input.value.trim();
+            }
+        }
+        this.agentSystemPrompts = prompts;
+        localStorage.setItem('agentSystemPrompts', JSON.stringify(prompts));
+        
+        // Save AI model selection
+        const modelSelect = document.getElementById('agentAIModelSelect');
+        if (modelSelect) {
+            localStorage.setItem('agentAIModel', modelSelect.value);
+            this.aiModel = modelSelect.value;
+        }
+        
+        this.closeAgentSettings();
+        console.log('✅ Agent system prompts and settings saved');
+        
+        // Show confirmation
+        const notification = document.createElement('div');
+        notification.style.cssText = 'position: fixed; top: 100px; right: 20px; background: var(--success-color); color: white; padding: 12px 20px; border-radius: 8px; box-shadow: var(--shadow-lg); z-index: 10001;';
+        notification.textContent = '✅ Agent settings saved';
+        document.body.appendChild(notification);
+        setTimeout(() => notification.remove(), 3000);
+    }
+
+    resetAgentSystemPrompts() {
+        this.agentSystemPrompts = this.getDefaultAgentSystemPrompts();
+        localStorage.removeItem('agentSystemPrompts');
+        this.updateAgentSystemPromptDisplay();
+    }
+
+    async sendAgentMessage(message) {
+        if (!message.trim()) return;
+
+        // Add user message
+        this.addAgentMessage(message, 'user');
+
+        // Show loading
+        const loadingId = this.addAgentLoadingMessage();
+
+        try {
+            const inputs = this.getInputs();
+            
+            // Get current tab and sub-tab information
+            const activeTab = this.getCurrentTabInfo();
+            
+            // Get all models data
+            const allModels = await this.getAllModelsData();
+            
+            // Get Monte Carlo simulations
+            const monteCarloData = this.currentMonteCarloData ? {
+                statistics: this.currentMonteCarloData.statistics,
+                runs: this.currentMonteCarloData.runs,
+                sampleResults: this.currentMonteCarloData.sampleResults?.slice(0, 10) || [] // First 10 samples
+            } : null;
+            
+            // Build comprehensive context
+            const context = {
+                currentView: this.currentView,
+                currentTab: activeTab.tab,
+                currentSubTab: activeTab.subTab,
+                currentModel: {
+                    id: this.currentModelId,
+                    name: this.currentModelName,
+                    inputs: inputs,
+                    valuationData: this.currentData
+                },
+                allModels: allModels,
+                monteCarloSimulations: monteCarloData,
+                parameters: {
+                    earth: inputs.earth || {},
+                    mars: inputs.mars || {},
+                    financial: inputs.financial || {}
+                }
+            };
+            
+            // Build system prompts from 10-level hierarchy
+            const systemPrompts = this.agentSystemPrompts || this.getDefaultAgentSystemPrompts();
+            const systemPromptText = Object.values(systemPrompts)
+                .filter(p => p && p.trim())
+                .join('\n\n');
+            
+            const response = await fetch('/api/agent/chat', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-AI-Model': document.getElementById('agentAIModelSelect')?.value || this.aiModel || 'grok:grok-3'
+                },
+                body: JSON.stringify({
+                    message: message,
+                    systemPrompt: systemPromptText,
+                    context: context,
+                    history: this.getAgentChatHistory()
+                })
+            });
+
+            const result = await response.json();
+            this.removeAgentMessage(loadingId);
+
+            if (result.success) {
+                this.addAgentMessage(result.response, 'assistant');
+            } else {
+                this.addAgentMessage('Sorry, I encountered an error: ' + (result.error || 'Unknown error'), 'assistant');
+            }
+        } catch (error) {
+            console.error('Agent chat error:', error);
+            this.removeAgentMessage(loadingId);
+            this.addAgentMessage('Sorry, I encountered an error. Please check your connection and try again.', 'assistant');
+        }
+    }
+
+    getCurrentTabInfo() {
+        let tab = this.currentView || 'dashboard';
+        let subTab = null;
+        
+        // Check for sub-tabs in different views
+        if (this.currentView === 'insights') {
+            const activeTab = document.querySelector('#insights .insights-tab.active');
+            subTab = activeTab?.dataset.tab || null;
+        } else if (this.currentView === 'earth') {
+            const activeTab = document.querySelector('#earth .insights-tab.active');
+            subTab = activeTab?.dataset.earthTab || null;
+        } else if (this.currentView === 'models') {
+            const activeTab = document.querySelector('#models .insights-tab.active');
+            subTab = activeTab?.dataset.tab || null;
+        }
+        
+        return { tab, subTab };
+    }
+
+    async getAllModelsData() {
+        try {
+            const response = await fetch('/api/models?limit=50');
+            const result = await response.json();
+            if (result.success && result.data) {
+                // Return summary of all models (names, IDs, simulation counts)
+                return result.data.map(model => ({
+                    id: model._id,
+                    name: model.name,
+                    createdAt: model.createdAt,
+                    simulationCount: model.simulationCount || 0,
+                    hasInputs: !!model.inputs
+                }));
+            }
+        } catch (error) {
+            console.error('Error fetching all models:', error);
+        }
+        return [];
+    }
+
+    getAgentChatHistory() {
+        const messagesArea = document.getElementById('agentChatMessages');
+        if (!messagesArea) return [];
+        
+        const messages = [];
+        const messageElements = messagesArea.querySelectorAll('.agent-message');
+        
+        messageElements.forEach(msgEl => {
+            const content = msgEl.querySelector('.message-content p')?.textContent || '';
+            if (content && !content.includes('Thinking...')) {
+                if (msgEl.classList.contains('agent-message-user')) {
+                    messages.push({ role: 'user', content: content });
+                } else if (msgEl.classList.contains('agent-message-assistant')) {
+                    messages.push({ role: 'assistant', content: content });
+                }
+            }
+        });
+        
+        // Return last 10 messages for context
+        return messages.slice(-10);
+    }
+
+    addAgentMessage(content, sender = 'user') {
+        const messagesArea = document.getElementById('agentChatMessages');
+        if (!messagesArea) return null;
+
+        const messageId = `msg-${Date.now()}-${Math.random()}`;
+        const messageDiv = document.createElement('div');
+        messageDiv.className = `agent-message agent-message-${sender}`;
+        messageDiv.id = messageId;
+        messageDiv.innerHTML = `
+            <div class="message-content">
+                <p>${content.replace(/\n/g, '<br>')}</p>
+            </div>
+        `;
+        messagesArea.appendChild(messageDiv);
+        messagesArea.scrollTop = messagesArea.scrollHeight;
+
+        return messageId;
+    }
+
+    addAgentLoadingMessage() {
+        const messagesArea = document.getElementById('agentChatMessages');
+        if (!messagesArea) return null;
+
+        const messageId = `loading-${Date.now()}`;
+        const messageDiv = document.createElement('div');
+        messageDiv.className = 'agent-message agent-message-assistant agent-loading-message';
+        messageDiv.id = messageId;
+        messageDiv.innerHTML = `
+            <div class="message-content">
+                <p><i data-lucide="loader" class="spinning"></i> Thinking...</p>
+            </div>
+        `;
+        messagesArea.appendChild(messageDiv);
+        messagesArea.scrollTop = messagesArea.scrollHeight;
+        if (window.lucide) window.lucide.createIcons();
+
+        return messageId;
+    }
+
+    removeAgentMessage(messageId) {
+        const message = document.getElementById(messageId);
+        if (message) {
+            message.remove();
+        }
     }
 }
 

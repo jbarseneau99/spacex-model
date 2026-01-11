@@ -4718,26 +4718,93 @@ app.post('/api/agent/chat', async (req, res) => {
       });
     }
 
-    // Add context about current state
+    // Build comprehensive context message
+    let contextMessage = `User Question: ${message}\n\n`;
+    
     if (context) {
-      const contextMessage = `Current Context:
-- Current View: ${context.currentView || 'Unknown'}
-- Has Valuation Data: ${context.currentData ? 'Yes' : 'No'}
-${context.currentData ? `- Total Value: $${((context.currentData.total?.value || 0) / 1000).toFixed(1)}T` : ''}
-${context.inputs ? `- Key Inputs: Starlink Penetration ${((context.inputs.earth?.starlinkPenetration || 0) * 100).toFixed(1)}%, Launch Volume ${context.inputs.earth?.launchVolume || 0}/year` : ''}
-
-User Question: ${message}`;
-
-      messages.push({
-        role: 'user',
-        content: contextMessage
-      });
-    } else {
-      messages.push({
-        role: 'user',
-        content: message
-      });
+      contextMessage += `=== CURRENT APPLICATION STATE ===\n`;
+      contextMessage += `Current View: ${context.currentView || 'Unknown'}\n`;
+      contextMessage += `Current Tab: ${context.currentTab || 'N/A'}\n`;
+      contextMessage += `Current Sub-Tab: ${context.currentSubTab || 'N/A'}\n\n`;
+      
+      // Current Model Information
+      if (context.currentModel) {
+        contextMessage += `=== CURRENT MODEL ===\n`;
+        contextMessage += `Model Name: ${context.currentModel.name || 'Unnamed Model'}\n`;
+        contextMessage += `Model ID: ${context.currentModel.id || 'N/A'}\n\n`;
+        
+        if (context.currentModel.valuationData) {
+          const data = context.currentModel.valuationData;
+          contextMessage += `Valuation Results:\n`;
+          contextMessage += `- Total Enterprise Value: $${((data.total?.value || 0) / 1000).toFixed(2)}T\n`;
+          contextMessage += `- Earth Operations: $${((data.earth?.adjustedValue || 0) / 1000).toFixed(2)}T\n`;
+          contextMessage += `- Mars Operations: $${((data.mars?.adjustedValue || 0) / 1000).toFixed(2)}T\n\n`;
+        }
+        
+        if (context.currentModel.inputs) {
+          const inputs = context.currentModel.inputs;
+          contextMessage += `Model Parameters:\n`;
+          if (inputs.earth) {
+            contextMessage += `Earth Operations:\n`;
+            contextMessage += `- Starlink Penetration: ${((inputs.earth.starlinkPenetration || 0) * 100).toFixed(1)}%\n`;
+            contextMessage += `- Launch Volume: ${inputs.earth.launchVolume || 0} launches/year\n`;
+            contextMessage += `- Bandwidth Price Decline: ${((inputs.earth.bandwidthPriceDecline || 0) * 100).toFixed(1)}%/year\n`;
+            contextMessage += `- Launch Price Decline: ${((inputs.earth.launchPriceDecline || 0) * 100).toFixed(1)}%/year\n`;
+          }
+          if (inputs.mars) {
+            contextMessage += `Mars Operations:\n`;
+            contextMessage += `- First Colony Year: ${inputs.mars.firstColonyYear || 'N/A'}\n`;
+            contextMessage += `- Population Growth: ${((inputs.mars.populationGrowth || 0) * 100).toFixed(1)}%/year\n`;
+            contextMessage += `- Transport Cost Decline: ${((inputs.mars.transportCostDecline || 0) * 100).toFixed(1)}%/year\n`;
+            contextMessage += `- Industrial Bootstrap: ${inputs.mars.industrialBootstrap ? 'Yes' : 'No'}\n`;
+          }
+          if (inputs.financial) {
+            contextMessage += `Financial Parameters:\n`;
+            contextMessage += `- Discount Rate: ${((inputs.financial.discountRate || 0) * 100).toFixed(1)}%\n`;
+            contextMessage += `- Dilution Factor: ${((inputs.financial.dilutionFactor || 0) * 100).toFixed(1)}%\n`;
+            contextMessage += `- Terminal Growth: ${((inputs.financial.terminalGrowth || 0) * 100).toFixed(1)}%\n`;
+          }
+          contextMessage += `\n`;
+        }
+      }
+      
+      // All Models Summary
+      if (context.allModels && context.allModels.length > 0) {
+        contextMessage += `=== ALL SAVED MODELS (${context.allModels.length} total) ===\n`;
+        contextMessage += `Available Models:\n`;
+        context.allModels.slice(0, 10).forEach((model, idx) => {
+          contextMessage += `${idx + 1}. ${model.name || 'Unnamed'} (ID: ${model.id}) - ${model.simulationCount || 0} simulations\n`;
+        });
+        if (context.allModels.length > 10) {
+          contextMessage += `... and ${context.allModels.length - 10} more models\n`;
+        }
+        contextMessage += `\n`;
+      }
+      
+      // Monte Carlo Simulations
+      if (context.monteCarloSimulations) {
+        const mc = context.monteCarloSimulations;
+        contextMessage += `=== MONTE CARLO SIMULATION RESULTS ===\n`;
+        if (mc.statistics && mc.statistics.totalValue) {
+          const stats = mc.statistics.totalValue;
+          contextMessage += `Simulation Runs: ${mc.runs || 'N/A'}\n`;
+          contextMessage += `Total Enterprise Value Statistics:\n`;
+          contextMessage += `- Mean: $${((stats.mean || 0) / 1000).toFixed(2)}T\n`;
+          contextMessage += `- Median: $${((stats.median || 0) / 1000).toFixed(2)}T\n`;
+          contextMessage += `- Std Dev: $${((stats.stdDev || 0) / 1000).toFixed(2)}T\n`;
+          contextMessage += `- Min: $${((stats.min || 0) / 1000).toFixed(2)}T\n`;
+          contextMessage += `- Max: $${((stats.max || 0) / 1000).toFixed(2)}T\n`;
+          contextMessage += `- 10th Percentile: $${((stats.p10 || 0) / 1000).toFixed(2)}T\n`;
+          contextMessage += `- 90th Percentile: $${((stats.p90 || 0) / 1000).toFixed(2)}T\n`;
+        }
+        contextMessage += `\n`;
+      }
     }
+    
+    messages.push({
+      role: 'user',
+      content: contextMessage
+    });
 
     // Call AI API with conversation history
     let aiResponse;

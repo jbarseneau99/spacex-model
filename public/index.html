@@ -2932,13 +2932,16 @@
         <div class="modal-content modal-small">
             <div class="modal-header">
                 <h2><i data-lucide="dice-6"></i> Running Monte Carlo Simulation</h2>
+                <button class="icon-button" id="closeMonteCarloProgressBtn" onclick="app.closeMonteCarloProgress()" style="display: none;">
+                    <i data-lucide="x"></i>
+                </button>
             </div>
             <div class="modal-body" style="text-align: center; padding: 32px;">
-                <div style="margin-bottom: 24px;">
+                <div id="monteCarloProgressSpinner" style="margin-bottom: 24px;">
                     <i data-lucide="loader-2" style="width: 48px; height: 48px; animation: spin 1s linear infinite;"></i>
                 </div>
-                <h3 style="margin-bottom: 16px; color: var(--text-primary);">Parameters Have Changed</h3>
-                <p style="color: var(--text-secondary); margin-bottom: 24px; line-height: 1.6;">
+                <h3 id="monteCarloProgressTitle" style="margin-bottom: 16px; color: var(--text-primary);">Parameters Have Changed</h3>
+                <p id="monteCarloProgressDescription" style="color: var(--text-secondary); margin-bottom: 24px; line-height: 1.6;">
                     Monte Carlo is calculating new simulations based on the updated parameters.<br>
                     This may take a few moments...
                 </p>
@@ -2948,6 +2951,11 @@
                 <p id="monteCarloProgressText" style="margin-top: 16px; color: var(--text-secondary); font-size: 14px;">
                     Initializing simulation...
                 </p>
+                <div id="monteCarloProgressComplete" style="display: none; margin-top: 24px;">
+                    <button class="btn btn-primary" onclick="app.closeMonteCarloProgress()">
+                        <i data-lucide="check"></i> Close
+                    </button>
+                </div>
             </div>
         </div>
     </div>
@@ -3974,7 +3982,12 @@
         <div class="agent-header" id="agentHeader">
             <div class="agent-header-left">
                 <i data-lucide="bot" style="width: 20px; height: 20px; color: var(--primary-color);"></i>
-                <span class="agent-title">AI Agent</span>
+                <div style="display: flex; flex-direction: column; gap: 2px;">
+                    <span class="agent-title">AI Agent</span>
+                    <span id="agentContextBadge" class="agent-context-badge" style="font-size: 10px; color: var(--text-secondary); font-weight: 400;">
+                        Dashboard
+                    </span>
+                </div>
             </div>
             <div class="agent-header-right">
                 <button class="icon-button agent-header-btn" id="agentSettingsBtn" title="Agent Settings">
@@ -4013,6 +4026,8 @@
                 </button>
             </div>
         </div>
+        <!-- Resize Handle -->
+        <div class="agent-resize-handle"></div>
     </div>
 
     <!-- Agent Settings Modal (10-Level System Prompt) -->
@@ -4025,39 +4040,63 @@
                 </button>
             </div>
             <div class="modal-body">
-                <!-- AI Model Selection -->
-                <div class="section" style="margin-bottom: var(--spacing-lg);">
-                    <h3>AI Model</h3>
-                    <div class="form-group">
-                        <label>Select AI Model</label>
-                        <select id="agentAIModelSelect" class="input-field">
-                            <option value="grok:grok-3">Grok-3 (Default)</option>
-                            <option value="grok:grok-2">Grok-2</option>
-                            <option value="claude-opus-4-1-20250805">Claude Opus 4.1</option>
-                            <option value="claude-sonnet-4-20250514">Claude Sonnet 4</option>
-                            <option value="gpt-4o">GPT-4o</option>
-                        </select>
-                        <span class="input-hint">Default: Grok-3</span>
+                <!-- Settings Tabs -->
+                <div class="insights-tabs" style="display: flex; gap: 8px; padding: 0; margin-bottom: var(--spacing-md); border-bottom: 1px solid var(--border-color);">
+                    <button class="insights-tab active" data-agent-tab="system-prompts" onclick="app.switchAgentSettingsTab('system-prompts')">
+                        <i data-lucide="layers"></i>
+                        <span>System Prompts</span>
+                    </button>
+                    <button class="insights-tab" data-agent-tab="model-config" onclick="app.switchAgentSettingsTab('model-config')">
+                        <i data-lucide="cpu"></i>
+                        <span>Model Configuration</span>
+                    </button>
+                </div>
+
+                <!-- System Prompts Tab -->
+                <div id="agentSettingsTab-system-prompts" class="agent-settings-tab-content" style="display: block;">
+                    <!-- 10-Level System Prompt Configuration -->
+                    <div class="section">
+                        <h3>System Prompt Configuration (10 Levels)</h3>
+                        <p class="info-text" style="margin-bottom: var(--spacing-md);">
+                            Configure the agent's behavior through a hierarchical 10-level system prompt. Each level builds upon the previous ones.
+                        </p>
+                        
+                        <div id="agentSystemPromptInputs">
+                            <!-- Levels will be generated dynamically -->
+                        </div>
+
+                        <div style="margin-top: var(--spacing-lg); display: flex; gap: var(--spacing-sm); justify-content: flex-end;">
+                            <button class="btn btn-secondary" id="resetAgentSettingsBtn" onclick="app.resetAgentSystemPrompts()">
+                                <i data-lucide="refresh-cw"></i> Reset to Defaults
+                            </button>
+                            <button class="btn btn-primary" id="saveAgentSettingsBtn" onclick="app.saveAgentSystemPrompts()">
+                                <i data-lucide="save"></i> Save Settings
+                            </button>
+                        </div>
                     </div>
                 </div>
 
-                <!-- 10-Level System Prompt Configuration -->
-                <div class="section">
-                    <h3>System Prompt Configuration (10 Levels)</h3>
-                    <p class="info-text" style="margin-bottom: var(--spacing-md);">
-                        Configure the agent's behavior through a hierarchical 10-level system prompt. Each level builds upon the previous ones.
-                    </p>
-                    
-                    <div id="agentSystemPrompts">
-                        <!-- Levels will be generated dynamically -->
+                <!-- Model Configuration Tab -->
+                <div id="agentSettingsTab-model-config" class="agent-settings-tab-content" style="display: none;">
+                    <!-- AI Model Selection -->
+                    <div class="section">
+                        <h3>AI Model Selection</h3>
+                        <div class="form-group">
+                            <label>Select AI Model</label>
+                            <select id="agentAIModelSelect" class="input-field">
+                                <option value="grok:grok-3">Grok-3 (Default)</option>
+                                <option value="grok:grok-2">Grok-2</option>
+                                <option value="claude-opus-4-1-20250805">Claude Opus 4.1</option>
+                                <option value="claude-sonnet-4-20250514">Claude Sonnet 4</option>
+                                <option value="gpt-4o">GPT-4o</option>
+                            </select>
+                            <span class="input-hint">Default: Grok-3. This model will be used for all agent conversations.</span>
+                        </div>
                     </div>
 
-                    <div style="margin-top: var(--spacing-lg); display: flex; gap: var(--spacing-sm);">
-                        <button class="btn btn-primary" id="saveAgentSettingsBtn">
+                    <div style="margin-top: var(--spacing-lg); display: flex; gap: var(--spacing-sm); justify-content: flex-end;">
+                        <button class="btn btn-primary" id="saveAgentSettingsBtn2" onclick="app.saveAgentSystemPrompts()">
                             <i data-lucide="save"></i> Save Settings
-                        </button>
-                        <button class="btn btn-secondary" id="resetAgentSettingsBtn">
-                            <i data-lucide="refresh-cw"></i> Reset to Defaults
                         </button>
                     </div>
                 </div>

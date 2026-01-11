@@ -2410,10 +2410,29 @@ textarea:focus {
     gap: var(--spacing-sm);
     font-weight: 600;
     color: var(--text-primary);
+    flex: 1;
+    min-width: 0;
 }
 
 .agent-title {
     font-size: 15px;
+}
+
+.agent-context-badge {
+    display: block;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 200px;
+}
+
+.agent-settings-tab-content {
+    animation: fadeIn 0.2s ease-in;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
 }
 
 .agent-header-right {
@@ -2703,10 +2722,29 @@ textarea:focus {
     gap: var(--spacing-sm);
     font-weight: 600;
     color: var(--text-primary);
+    flex: 1;
+    min-width: 0;
 }
 
 .agent-title {
     font-size: 15px;
+}
+
+.agent-context-badge {
+    display: block;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 200px;
+}
+
+.agent-settings-tab-content {
+    animation: fadeIn 0.2s ease-in;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
 }
 
 .agent-header-right {
