@@ -6715,7 +6715,16 @@ class ValuationApp {
                 },
                 earth: {
                     adjustedValue: mcStats.earthValue?.mean || 0,
-                    terminalValue: mcStats.earthValue?.mean || 0
+                    terminalValue: mcStats.earthValue?.mean || 0,
+                    // Include cash flow timeline data from Monte Carlo response
+                    cashFlow: data.earth?.cashFlow || Array.from({ length: 30 }, (_, i) => ({
+                        year: 2024 + i,
+                        value: 0
+                    })),
+                    presentValue: data.earth?.presentValue || Array.from({ length: 30 }, (_, i) => ({
+                        value: 0,
+                        cumulative: 0
+                    }))
                 },
                 mars: {
                     adjustedValue: mcStats.marsValue?.mean || 0,
