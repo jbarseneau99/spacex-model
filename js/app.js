@@ -6743,7 +6743,19 @@ class ValuationApp {
             // Update dashboard with Monte Carlo mean values
             // Mark as allowed since this is Monte Carlo data
             dashboardData._allowDeterministic = false; // This is Monte Carlo, not deterministic
+            
+            // Debug: Log cash flow data
+            console.log('📊 Dashboard update with cash flow:', {
+                hasCashFlow: !!dashboardData.earth?.cashFlow,
+                cashFlowLength: dashboardData.earth?.cashFlow?.length || 0,
+                firstValue: dashboardData.earth?.cashFlow?.[0]?.value,
+                lastValue: dashboardData.earth?.cashFlow?.[dashboardData.earth?.cashFlow?.length - 1]?.value
+            });
+            
             this.updateDashboard(dashboardData);
+            
+            // Also update currentData so charts can access it
+            this.currentData = dashboardData;
             
             // Store Monte Carlo results as the primary valuation data
             this.currentData = dashboardData;
