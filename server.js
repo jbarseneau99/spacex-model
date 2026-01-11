@@ -1452,6 +1452,9 @@ app.post('/api/monte-carlo/run', async (req, res) => {
       }
     });
     
+    // Log cash flow data for debugging
+    console.log(`✓ Monte Carlo response includes cash flow: ${baseCashFlow.length} years, first value = $${baseCashFlow[0]?.value?.toFixed(2)}B`);
+    
   } catch (error) {
     console.error('❌ Monte Carlo simulation error:', error);
     res.status(500).json({
