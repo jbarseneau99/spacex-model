@@ -28,3 +28,4 @@ archive/
 
 # Test outputs
 test-output*.txt
+server.pid
