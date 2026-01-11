@@ -1035,6 +1035,10 @@ body {
     display: none;
 }
 
+.insights-tab-content {
+    display: none;
+}
+
 .insights-tab-content.active {
     display: block;
 }

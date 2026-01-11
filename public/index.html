@@ -620,6 +620,28 @@
                     <h2>Earth Operations Analysis</h2>
                 </div>
 
+                <!-- Earth Operations Sub-Tabs -->
+                <div class="insights-tabs" style="display: flex; gap: 8px; padding: 0 var(--spacing-lg); margin-bottom: var(--spacing-md); border-bottom: 1px solid var(--border-color);">
+                    <button class="insights-tab active" data-earth-tab="starlink">
+                        <i data-lucide="satellite"></i>
+                        <span>Starlink</span>
+                    </button>
+                    <button class="insights-tab" data-earth-tab="launch">
+                        <i data-lucide="rocket"></i>
+                        <span>Launch Services</span>
+                    </button>
+                    <button class="insights-tab" data-earth-tab="technology">
+                        <i data-lucide="refresh-cw"></i>
+                        <span>Technology</span>
+                    </button>
+                    <button class="insights-tab" data-earth-tab="financials">
+                        <i data-lucide="trending-up"></i>
+                        <span>Financials</span>
+                    </button>
+                </div>
+
+                <!-- Starlink Tab Content -->
+                <div id="earthTab-starlink" class="insights-tab-content active">
                 <!-- Starlink Analysis -->
                 <div class="section" style="margin-bottom: var(--spacing-md);">
                     <h3 style="margin: 0 0 12px 0; font-size: 16px;"><i data-lucide="satellite"></i> Starlink Operations</h3>
@@ -657,7 +679,70 @@
                         </div>
                     </div>
                 </div>
+                </div>
 
+                <!-- Technology Tab Content -->
+                <div id="earthTab-technology" class="insights-tab-content">
+                <!-- Technology Transition -->
+                <div class="section" style="margin-bottom: var(--spacing-md);">
+                    <h3 style="margin: 0 0 12px 0; font-size: 16px;"><i data-lucide="refresh-cw"></i> Technology Transition</h3>
+                    <p style="color: var(--text-secondary); font-size: 14px; margin-bottom: var(--spacing-md); line-height: 1.6;">
+                        Evolution from Starlink v2 to v3 satellites increases bandwidth capacity per satellite and improves cost efficiency.
+                    </p>
+                    <div class="chart-container" style="height: 300px;">
+                        <canvas id="technologyTransitionChart"></canvas>
+                    </div>
+                </div>
+                </div>
+
+                <!-- Financials Tab Content -->
+                <div id="earthTab-financials" class="insights-tab-content">
+                <!-- Cash Flow Details -->
+                <div class="section" style="margin-bottom: var(--spacing-md);">
+                    <h3 style="margin: 0 0 12px 0; font-size: 16px;"><i data-lucide="trending-up"></i> Cash Flow Projection</h3>
+                    <div class="table-container">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>Year</th>
+                                    <th>Starlink Revenue</th>
+                                    <th>Launch Revenue</th>
+                                    <th>Total Revenue</th>
+                                    <th>Costs</th>
+                                    <th>Cash Flow</th>
+                                    <th>PV</th>
+                                </tr>
+                            </thead>
+                            <tbody id="earthCashFlowBody">
+                                <tr><td colspan="7" class="empty-state">Run calculation to see projections</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                </div>
+            </div>
+
+                <!-- Bandwidth Economics -->
+                <div class="section" style="margin-bottom: var(--spacing-md);">
+                    <h3 style="margin: 0 0 12px 0; font-size: 16px;"><i data-lucide="signal"></i> Bandwidth Economics</h3>
+                    <div class="metrics-grid-small">
+                        <div class="metric-card-small">
+                            <span class="metric-label-small">Revenue per Gbps</span>
+                            <span class="metric-value-small" id="revenuePerGbps">--</span>
+                        </div>
+                        <div class="metric-card-small">
+                            <span class="metric-label-small">Bandwidth Utilization</span>
+                            <span class="metric-value-small" id="bandwidthUtilization">--</span>
+                        </div>
+                    </div>
+                    <div class="chart-container" style="height: 300px;">
+                        <canvas id="bandwidthEconomicsChart"></canvas>
+                    </div>
+                </div>
+                </div>
+
+                <!-- Launch Services Tab Content -->
+                <div id="earthTab-launch" class="insights-tab-content">
                 <!-- Launch Services -->
                 <div class="section" style="margin-bottom: var(--spacing-md);">
                     <h3 style="margin: 0 0 12px 0; font-size: 16px;"><i data-lucide="rocket"></i> Launch Services</h3>
@@ -714,17 +799,6 @@
                     </div>
                 </div>
 
-                <!-- Technology Transition -->
-                <div class="section" style="margin-bottom: var(--spacing-md);">
-                    <h3 style="margin: 0 0 12px 0; font-size: 16px;"><i data-lucide="refresh-cw"></i> Technology Transition</h3>
-                    <p style="color: var(--text-secondary); font-size: 14px; margin-bottom: var(--spacing-md); line-height: 1.6;">
-                        Evolution from Starlink v2 to v3 satellites increases bandwidth capacity per satellite and improves cost efficiency.
-                    </p>
-                    <div class="chart-container" style="height: 300px;">
-                        <canvas id="technologyTransitionChart"></canvas>
-                    </div>
-                </div>
-
                 <!-- Launch Cadence -->
                 <div class="section" style="margin-bottom: var(--spacing-md);">
                     <h3 style="margin: 0 0 12px 0; font-size: 16px;"><i data-lucide="rocket"></i> Launch Cadence</h3>
@@ -735,48 +809,7 @@
                         <canvas id="launchCadenceChart"></canvas>
                     </div>
                 </div>
-
-                <!-- Bandwidth Economics -->
-                <div class="section" style="margin-bottom: var(--spacing-md);">
-                    <h3 style="margin: 0 0 12px 0; font-size: 16px;"><i data-lucide="signal"></i> Bandwidth Economics</h3>
-                    <div class="metrics-grid-small">
-                        <div class="metric-card-small">
-                            <span class="metric-label-small">Revenue per Gbps</span>
-                            <span class="metric-value-small" id="revenuePerGbps">--</span>
-                        </div>
-                        <div class="metric-card-small">
-                            <span class="metric-label-small">Bandwidth Utilization</span>
-                            <span class="metric-value-small" id="bandwidthUtilization">--</span>
-                        </div>
-                    </div>
-                    <div class="chart-container" style="height: 300px;">
-                        <canvas id="bandwidthEconomicsChart"></canvas>
-                    </div>
                 </div>
-
-                <!-- Cash Flow Details -->
-                <div class="section" style="margin-bottom: var(--spacing-md);">
-                    <h3 style="margin: 0 0 12px 0; font-size: 16px;"><i data-lucide="trending-up"></i> Cash Flow Projection</h3>
-                    <div class="table-container">
-                        <table class="data-table">
-                            <thead>
-                                <tr>
-                                    <th>Year</th>
-                                    <th>Starlink Revenue</th>
-                                    <th>Launch Revenue</th>
-                                    <th>Total Revenue</th>
-                                    <th>Costs</th>
-                                    <th>Cash Flow</th>
-                                    <th>PV</th>
-                                </tr>
-                            </thead>
-                            <tbody id="earthCashFlowBody">
-                                <tr><td colspan="7" class="empty-state">Run calculation to see projections</td></tr>
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            </div>
 
             <!-- Mars View -->
             <div id="mars" class="view">
@@ -784,6 +817,24 @@
                     <h2>Mars Operations Analysis</h2>
                 </div>
 
+                <!-- Mars Operations Sub-Tabs -->
+                <div class="insights-tabs" style="display: flex; gap: 8px; padding: 0 var(--spacing-lg); margin-bottom: var(--spacing-md); border-bottom: 1px solid var(--border-color);">
+                    <button class="insights-tab active" data-mars-tab="overview">
+                        <i data-lucide="layout-dashboard"></i>
+                        <span>Overview</span>
+                    </button>
+                    <button class="insights-tab" data-mars-tab="launch-scaling">
+                        <i data-lucide="rocket"></i>
+                        <span>Launch Scaling</span>
+                    </button>
+                    <button class="insights-tab" data-mars-tab="scenarios">
+                        <i data-lucide="layers"></i>
+                        <span>Scenarios</span>
+                    </button>
+                </div>
+
+                <!-- Overview Tab Content -->
+                <div id="marsTab-overview" class="insights-tab-content active">
                 <!-- Top Row: Metrics + Scenario Analysis -->
                 <div class="section" style="margin-bottom: var(--spacing-md);">
                     <div class="mars-top-row">
@@ -838,7 +889,10 @@
                         </div>
                     </div>
                 </div>
+                </div>
 
+                <!-- Launch Scaling Tab Content -->
+                <div id="marsTab-launch-scaling" class="insights-tab-content">
                 <!-- Mars Launch Scaling Chart -->
                 <div class="section" style="margin-bottom: var(--spacing-md);">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
@@ -855,6 +909,21 @@
                     <div class="chart-container" style="height: 400px;">
                         <canvas id="marsLaunchScalingChart"></canvas>
                     </div>
+                </div>
+                </div>
+
+                <!-- Scenarios Tab Content -->
+                <div id="marsTab-scenarios" class="insights-tab-content">
+                <!-- Scenario Analysis Details -->
+                <div class="section" style="margin-bottom: var(--spacing-md);">
+                    <h3 style="margin: 0 0 12px 0; font-size: 16px;"><i data-lucide="layers"></i> Scenario Analysis</h3>
+                    <p style="color: var(--text-secondary); font-size: 14px; margin-bottom: var(--spacing-md); line-height: 1.6;">
+                        Detailed scenario breakdown showing probability-weighted outcomes across different Mars colonization timelines and growth rates.
+                    </p>
+                    <div class="scenarios-grid-compact" id="marsScenariosGridDetail" style="gap: var(--spacing-md);">
+                        <!-- Detailed scenarios will be populated dynamically -->
+                    </div>
+                </div>
                 </div>
             </div>
 

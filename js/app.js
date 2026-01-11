@@ -630,17 +630,78 @@ class ValuationApp {
         });
 
         // Insights tab switching (works for both Insights, Charts, Monte Carlo, and Reference Data views)
+        // Earth Operations sub-tabs
+        document.querySelectorAll('[data-earth-tab]').forEach(tab => {
+            tab.addEventListener('click', () => {
+                const tabName = tab.dataset.earthTab;
+                const earthView = document.getElementById('earth');
+                
+                // Remove active class from all Earth tabs
+                earthView.querySelectorAll('[data-earth-tab]').forEach(t => {
+                    t.classList.remove('active');
+                });
+                earthView.querySelectorAll('[id^="earthTab-"]').forEach(c => {
+                    c.classList.remove('active');
+                    c.style.display = 'none';
+                });
+                
+                // Add active class to clicked tab and corresponding content
+                tab.classList.add('active');
+                const contentEl = document.getElementById(`earthTab-${tabName}`);
+                if (contentEl) {
+                    contentEl.classList.add('active');
+                    contentEl.style.display = 'block';
+                }
+                
+                // Refresh icons
+                if (window.lucide) window.lucide.createIcons();
+            });
+        });
+
+        // Mars Operations sub-tabs
+        document.querySelectorAll('[data-mars-tab]').forEach(tab => {
+            tab.addEventListener('click', () => {
+                const tabName = tab.dataset.marsTab;
+                const marsView = document.getElementById('mars');
+                
+                // Remove active class from all Mars tabs
+                marsView.querySelectorAll('[data-mars-tab]').forEach(t => {
+                    t.classList.remove('active');
+                });
+                marsView.querySelectorAll('[id^="marsTab-"]').forEach(c => {
+                    c.classList.remove('active');
+                    c.style.display = 'none';
+                });
+                
+                // Add active class to clicked tab and corresponding content
+                tab.classList.add('active');
+                const contentEl = document.getElementById(`marsTab-${tabName}`);
+                if (contentEl) {
+                    contentEl.classList.add('active');
+                    contentEl.style.display = 'block';
+                }
+                
+                // Refresh icons
+                if (window.lucide) window.lucide.createIcons();
+            });
+        });
+
         document.querySelectorAll('.insights-tab').forEach(tab => {
             tab.addEventListener('click', () => {
                 const tabName = tab.dataset.tab;
                 const subtabName = tab.dataset.subtab; // Check for sub-tabs
                 const viewContainer = tab.closest('.view');
                 
+                // Skip if this is an Earth or Mars sub-tab (handled separately above)
+                if (tab.dataset.earthTab || tab.dataset.marsTab) {
+                    return;
+                }
+                
                 // Main tab switching logic
                 // Remove active class from all tabs in this view only
                 viewContainer.querySelectorAll('.insights-tab').forEach(t => {
                     // Only remove active from main tabs, not sub-tabs
-                    if (!t.dataset.subtab) {
+                    if (!t.dataset.subtab && !t.dataset.earthTab && !t.dataset.marsTab) {
                         t.classList.remove('active');
                     }
                 });
