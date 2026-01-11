@@ -1376,86 +1376,44 @@ app.post('/api/monte-carlo/run', async (req, res) => {
     }));
     
     try {
-      // Calculate cash flow using the calculation engine or call /api/calculate
+      // Calculate cash flow using realistic revenue/cost model
       const discountRate = baseInputs.financial?.discountRate || 0.12;
       const baseEarthComponent = cachedBaseEarthValue - (cachedBaseMarsValue || 0);
       
-      // Get actual cash flow from calculation engine if available
-      if (calculationEngine && baseEarthComponent > 0) {
-        try {
-          // Try to get cash flow from a full calculation
-          // For now, generate realistic cash flow projection
-          // Cash flow should grow over time as revenue scales and costs become more efficient
-          
-          // Estimate starting revenue (year 0)
-          const startingRevenue = baseEarthComponent * 0.15; // ~15% of valuation as starting revenue
-          
-          // Generate cash flow projection with growth
-          for (let i = 0; i < 30; i++) {
-            const year = 2024 + i;
-            
-            // Revenue grows exponentially (compounding growth)
-            const revenueGrowthRate = 0.25; // 25% annual growth
-            const annualRevenue = startingRevenue * Math.pow(1 + revenueGrowthRate, i);
-            
-            // Costs scale slower than revenue (efficiency gains)
-            const costRatio = 0.60 - (i * 0.01); // Costs go from 60% to 30% of revenue
-            const annualCosts = annualRevenue * Math.max(0.30, costRatio);
-            
-            // Capex declines over time as infrastructure matures
-            const capexRatio = 0.20 - (i * 0.005); // Capex goes from 20% to 5% of revenue
-            const annualCapex = annualRevenue * Math.max(0.05, capexRatio);
-            
-            // Cash flow = Revenue - Costs - Capex
-            const annualCashFlow = annualRevenue - annualCosts - annualCapex;
-            
-            baseCashFlow[i] = {
-              year: year,
-              value: annualCashFlow
-            };
-            
-            // Calculate PV (discount to present)
-            const pv = annualCashFlow / Math.pow(1 + discountRate, i + 1);
-            const prevCumulative = i > 0 ? basePresentValue[i - 1].cumulative : 0;
-            
-            basePresentValue[i] = {
-              value: pv,
-              cumulative: prevCumulative + pv
-            };
-          }
-        } catch (error) {
-          console.warn('⚠️ Calculation engine cash flow failed, using fallback:', error.message);
-          // Fallback: simple linear growth
-          for (let i = 0; i < 30; i++) {
-            const year = 2024 + i;
-            const annualCashFlow = (baseEarthComponent / 30) * (1 + i * 0.1); // Growing cash flow
-            
-            baseCashFlow[i] = {
-              year: year,
-              value: annualCashFlow
-            };
-            
-            const pv = annualCashFlow / Math.pow(1 + discountRate, i + 1);
-            const prevCumulative = i > 0 ? basePresentValue[i - 1].cumulative : 0;
-            
-            basePresentValue[i] = {
-              value: pv,
-              cumulative: prevCumulative + pv
-            };
-          }
-        }
-      } else {
-        // Fallback if no calculation engine
-        console.warn('⚠️ No calculation engine available, using simple cash flow model');
+      if (baseEarthComponent > 0) {
+        // Estimate starting annual revenue (year 0) - use a reasonable fraction of valuation
+        // For a $4.67T valuation, starting revenue might be ~$50-100B/year
+        const startingRevenue = baseEarthComponent * 0.02; // 2% of valuation as starting revenue
+        
+        // Generate cash flow projection with realistic growth
         for (let i = 0; i < 30; i++) {
           const year = 2024 + i;
-          const annualCashFlow = baseEarthComponent > 0 ? (baseEarthComponent / 30) * (1 + i * 0.05) : 0;
+          
+          // Revenue grows exponentially (compounding growth)
+          const revenueGrowthRate = 0.20; // 20% annual growth
+          const annualRevenue = startingRevenue * Math.pow(1 + revenueGrowthRate, i);
+          
+          // Costs scale slower than revenue (efficiency gains over time)
+          const initialCostRatio = 0.70; // Start at 70% of revenue
+          const finalCostRatio = 0.40; // End at 40% of revenue
+          const costRatio = initialCostRatio - ((initialCostRatio - finalCostRatio) * i / 29);
+          const annualCosts = annualRevenue * Math.max(finalCostRatio, costRatio);
+          
+          // Capex declines over time as infrastructure matures
+          const initialCapexRatio = 0.25; // Start at 25% of revenue
+          const finalCapexRatio = 0.10; // End at 10% of revenue
+          const capexRatio = initialCapexRatio - ((initialCapexRatio - finalCapexRatio) * i / 29);
+          const annualCapex = annualRevenue * Math.max(finalCapexRatio, capexRatio);
+          
+          // Cash flow = Revenue - Costs - Capex
+          const annualCashFlow = annualRevenue - annualCosts - annualCapex;
           
           baseCashFlow[i] = {
             year: year,
             value: annualCashFlow
           };
           
+          // Calculate PV (discount to present)
           const pv = annualCashFlow / Math.pow(1 + discountRate, i + 1);
           const prevCumulative = i > 0 ? basePresentValue[i - 1].cumulative : 0;
           
@@ -1464,9 +1422,14 @@ app.post('/api/monte-carlo/run', async (req, res) => {
             cumulative: prevCumulative + pv
           };
         }
+        
+        console.log(`✓ Generated cash flow timeline: Year 0 = $${baseCashFlow[0].value.toFixed(2)}B, Year 29 = $${baseCashFlow[29].value.toFixed(2)}B`);
+      } else {
+        console.warn('⚠️ Base Earth component is zero or negative, cannot generate cash flow');
       }
     } catch (error) {
       console.warn('⚠️ Could not calculate cash flow timeline:', error.message);
+      console.error(error);
     }
     
     res.json({
