@@ -713,33 +713,6 @@
                 </div>
                 </div>
 
-                <!-- Financials Tab Content -->
-                <div id="earthTab-financials" class="insights-tab-content">
-                <!-- Cash Flow Details -->
-                <div class="section" style="margin-bottom: var(--spacing-md);">
-                    <h3 style="margin: 0 0 12px 0; font-size: 16px;"><i data-lucide="trending-up"></i> Cash Flow Projection</h3>
-                    <div class="table-container">
-                        <table class="data-table">
-                            <thead>
-                                <tr>
-                                    <th>Year</th>
-                                    <th>Starlink Revenue</th>
-                                    <th>Launch Revenue</th>
-                                    <th>Total Revenue</th>
-                                    <th>Costs</th>
-                                    <th>Cash Flow</th>
-                                    <th>PV</th>
-                                </tr>
-                            </thead>
-                            <tbody id="earthCashFlowBody">
-                                <tr><td colspan="7" class="empty-state">Run calculation to see projections</td></tr>
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-                </div>
-            </div>
-
                 <!-- Launch Services Tab Content -->
                 <div id="earthTab-launch" class="insights-tab-content">
                 <!-- Launch Services -->
@@ -809,6 +782,47 @@
                     </div>
                 </div>
                 </div>
+
+                <!-- Technology Tab Content -->
+                <div id="earthTab-technology" class="insights-tab-content">
+                <!-- Technology Transition -->
+                <div class="section" style="margin-bottom: var(--spacing-md);">
+                    <h3 style="margin: 0 0 12px 0; font-size: 16px;"><i data-lucide="refresh-cw"></i> Technology Transition</h3>
+                    <p style="color: var(--text-secondary); font-size: 14px; margin-bottom: var(--spacing-md); line-height: 1.6;">
+                        Evolution from Starlink v2 to v3 satellites increases bandwidth capacity per satellite and improves cost efficiency.
+                    </p>
+                    <div class="chart-container" style="height: 300px;">
+                        <canvas id="technologyTransitionChart"></canvas>
+                    </div>
+                </div>
+                </div>
+
+                <!-- Financials Tab Content -->
+                <div id="earthTab-financials" class="insights-tab-content">
+                <!-- Cash Flow Details -->
+                <div class="section" style="margin-bottom: var(--spacing-md);">
+                    <h3 style="margin: 0 0 12px 0; font-size: 16px;"><i data-lucide="trending-up"></i> Cash Flow Projection</h3>
+                    <div class="table-container">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>Year</th>
+                                    <th>Starlink Revenue</th>
+                                    <th>Launch Revenue</th>
+                                    <th>Total Revenue</th>
+                                    <th>Costs</th>
+                                    <th>Cash Flow</th>
+                                    <th>PV</th>
+                                </tr>
+                            </thead>
+                            <tbody id="earthCashFlowBody">
+                                <tr><td colspan="7" class="empty-state">Run calculation to see projections</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                </div>
+            </div>
 
             <!-- Mars View -->
             <div id="mars" class="view">
