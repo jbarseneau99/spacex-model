@@ -3309,9 +3309,10 @@ async function callAIAPI(model, prompt, maxTokens = 300) {
 
 // AI Commentary for Greeks
 app.post('/api/ai/greeks/commentary', async (req, res) => {
+  // Extract greeks from req.body outside try block so it's available in catch
+  const { greeks, summary, baseValues } = req.body || {};
+  
   try {
-    const { greeks, summary, baseValues } = req.body;
-    
     // Get model from request header or use default
     const requestedModel = req.headers['x-ai-model'] || process.env.ANTHROPIC_DEFAULT_MODEL || 'claude-opus-4-1-20250805';
     
@@ -3350,9 +3351,19 @@ Keep it concise and actionable.`;
   } catch (error) {
     console.error('AI Greeks commentary error:', error);
     // Fallback commentary if AI fails
-    const topDelta = greeks && greeks.total && greeks.total.delta 
-      ? Object.entries(greeks.total.delta).sort((a, b) => Math.abs(b[1].value) - Math.abs(a[1].value))[0]
-      : null;
+    // Safely access greeks which was extracted from req.body at the top
+    let topDelta = null;
+    try {
+      if (greeks && greeks.total && greeks.total.delta) {
+        const deltaEntries = Object.entries(greeks.total.delta);
+        if (deltaEntries.length > 0) {
+          topDelta = deltaEntries.sort((a, b) => Math.abs(b[1].value) - Math.abs(a[1].value))[0];
+        }
+      }
+    } catch (e) {
+      console.error('Error extracting topDelta:', e);
+    }
+    
     res.json({
       success: true,
       data: {
