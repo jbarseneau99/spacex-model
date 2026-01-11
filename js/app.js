@@ -653,23 +653,40 @@ class ValuationApp {
                     contentEl.style.display = 'block';
                     
                     // Update charts when switching to specific tabs
-                    if (this.currentData && this.currentData.earth) {
-                        const inputs = this.getInputs();
-                        
-                        // Update charts based on which tab was clicked
-                        if (tabName === 'starlink') {
-                            this.updateStarlinkChart(this.currentData.earth, inputs).catch(err => console.error('Starlink chart error:', err));
-                            this.updateBandwidthEconomicsChart(this.currentData.earth).catch(err => console.error('Bandwidth economics chart error:', err));
-                        } else if (tabName === 'launch') {
-                            this.updateLaunchChart(this.currentData.earth, inputs).catch(err => console.error('Launch chart error:', err));
-                        } else if (tabName === 'utilization') {
-                            this.updateUtilizationChart(this.currentData.earth, inputs).catch(err => console.error('Utilization chart error:', err));
-                        } else if (tabName === 'cadence') {
-                            this.updateLaunchCadenceChart(this.currentData.earth, inputs).catch(err => console.error('Launch cadence chart error:', err));
-                        } else if (tabName === 'technology') {
-                            this.updateTechnologyTransitionChart(this.currentData.earth).catch(err => console.error('Technology transition chart error:', err));
-                        }
-                    }
+                    // Use requestAnimationFrame to ensure canvas is visible before rendering
+                    requestAnimationFrame(() => {
+                        setTimeout(() => {
+                            if (this.currentData && this.currentData.earth) {
+                                const inputs = this.getInputs();
+                                
+                                // Update charts based on which tab was clicked
+                                if (tabName === 'starlink') {
+                                    this.updateStarlinkChart(this.currentData.earth, inputs).then(() => {
+                                        if (this.charts.starlink) this.charts.starlink.resize();
+                                    }).catch(err => console.error('Starlink chart error:', err));
+                                    this.updateBandwidthEconomicsChart(this.currentData.earth).then(() => {
+                                        if (this.charts.bandwidthEconomics) this.charts.bandwidthEconomics.resize();
+                                    }).catch(err => console.error('Bandwidth economics chart error:', err));
+                                } else if (tabName === 'launch') {
+                                    this.updateLaunchChart(this.currentData.earth, inputs).then(() => {
+                                        if (this.charts.launch) this.charts.launch.resize();
+                                    }).catch(err => console.error('Launch chart error:', err));
+                                } else if (tabName === 'utilization') {
+                                    this.updateUtilizationChart(this.currentData.earth, inputs).then(() => {
+                                        if (this.charts.utilization) this.charts.utilization.resize();
+                                    }).catch(err => console.error('Utilization chart error:', err));
+                                } else if (tabName === 'cadence') {
+                                    this.updateLaunchCadenceChart(this.currentData.earth, inputs).then(() => {
+                                        if (this.charts.launchCadence) this.charts.launchCadence.resize();
+                                    }).catch(err => console.error('Launch cadence chart error:', err));
+                                } else if (tabName === 'technology') {
+                                    this.updateTechnologyTransitionChart(this.currentData.earth).then(() => {
+                                        if (this.charts.technologyTransition) this.charts.technologyTransition.resize();
+                                    }).catch(err => console.error('Technology transition chart error:', err));
+                                }
+                            }
+                        }, 50);
+                    });
                 }
                 
                 // Refresh icons
