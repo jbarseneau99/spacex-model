@@ -2104,9 +2104,17 @@ class ValuationApp {
         tbody.innerHTML = '';
 
         if (!earthData.cashFlow || earthData.cashFlow.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="7" class="empty-state">No data available</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="9" class="empty-state">No data available</td></tr>';
             return;
         }
+        
+        console.log('📊 Updating Earth cash flow table:', {
+            cashFlowLength: earthData.cashFlow.length,
+            firstValue: earthData.cashFlow[0]?.value,
+            hasRevenue: !!earthData.revenue,
+            hasCosts: !!earthData.costs,
+            hasPresentValue: !!earthData.presentValue
+        });
 
         const formatBillion = (value) => {
             if (!value && value !== 0) return 'N/A';
@@ -2119,33 +2127,30 @@ class ValuationApp {
         };
 
         // Use actual results data (already in billions)
+        // Table structure: Year, Starlink Revenue, Launch Revenue, Total Revenue, Costs, Cash Flow, PV
         earthData.cashFlow.forEach((item, index) => {
-            const year = item.year || index + 1;
+            const year = item.year || (2024 + index);
             const revenueItem = earthData.revenue && earthData.revenue[index];
-            const revenue = revenueItem ? (typeof revenueItem === 'object' ? revenueItem.value : revenueItem) : item.value;
+            const revenue = revenueItem ? (typeof revenueItem === 'object' ? revenueItem.value : revenueItem) : (item.value * 3); // Estimate revenue as 3x cash flow
             const breakdown = revenueItem && revenueItem.breakdown ? revenueItem.breakdown : {};
-            const costs = earthData.costs && earthData.costs[index] ? earthData.costs[index].value : revenue * 0.6;
+            const costs = earthData.costs && earthData.costs[index] ? earthData.costs[index].value : (revenue * 0.6);
             const cashFlow = item.value; // Already in billions
             const pv = earthData.presentValue && earthData.presentValue[index] ? earthData.presentValue[index].value : 0;
             
             // Use breakdown if available, otherwise estimate
-            const starlinkRev = breakdown.starlink || revenue * 0.75;
-            const starshieldRev = breakdown.starshield || revenue * 0.10;
-            const launchRev = breakdown.launch || revenue * 0.15;
-            const starshipRev = breakdown.starship || launchRev * 0.5;
-            const falcon9Rev = breakdown.falcon9 || launchRev * 0.5;
+            const starlinkRev = breakdown.starlink || (revenue * 0.75);
+            const launchRev = breakdown.launch || (revenue * 0.15);
+            // Starshield is included in Starlink for simplicity
 
             const row = document.createElement('tr');
             row.innerHTML = `
                 <td>${year}</td>
                 <td>${formatBillion(starlinkRev)}</td>
-                <td>${formatBillion(starshieldRev)}</td>
                 <td>${formatBillion(launchRev)}</td>
                 <td>${formatBillion(revenue)}</td>
                 <td>${formatBillion(costs)}</td>
                 <td>${formatBillion(cashFlow)}</td>
                 <td>${formatBillion(pv)}</td>
-                <td>${earthData.presentValue && earthData.presentValue[index] ? formatBillion(earthData.presentValue[index].cumulative || 0) : formatBillion(pv)}</td>
             `;
             tbody.appendChild(row);
         });
