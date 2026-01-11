@@ -22,8 +22,8 @@
                 <button class="icon-button" id="helpBtn" title="Help & Methodology">
                     <i data-lucide="help-circle"></i>
                 </button>
-                <button class="icon-button" id="aiInsightsBtn" title="AI Insights">
-                    <i data-lucide="sparkles"></i>
+                <button class="icon-button" id="aiAgentBtn" title="AI Agent">
+                    <i data-lucide="bot"></i>
                 </button>
                 <button class="icon-button" id="settingsBtn" title="Settings">
                     <i data-lucide="settings"></i>
@@ -1126,8 +1126,8 @@
                     </button>
                 </div>
 
-                <!-- Dashboard Tab Content -->
-                <div id="insightsTab-dashboard" class="insights-tab-content active">
+                <!-- Dashboard Tab Content (Monte Carlo) -->
+                <div id="modelsTab-dashboard" class="insights-tab-content active">
                     <!-- Results Section -->
                     <div id="monteCarloResultsSection" class="section" style="display: none;">
                         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
@@ -1615,6 +1615,14 @@
                         <i data-lucide="alert-triangle"></i>
                         <span>Risk Assessment</span>
                     </button>
+                    <button class="insights-tab" data-tab="real-time">
+                        <i data-lucide="activity"></i>
+                        <span>Real-Time Data</span>
+                    </button>
+                    <button class="insights-tab" data-tab="dashboard">
+                        <i data-lucide="terminal"></i>
+                        <span>Terminal</span>
+                    </button>
                 </div>
 
                 <!-- Tab Content -->
@@ -1638,6 +1646,72 @@
                     <div class="section" style="margin-bottom: var(--spacing-md);">
                         <div id="riskAssessmentContent">
                             <!-- Will be populated dynamically -->
+                        </div>
+                    </div>
+                </div>
+
+                <div class="insights-tab-content" id="insightsTab-real-time">
+                    <!-- Launch Statistics Tiles -->
+                    <div class="section" style="margin-bottom: var(--spacing-md);">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                            <h3 style="margin: 0; font-size: 16px;"><i data-lucide="activity"></i> Real-Time Launch Data</h3>
+                            <button class="btn btn-secondary btn-sm" id="refreshLaunchDataBtn" onclick="app.refreshLaunchData()">
+                                <i data-lucide="refresh-cw"></i> Refresh
+                            </button>
+                        </div>
+                        <div id="launchDataTiles" class="insight-tiles-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: var(--spacing-md);">
+                            <div class="loading-state">Loading launch data...</div>
+                        </div>
+                    </div>
+
+                    <!-- Upcoming Launches -->
+                    <div class="section" style="margin-bottom: var(--spacing-md);">
+                        <h3 style="margin: 0 0 12px 0; font-size: 16px;"><i data-lucide="calendar"></i> Upcoming Launches</h3>
+                        <div id="upcomingLaunchesList" style="display: flex; flex-direction: column; gap: var(--spacing-sm);">
+                            <div class="loading-state">Loading upcoming launches...</div>
+                        </div>
+                    </div>
+
+                    <!-- Recent Launches Timeline -->
+                    <div class="section" style="margin-bottom: var(--spacing-md);">
+                        <h3 style="margin: 0 0 12px 0; font-size: 16px;"><i data-lucide="clock"></i> Recent Launches</h3>
+                        <div id="recentLaunchesList" style="display: flex; flex-direction: column; gap: var(--spacing-sm);">
+                            <div class="loading-state">Loading recent launches...</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Dashboard Tab Content (New Bloomberg Terminal Style) -->
+                <div class="insights-tab-content" id="insightsTab-dashboard" style="display: none;">
+                    <!-- Header with Refresh Button -->
+                    <div class="section" style="margin-bottom: var(--spacing-sm); padding: var(--spacing-sm) var(--spacing-md); display: flex; justify-content: space-between; align-items: center;">
+                        <h3 style="margin: 0; font-size: 16px; font-weight: 600;">
+                            <i data-lucide="grid"></i> Terminal Dashboard
+                        </h3>
+                        <button class="btn btn-secondary btn-sm" id="refreshDashboardInsightsBtn" title="Refresh All AI Insights">
+                            <i data-lucide="refresh-cw"></i> Refresh Insights
+                        </button>
+                    </div>
+                    <!-- Fixed Center Panel with Grid System -->
+                    <div class="section" style="margin-bottom: var(--spacing-md);">
+                        <!-- Grid Container -->
+                        <div id="dashboardGrid" class="dashboard-grid" style="
+                            display: grid;
+                            grid-template-columns: repeat(4, 1fr);
+                            grid-auto-rows: minmax(150px, auto);
+                            gap: var(--spacing-sm);
+                            width: 100%;
+                            max-width: 1400px;
+                            margin: 0 auto;
+                            height: fit-content;
+                        ">
+                            <!-- Tiles will be dynamically inserted here -->
+                            <div style="grid-column: 1 / -1; display: flex; align-items: center; justify-content: center; color: var(--text-secondary); padding: var(--spacing-xl);">
+                                <div style="text-align: center;">
+                                    <i data-lucide="loader" class="spinning" style="width: 32px; height: 32px; margin: 0 auto 16px; display: block;"></i>
+                                    <p>Generating dashboard layout...</p>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -3091,88 +3165,6 @@
         </div>
     </div>
 
-    <!-- Save Model Modal -->
-    <div id="saveModelModal" class="modal">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3>Save Valuation Model</h3>
-                <button class="modal-close" id="closeSaveModelBtn">
-                    <i data-lucide="x"></i>
-                </button>
-            </div>
-            <div class="modal-body">
-                <div class="form-group">
-                    <label>Model Name *</label>
-                    <input type="text" id="saveModelName" class="input-full" placeholder="e.g., Base Case 2025">
-                </div>
-                <div class="form-group">
-                    <label>Description</label>
-                    <textarea id="saveModelDescription" class="input-full" rows="3" placeholder="Optional description"></textarea>
-                </div>
-                <div class="form-group">
-                    <label>Tags (comma-separated)</label>
-                    <input type="text" id="saveModelTags" class="input-full" placeholder="e.g., base-case, 2025, starlink">
-                </div>
-                <div class="form-group">
-                    <label>
-                        <input type="checkbox" id="saveModelFavorite">
-                        Mark as Favorite
-                    </label>
-                </div>
-                <div class="actions-bar">
-                    <button class="btn btn-primary" id="confirmSaveModelBtn">
-                        <i data-lucide="save"></i>
-                        Save Model
-                    </button>
-                    <button class="btn btn-secondary" id="cancelSaveModelBtn">
-                        Cancel
-                    </button>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Save Model Modal -->
-    <div id="saveModelModal" class="modal">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3>Save Valuation Model</h3>
-                <button class="modal-close" id="closeSaveModelBtn">
-                    <i data-lucide="x"></i>
-                </button>
-            </div>
-            <div class="modal-body">
-                <div class="form-group">
-                    <label>Model Name *</label>
-                    <input type="text" id="saveModelName" class="input-full" placeholder="e.g., Base Case 2025">
-                </div>
-                <div class="form-group">
-                    <label>Description</label>
-                    <textarea id="saveModelDescription" class="input-full" rows="3" placeholder="Optional description"></textarea>
-                </div>
-                <div class="form-group">
-                    <label>Tags (comma-separated)</label>
-                    <input type="text" id="saveModelTags" class="input-full" placeholder="e.g., base-case, 2025, starlink">
-                </div>
-                <div class="form-group">
-                    <label>
-                        <input type="checkbox" id="saveModelFavorite">
-                        Mark as Favorite
-                    </label>
-                </div>
-                <div class="actions-bar">
-                    <button class="btn btn-primary" id="confirmSaveModelBtn">
-                        <i data-lucide="save"></i>
-                        Save Model
-                    </button>
-                    <button class="btn btn-secondary" id="cancelSaveModelBtn">
-                        Cancel
-                    </button>
-                </div>
-            </div>
-        </div>
-    </div>
-
     <!-- Settings Modal -->
     <div id="settingsModal" class="modal">
         <div class="modal-content modal-large">
@@ -3975,6 +3967,103 @@
             }
         });
     </script>
+
+    <!-- Floating AI Agent Window -->
+    <div id="aiAgentWindow" class="floating-agent-window" style="display: none;">
+        <!-- Agent Header -->
+        <div class="agent-header" id="agentHeader">
+            <div class="agent-header-left">
+                <i data-lucide="bot" style="width: 20px; height: 20px; color: var(--primary-color);"></i>
+                <span class="agent-title">AI Agent</span>
+            </div>
+            <div class="agent-header-right">
+                <button class="icon-button agent-header-btn" id="agentSettingsBtn" title="Agent Settings">
+                    <i data-lucide="settings"></i>
+                </button>
+                <button class="icon-button agent-header-btn" id="agentCollapseBtn" title="Collapse">
+                    <i data-lucide="chevron-down"></i>
+                </button>
+                <button class="icon-button agent-header-btn" id="agentCloseBtn" title="Close">
+                    <i data-lucide="x"></i>
+                </button>
+            </div>
+        </div>
+
+        <!-- Agent Content (collapsible) -->
+        <div class="agent-content" id="agentContent">
+            <!-- Chat Messages Area -->
+            <div class="agent-chat-messages" id="agentChatMessages">
+                <div class="agent-message agent-message-system">
+                    <div class="message-content">
+                        <p>Hello! I'm your AI agent. I can help you analyze SpaceX valuation data, answer questions, and provide insights. How can I assist you today?</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Chat Input Area -->
+            <div class="agent-chat-input-container">
+                <textarea 
+                    id="agentChatInput" 
+                    class="agent-chat-input" 
+                    placeholder="Type your message here..."
+                    rows="2"
+                ></textarea>
+                <button class="btn btn-primary" id="agentSendBtn" title="Send">
+                    <i data-lucide="send"></i>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Agent Settings Modal (10-Level System Prompt) -->
+    <div id="agentSettingsModal" class="modal" style="display: none;" onclick="if(event.target.id === 'agentSettingsModal') app.closeAgentSettings()">
+        <div class="modal-content" style="max-width: 900px; max-height: 90vh; overflow-y: auto;">
+            <div class="modal-header">
+                <h2><i data-lucide="settings"></i> Agent Settings</h2>
+                <button class="icon-button" onclick="app.closeAgentSettings()">
+                    <i data-lucide="x"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <!-- AI Model Selection -->
+                <div class="section" style="margin-bottom: var(--spacing-lg);">
+                    <h3>AI Model</h3>
+                    <div class="form-group">
+                        <label>Select AI Model</label>
+                        <select id="agentAIModelSelect" class="input-field">
+                            <option value="grok:grok-3">Grok-3 (Default)</option>
+                            <option value="grok:grok-2">Grok-2</option>
+                            <option value="claude-opus-4-1-20250805">Claude Opus 4.1</option>
+                            <option value="claude-sonnet-4-20250514">Claude Sonnet 4</option>
+                            <option value="gpt-4o">GPT-4o</option>
+                        </select>
+                        <span class="input-hint">Default: Grok-3</span>
+                    </div>
+                </div>
+
+                <!-- 10-Level System Prompt Configuration -->
+                <div class="section">
+                    <h3>System Prompt Configuration (10 Levels)</h3>
+                    <p class="info-text" style="margin-bottom: var(--spacing-md);">
+                        Configure the agent's behavior through a hierarchical 10-level system prompt. Each level builds upon the previous ones.
+                    </p>
+                    
+                    <div id="agentSystemPrompts">
+                        <!-- Levels will be generated dynamically -->
+                    </div>
+
+                    <div style="margin-top: var(--spacing-lg); display: flex; gap: var(--spacing-sm);">
+                        <button class="btn btn-primary" id="saveAgentSettingsBtn">
+                            <i data-lucide="save"></i> Save Settings
+                        </button>
+                        <button class="btn btn-secondary" id="resetAgentSettingsBtn">
+                            <i data-lucide="refresh-cw"></i> Reset to Defaults
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
 </body>
 </html>
 

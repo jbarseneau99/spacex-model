@@ -27,9 +27,7 @@ class ValuationApp {
         this.autoRunningAttribution = false; // Flag to track Attribution auto-runs
         this.attributionDebounceTimer = null; // Debounce timer for Attribution input changes
         this.currentComparablesData = null; // Store current comparables data for charts
-        // Prefer Grok for X feed access, fallback to Claude
-        const savedModel = localStorage.getItem('aiModel');
-        this.aiModel = savedModel || 'grok:grok-3'; // Default to Grok-3 (latest with X feed access)
+        this.aiModel = localStorage.getItem('aiModel') || 'claude-opus-4-1-20250805'; // Default AI model
         this.financialApiProvider = localStorage.getItem('financialApiProvider') || 'yahoo-finance'; // Default financial API
         this.alphaVantageApiKey = localStorage.getItem('alphaVantageApiKey') || '';
         this.financialModelingPrepApiKey = localStorage.getItem('financialModelingPrepApiKey') || '';
@@ -330,15 +328,15 @@ class ValuationApp {
         });
 
         // Calculate button - uses EBITDA multiple approach (consistent for all scenarios)
-        document.getElementById('calculateBtn').addEventListener('click', () => {
+        document.getElementById('calculateBtn')?.addEventListener('click', () => {
             this.calculateValuation(2030); // Default to 2030, but logic works for any year
         });
 
         // Input save/reset
-        document.getElementById('saveInputsBtn').addEventListener('click', () => {
+        document.getElementById('saveInputsBtn')?.addEventListener('click', () => {
             this.saveInputs();
         });
-        document.getElementById('resetInputsBtn').addEventListener('click', () => {
+        document.getElementById('resetInputsBtn')?.addEventListener('click', () => {
             this.resetInputs();
         });
 
@@ -361,16 +359,19 @@ class ValuationApp {
         });
 
         // Export
-        document.getElementById('exportBtn').addEventListener('click', () => {
+        document.getElementById('exportBtn')?.addEventListener('click', () => {
             this.exportData();
         });
 
         // AI Insights
-        document.getElementById('aiInsightsBtn').addEventListener('click', () => {
+        document.getElementById('aiInsightsBtn')?.addEventListener('click', () => {
             this.toggleAIInsights();
         });
-        document.getElementById('refreshInsightsBtn').addEventListener('click', () => {
+        document.getElementById('refreshInsightsBtn')?.addEventListener('click', () => {
             this.generateAIInsights();
+        });
+        document.getElementById('refreshDashboardInsightsBtn')?.addEventListener('click', () => {
+            this.refreshDashboardInsights();
         });
 
         // TAM regeneration
@@ -479,7 +480,7 @@ class ValuationApp {
         });
 
         // Custom stress test
-        document.getElementById('runCustomStressBtn').addEventListener('click', () => {
+        document.getElementById('runCustomStressBtn')?.addEventListener('click', () => {
             this.runCustomStressTest();
         });
         
@@ -518,7 +519,7 @@ class ValuationApp {
         });
 
         // Monte Carlo simulation - always rerun and save
-        document.getElementById('runMonteCarloBtn').addEventListener('click', () => {
+        document.getElementById('runMonteCarloBtn')?.addEventListener('click', () => {
             this.runMonteCarloSimulation(true); // Skip validation - always rerun
         });
         
@@ -528,7 +529,7 @@ class ValuationApp {
         });
 
         // Scenario comparison
-        document.getElementById('runScenariosBtn').addEventListener('click', () => {
+        document.getElementById('runScenariosBtn')?.addEventListener('click', () => {
             this.runScenarioComparison();
         });
 
@@ -591,22 +592,22 @@ class ValuationApp {
         });
 
         // Model management
-        document.getElementById('saveCurrentModelBtn').addEventListener('click', () => {
+        document.getElementById('saveCurrentModelBtn')?.addEventListener('click', () => {
             this.openSaveModelModal();
         });
 
         // Help modal
-        document.getElementById('helpBtn').addEventListener('click', () => {
+        document.getElementById('helpBtn')?.addEventListener('click', () => {
             document.getElementById('helpModal').classList.add('active');
             if (window.lucide) window.lucide.createIcons();
         });
 
-        document.getElementById('closeHelpModal').addEventListener('click', () => {
+        document.getElementById('closeHelpModal')?.addEventListener('click', () => {
             document.getElementById('helpModal').classList.remove('active');
         });
 
         // Close help modal on background click
-        document.getElementById('helpModal').addEventListener('click', (e) => {
+        document.getElementById('helpModal')?.addEventListener('click', (e) => {
             if (e.target.id === 'helpModal') {
                 document.getElementById('helpModal').classList.remove('active');
             }
@@ -632,126 +633,17 @@ class ValuationApp {
         });
 
         // Insights tab switching (works for both Insights, Charts, Monte Carlo, and Reference Data views)
-        // Earth Operations sub-tabs
-        document.querySelectorAll('[data-earth-tab]').forEach(tab => {
-            tab.addEventListener('click', () => {
-                const tabName = tab.dataset.earthTab;
-                const earthView = document.getElementById('earth');
-                
-                // Remove active class from all Earth tabs
-                earthView.querySelectorAll('[data-earth-tab]').forEach(t => {
-                    t.classList.remove('active');
-                });
-                earthView.querySelectorAll('[id^="earthTab-"]').forEach(c => {
-                    c.classList.remove('active');
-                    c.style.display = 'none';
-                });
-                
-                // Add active class to clicked tab and corresponding content
-                tab.classList.add('active');
-                const contentEl = document.getElementById(`earthTab-${tabName}`);
-                if (contentEl) {
-                    contentEl.classList.add('active');
-                    contentEl.style.display = 'block';
-                    
-                    // Update charts when switching to specific tabs
-                    // Use requestAnimationFrame to ensure canvas is visible before rendering
-                    requestAnimationFrame(() => {
-                        setTimeout(() => {
-                            if (this.currentData && this.currentData.earth) {
-                                const inputs = this.getInputs();
-                                
-                                // Update charts based on which tab was clicked
-                                if (tabName === 'starlink') {
-                                    this.updateStarlinkChart(this.currentData.earth, inputs).then(() => {
-                                        if (this.charts.starlink) this.charts.starlink.resize();
-                                    }).catch(err => console.error('Starlink chart error:', err));
-                                    this.updateBandwidthEconomicsChart(this.currentData.earth).then(() => {
-                                        if (this.charts.bandwidthEconomics) this.charts.bandwidthEconomics.resize();
-                                    }).catch(err => console.error('Bandwidth economics chart error:', err));
-                                } else if (tabName === 'launch') {
-                                    this.updateLaunchChart(this.currentData.earth, inputs).then(() => {
-                                        if (this.charts.launch) this.charts.launch.resize();
-                                    }).catch(err => console.error('Launch chart error:', err));
-                                } else if (tabName === 'utilization') {
-                                    this.updateUtilizationChart(this.currentData.earth, inputs).then(() => {
-                                        if (this.charts.utilization) this.charts.utilization.resize();
-                                    }).catch(err => console.error('Utilization chart error:', err));
-                                } else if (tabName === 'cadence') {
-                                    this.updateLaunchCadenceChart(this.currentData.earth, inputs).then(() => {
-                                        if (this.charts.launchCadence) this.charts.launchCadence.resize();
-                                    }).catch(err => console.error('Launch cadence chart error:', err));
-                                } else if (tabName === 'technology') {
-                                    this.updateTechnologyTransitionChart(this.currentData.earth).then(() => {
-                                        if (this.charts.technologyTransition) this.charts.technologyTransition.resize();
-                                    }).catch(err => console.error('Technology transition chart error:', err));
-                                } else if (tabName === 'financials') {
-                                    // Update cash flow table when Financials tab is activated
-                                    console.log('📊 Financials tab activated, updating cash flow table');
-                                    this.updateEarthCashFlowTable(this.currentData.earth);
-                                    // Also update cash flow chart if it exists
-                                    if (this.currentData.earth.cashFlow && Array.isArray(this.currentData.earth.cashFlow)) {
-                                        try {
-                                            this.updateCashFlowTimelineChart(this.currentData);
-                                        } catch (err) {
-                                            console.error('Cash flow chart error:', err);
-                                        }
-                                    }
-                                }
-                            }
-                        }, 50);
-                    });
-                }
-                
-                // Refresh icons
-                if (window.lucide) window.lucide.createIcons();
-            });
-        });
-
-        // Mars Operations sub-tabs
-        document.querySelectorAll('[data-mars-tab]').forEach(tab => {
-            tab.addEventListener('click', () => {
-                const tabName = tab.dataset.marsTab;
-                const marsView = document.getElementById('mars');
-                
-                // Remove active class from all Mars tabs
-                marsView.querySelectorAll('[data-mars-tab]').forEach(t => {
-                    t.classList.remove('active');
-                });
-                marsView.querySelectorAll('[id^="marsTab-"]').forEach(c => {
-                    c.classList.remove('active');
-                    c.style.display = 'none';
-                });
-                
-                // Add active class to clicked tab and corresponding content
-                tab.classList.add('active');
-                const contentEl = document.getElementById(`marsTab-${tabName}`);
-                if (contentEl) {
-                    contentEl.classList.add('active');
-                    contentEl.style.display = 'block';
-                }
-                
-                // Refresh icons
-                if (window.lucide) window.lucide.createIcons();
-            });
-        });
-
         document.querySelectorAll('.insights-tab').forEach(tab => {
             tab.addEventListener('click', () => {
                 const tabName = tab.dataset.tab;
                 const subtabName = tab.dataset.subtab; // Check for sub-tabs
                 const viewContainer = tab.closest('.view');
                 
-                // Skip if this is an Earth or Mars sub-tab (handled separately above)
-                if (tab.dataset.earthTab || tab.dataset.marsTab) {
-                    return;
-                }
-                
                 // Main tab switching logic
                 // Remove active class from all tabs in this view only
                 viewContainer.querySelectorAll('.insights-tab').forEach(t => {
                     // Only remove active from main tabs, not sub-tabs
-                    if (!t.dataset.subtab && !t.dataset.earthTab && !t.dataset.marsTab) {
+                    if (!t.dataset.subtab) {
                         t.classList.remove('active');
                     }
                 });
@@ -798,6 +690,24 @@ class ValuationApp {
                     // Icons will be refreshed above
                 }
                 
+                // Handle Insights view tabs
+                if (viewContainer.closest('#insights')) {
+                    if (tabName === 'dashboard' && this.currentData) {
+                        // Terminal tab - generate dashboard layout
+                        this.generateDashboardLayout(this.currentData, this.getInputs()).catch(err => {
+                            console.error('Error generating dashboard layout:', err);
+                        });
+                    } else if (tabName === 'insights' && this.currentData) {
+                        // Key Insights tab - generate key insights
+                        this.generateKeyInsights(this.currentData, this.getInputs());
+                    } else if (tabName === 'real-time') {
+                        // Real-Time Data tab - load launch data
+                        this.loadLaunchData().catch(err => {
+                            console.error('Error loading launch data:', err);
+                        });
+                    }
+                }
+                
                 // Update chart if switching to a chart tab
                 if (this.currentData && ['cashFlywheel', 'marsCapital', 'enterpriseValue', 'starshipCost', 'orbitalPower', 'marginEvolution', 'unitEconomics', 'capexEfficiency'].includes(tabName)) {
                     const inputs = this.getInputs();
@@ -821,13 +731,13 @@ class ValuationApp {
                 }
             });
         });
-        document.getElementById('confirmSaveModelBtn').addEventListener('click', () => {
+        document.getElementById('confirmSaveModelBtn')?.addEventListener('click', () => {
             this.saveModel();
         });
-        document.getElementById('cancelSaveModelBtn').addEventListener('click', () => {
+        document.getElementById('cancelSaveModelBtn')?.addEventListener('click', () => {
             document.getElementById('saveModelModal').classList.remove('active');
         });
-        document.getElementById('closeSaveModelBtn').addEventListener('click', () => {
+        document.getElementById('closeSaveModelBtn')?.addEventListener('click', () => {
             document.getElementById('saveModelModal').classList.remove('active');
         });
 
@@ -1176,26 +1086,8 @@ class ValuationApp {
                 console.error('Error updating cash flow timeline chart:', err);
             }
         } else {
-            console.log('⏸️ Skipping cash flow timeline chart - no cash flow data available');
-        }
-        
-        // Update Earth cash flow tables (both main dashboard and Financials tab)
-        if (data.earth) {
-            try {
-                console.log('📊 updateDashboard: Updating cash flow tables with data:', {
-                    hasCashFlow: !!data.earth.cashFlow,
-                    cashFlowLength: data.earth.cashFlow?.length || 0,
-                    firstValue: data.earth.cashFlow?.[0]?.value
-                });
-                // Update main dashboard cash flow table
-                this.updateCashFlowTable(data.earth);
-                // Update Financials tab cash flow table
-                this.updateEarthCashFlowTable(data.earth);
-            } catch (err) {
-                console.error('Error updating cash flow tables:', err);
-            }
-        } else {
-            console.warn('⚠️ updateDashboard: No earth data provided');
+            // Monte Carlo results don't have cash flow timeline - skip chart update
+            console.log('⏸️ Skipping cash flow timeline chart - Monte Carlo results don\'t include timeline data');
         }
         // Revenue breakdown chart needs earth.revenue array
         if (data.earth && data.earth.revenue && Array.isArray(data.earth.revenue)) {
@@ -1486,28 +1378,14 @@ class ValuationApp {
 
     updateCashFlowTable(earthData) {
         const tbody = document.getElementById('cashFlowBody');
-        if (!tbody) {
-            console.warn('⚠️ cashFlowBody element not found - table may not be visible');
-            return;
-        }
+        if (!tbody) return;
         
         tbody.innerHTML = '';
 
         if (!earthData || !earthData.cashFlow || earthData.cashFlow.length === 0) {
-            console.warn('⚠️ updateCashFlowTable: No cash flow data available:', {
-                hasEarthData: !!earthData,
-                hasCashFlow: !!earthData?.cashFlow,
-                cashFlowLength: earthData?.cashFlow?.length || 0
-            });
             tbody.innerHTML = '<tr><td colspan="7" class="empty-state">No cash flow data available</td></tr>';
             return;
         }
-        
-        console.log('📊 updateCashFlowTable: Updating main dashboard cash flow table:', {
-            cashFlowLength: earthData.cashFlow.length,
-            firstValue: earthData.cashFlow[0]?.value,
-            lastValue: earthData.cashFlow[earthData.cashFlow.length - 1]?.value
-        });
 
         const formatValue = (value) => {
             if (!value && value !== 0) return 'N/A';
@@ -1529,27 +1407,17 @@ class ValuationApp {
 
         earthData.cashFlow.forEach((item, index) => {
             const row = document.createElement('tr');
-            const year = item.year || (2024 + index);
+            const year = item.year || index + 2024;
+            const revenue = item.value + (item.breakdown?.costs || 0) + (item.breakdown?.capex || 0); // Reconstruct revenue
+            const costs = item.breakdown?.costs || earthData.costs[index]?.value || 0;
+            const capex = item.breakdown?.capex || 0;
+            const cashFlow = item.value;
+            const pv = earthData.presentValue[index]?.value || 0;
+            const cumulativePV = earthData.presentValue[index]?.cumulative || 0;
             
-            // Get revenue from revenue array if available, otherwise estimate
-            const revenueItem = earthData.revenue && earthData.revenue[index];
-            const actualRevenue = revenueItem ? (typeof revenueItem === 'object' ? revenueItem.value : revenueItem) : (item.value * 3); // Estimate revenue as 3x cash flow
-            
-            // Get costs from costs array if available, otherwise estimate
-            const costs = earthData.costs && earthData.costs[index] ? 
-                (typeof earthData.costs[index] === 'object' ? earthData.costs[index].value : earthData.costs[index]) : 
-                (actualRevenue * 0.6); // Estimate costs as 60% of revenue
-            
-            // Estimate capex (not in cash flow data, so derive from revenue)
-            const capex = actualRevenue * 0.15; // Estimate capex as 15% of revenue
-            
-            const cashFlow = item.value; // Already in billions
-            const pv = earthData.presentValue && earthData.presentValue[index] ? 
-                (typeof earthData.presentValue[index] === 'object' ? earthData.presentValue[index].value : earthData.presentValue[index]) : 
-                0;
-            const cumulativePV = earthData.presentValue && earthData.presentValue[index] ? 
-                (typeof earthData.presentValue[index] === 'object' ? earthData.presentValue[index].cumulative : 0) : 
-                0;
+            // Get revenue from revenue array if available
+            const revenueItem = earthData.revenue[index];
+            const actualRevenue = revenueItem?.value || revenue;
             
             row.innerHTML = `
                 <td>${year}</td>
@@ -2147,31 +2015,14 @@ class ValuationApp {
 
     updateEarthCashFlowTable(earthData) {
         const tbody = document.getElementById('earthCashFlowBody');
-        if (!tbody) {
-            console.warn('⚠️ earthCashFlowBody element not found - table may not be visible');
-            return;
-        }
+        if (!tbody) return;
         
         tbody.innerHTML = '';
 
-        if (!earthData || !earthData.cashFlow || earthData.cashFlow.length === 0) {
-            console.warn('⚠️ No cash flow data available:', {
-                hasEarthData: !!earthData,
-                hasCashFlow: !!earthData?.cashFlow,
-                cashFlowLength: earthData?.cashFlow?.length || 0
-            });
+        if (!earthData.cashFlow || earthData.cashFlow.length === 0) {
             tbody.innerHTML = '<tr><td colspan="7" class="empty-state">No data available</td></tr>';
             return;
         }
-        
-        console.log('📊 Updating Earth cash flow table:', {
-            cashFlowLength: earthData.cashFlow.length,
-            firstValue: earthData.cashFlow[0]?.value,
-            lastValue: earthData.cashFlow[earthData.cashFlow.length - 1]?.value,
-            hasRevenue: !!earthData.revenue,
-            hasCosts: !!earthData.costs,
-            hasPresentValue: !!earthData.presentValue
-        });
 
         const formatBillion = (value) => {
             if (!value && value !== 0) return 'N/A';
@@ -2184,30 +2035,33 @@ class ValuationApp {
         };
 
         // Use actual results data (already in billions)
-        // Table structure: Year, Starlink Revenue, Launch Revenue, Total Revenue, Costs, Cash Flow, PV
         earthData.cashFlow.forEach((item, index) => {
-            const year = item.year || (2024 + index);
+            const year = item.year || index + 1;
             const revenueItem = earthData.revenue && earthData.revenue[index];
-            const revenue = revenueItem ? (typeof revenueItem === 'object' ? revenueItem.value : revenueItem) : (item.value * 3); // Estimate revenue as 3x cash flow
+            const revenue = revenueItem ? (typeof revenueItem === 'object' ? revenueItem.value : revenueItem) : item.value;
             const breakdown = revenueItem && revenueItem.breakdown ? revenueItem.breakdown : {};
-            const costs = earthData.costs && earthData.costs[index] ? earthData.costs[index].value : (revenue * 0.6);
+            const costs = earthData.costs && earthData.costs[index] ? earthData.costs[index].value : revenue * 0.6;
             const cashFlow = item.value; // Already in billions
             const pv = earthData.presentValue && earthData.presentValue[index] ? earthData.presentValue[index].value : 0;
             
             // Use breakdown if available, otherwise estimate
-            const starlinkRev = breakdown.starlink || (revenue * 0.75);
-            const launchRev = breakdown.launch || (revenue * 0.15);
-            // Starshield is included in Starlink for simplicity
+            const starlinkRev = breakdown.starlink || revenue * 0.75;
+            const starshieldRev = breakdown.starshield || revenue * 0.10;
+            const launchRev = breakdown.launch || revenue * 0.15;
+            const starshipRev = breakdown.starship || launchRev * 0.5;
+            const falcon9Rev = breakdown.falcon9 || launchRev * 0.5;
 
             const row = document.createElement('tr');
             row.innerHTML = `
                 <td>${year}</td>
                 <td>${formatBillion(starlinkRev)}</td>
+                <td>${formatBillion(starshieldRev)}</td>
                 <td>${formatBillion(launchRev)}</td>
                 <td>${formatBillion(revenue)}</td>
                 <td>${formatBillion(costs)}</td>
                 <td>${formatBillion(cashFlow)}</td>
                 <td>${formatBillion(pv)}</td>
+                <td>${earthData.presentValue && earthData.presentValue[index] ? formatBillion(earthData.presentValue[index].cumulative || 0) : formatBillion(pv)}</td>
             `;
             tbody.appendChild(row);
         });
@@ -2420,10 +2274,8 @@ class ValuationApp {
         const insightsModelEl = document.getElementById('insightsCurrentModel');
         if (insightsModelEl) insightsModelEl.textContent = modelName;
         
-        // Generate enhanced tile-based insights with Grok, web search, and RAG
-        await this.generateEnhancedInsightTiles(data, this.getInputs());
-        
-        // Also generate traditional insights for other tabs
+        // Generate text-based insights (no charts)
+        this.generateKeyInsights(data, this.getInputs());
         this.generateValueDrivers(data, this.getInputs());
         this.generateRiskAssessment(data, this.getInputs());
     }
@@ -2499,18 +2351,9 @@ class ValuationApp {
         console.log('Charts view updated. Active tab:', activeTab, 'Has earth data:', !!data.earth);
     }
 
-    async generateEnhancedInsightTiles(data, inputs) {
+    generateKeyInsights(data, inputs) {
         const container = document.getElementById('keyInsightsContent');
         if (!container) return;
-
-        // Show loading state
-        container.innerHTML = `
-            <div style="grid-column: 1 / -1; text-align: center; padding: var(--spacing-xl);">
-                <i data-lucide="loader" class="spinning" style="width: 32px; height: 32px; margin: 0 auto 16px; display: block;"></i>
-                <p style="color: var(--text-secondary);">Generating enhanced insights with Grok AI, X feeds, and RAG...</p>
-            </div>
-        `;
-        if (window.lucide) window.lucide.createIcons();
 
         const totalValue = data.total?.value || 0;
         const earthValue = data.earth?.adjustedValue || 0;
@@ -2523,274 +2366,98 @@ class ValuationApp {
             return `$${value.toFixed(1)}B`;
         };
 
-        // Define insight tiles to generate
-        const insightTiles = [
-            {
-                id: 'total-valuation',
+        const insights = [];
+
+        // Valuation insight
+        if (totalValue >= 2000) {
+            insights.push({
                 icon: 'zap',
-                title: 'Total Enterprise Value',
-                value: formatBillion(totalValue),
-                insightType: 'valuation',
-                color: '#0066cc',
-                data: { totalValue, earthValue, marsValue }
-            },
-            {
-                id: 'earth-operations',
-                icon: 'globe',
-                title: 'Earth Operations',
-                value: `${earthPercent.toFixed(1)}%`,
-                subtitle: formatBillion(earthValue),
-                insightType: 'starlink-earth',
-                color: '#10b981',
-                data: { earthValue, earthPercent }
-            },
-            {
-                id: 'mars-operations',
-                icon: 'rocket',
-                title: 'Mars Operations',
-                value: `${marsPercent.toFixed(1)}%`,
-                subtitle: formatBillion(marsValue),
-                insightType: 'mars',
-                color: '#f59e0b',
-                data: { marsValue, marsPercent }
-            },
-            {
-                id: 'starlink-penetration',
-                icon: 'trending-up',
-                title: 'Starlink Penetration',
-                value: `${((inputs?.earth?.starlinkPenetration || 0) * 100).toFixed(1)}%`,
-                insightType: 'starlink-earth',
-                color: '#10b981',
-                data: { penetration: inputs?.earth?.starlinkPenetration || 0 }
-            },
-            {
-                id: 'launch-volume',
-                icon: 'rocket',
-                title: 'Launch Volume',
-                value: `${inputs?.earth?.launchVolume || 0}/year`,
-                insightType: 'launch',
-                color: '#0066cc',
-                data: { launchVolume: inputs?.earth?.launchVolume || 0 }
-            },
-            {
-                id: 'discount-rate',
-                icon: 'percent',
-                title: 'Discount Rate',
-                value: `${((inputs?.financial?.discountRate || 0.12) * 100).toFixed(1)}%`,
-                insightType: 'risk',
-                color: inputs?.financial?.discountRate < 0.10 ? '#10b981' : inputs?.financial?.discountRate > 0.15 ? '#ef4444' : '#f59e0b',
-                data: { discountRate: inputs?.financial?.discountRate || 0.12 }
-            }
-        ];
-
-        // Generate tiles with AI insights
-        const tilesHTML = [];
-        
-        for (const tile of insightTiles) {
-            try {
-                // Fetch enhanced insight from API
-                const response = await fetch('/api/insights/enhanced', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-AI-Model': this.getAIModel()
-                    },
-                    body: JSON.stringify({
-                        data: { ...data, ...tile.data },
-                        inputs,
-                        insightType: tile.insightType
-                    })
-                });
-
-                const result = await response.json();
-                const insightData = result.success ? result.data : null;
-
-                // Render tile with AI overlay
-                tilesHTML.push(this.renderInsightTile(tile, insightData));
-            } catch (error) {
-                console.error(`Error generating insight for ${tile.id}:`, error);
-                // Render tile without AI overlay if API fails
-                tilesHTML.push(this.renderInsightTile(tile, null));
-            }
+                title: 'Trillion-Dollar Valuation',
+                content: `This model projects a ${formatBillion(totalValue)} enterprise value, positioning SpaceX among the world's most valuable companies.`,
+                color: '#0066cc'
+            });
         }
 
-        // Update container with tiles
-        container.innerHTML = `
-            <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: var(--spacing-md);">
-                ${tilesHTML.join('')}
-            </div>
-        `;
+        // Earth vs Mars balance
+        if (earthPercent > 80) {
+            insights.push({
+                icon: 'globe',
+                title: 'Earth-Dominant Value',
+                content: `${earthPercent.toFixed(0)}% of value comes from Earth operations (Starlink + Launch), indicating strong near-term cash generation.`,
+                color: '#10b981'
+            });
+        } else if (marsPercent > 30) {
+            insights.push({
+                icon: 'rocket',
+                title: 'Mars Optionality Significant',
+                content: `Mars operations represent ${marsPercent.toFixed(0)}% of total value, showing meaningful long-term optionality.`,
+                color: '#f59e0b'
+            });
+        }
 
-        if (window.lucide) window.lucide.createIcons();
-    }
+        // Starlink penetration insight
+        const penetration = inputs.earth?.starlinkPenetration || 0;
+        if (penetration > 0.20) {
+            insights.push({
+                icon: 'trending-up',
+                title: 'Aggressive Penetration',
+                content: `${(penetration * 100).toFixed(1)}% Starlink penetration suggests ambitious market capture assumptions.`,
+                color: '#10b981'
+            });
+        } else if (penetration < 0.10) {
+            insights.push({
+                icon: 'alert-circle',
+                title: 'Conservative Penetration',
+                content: `${(penetration * 100).toFixed(1)}% penetration reflects conservative market assumptions.`,
+                color: '#f59e0b'
+            });
+        }
 
-    renderInsightTile(tile, aiData) {
-        const hasAI = aiData && aiData.insight;
-        // Normalize xFeeds - handle both array of strings and array of objects
-        const xFeeds = (aiData?.xFeeds || []).map(feed => {
-            if (typeof feed === 'object' && feed !== null) {
-                return feed;
-            }
-            // If string, try to detect key accounts
-            const accountMatch = typeof feed === 'string' ? feed.match(/@(\w+)/) : null;
-            const account = accountMatch ? accountMatch[0] : '@unknown';
-            const isKeyAccount = account === '@elonmusk' || account === '@CathieDWood' || 
-                               (typeof feed === 'string' && (feed.toLowerCase().includes('cathie') || feed.toLowerCase().includes('wood')));
-            
-            return {
-                account: account,
-                content: feed,
-                isKeyAccount: isKeyAccount,
-                accountName: account === '@elonmusk' ? 'Elon Musk' : 
-                            account === '@CathieDWood' ? 'Cathie Wood' : 
-                            account.replace('@', '')
-            };
-        });
-        const risks = aiData?.risks || [];
-        const opportunities = aiData?.opportunities || [];
+        // Mars timing insight
+        const firstColonyYear = inputs.mars?.firstColonyYear || 2030;
+        const currentYear = new Date().getFullYear();
+        const yearsToColony = firstColonyYear - currentYear;
+        if (yearsToColony <= 5) {
+            insights.push({
+                icon: 'calendar',
+                title: 'Aggressive Mars Timeline',
+                content: `First colony targeted for ${firstColonyYear} (${yearsToColony} years) - an ambitious timeline requiring rapid Starship development.`,
+                color: '#f59e0b'
+            });
+        }
 
-        return `
-            <div class="insight-tile" style="
-                background: var(--surface);
-                border-radius: var(--radius);
-                border: 1px solid var(--border-color);
-                padding: var(--spacing-md);
-                position: relative;
-                transition: all 0.2s;
-                cursor: pointer;
-            " onmouseover="this.style.boxShadow='0 4px 12px rgba(0,0,0,0.15)'" onmouseout="this.style.boxShadow='none'">
-                <!-- Data Display -->
-                <div style="display: flex; align-items: start; gap: var(--spacing-sm); margin-bottom: var(--spacing-md);">
-                    <div style="
-                        width: 48px;
-                        height: 48px;
-                        border-radius: 8px;
-                        background: ${tile.color}20;
-                        display: flex;
-                        align-items: center;
-                        justify-content: center;
-                        flex-shrink: 0;
-                    ">
-                        <i data-lucide="${tile.icon}" style="width: 24px; height: 24px; color: ${tile.color};"></i>
-                    </div>
+        // Discount rate insight
+        const discountRate = inputs.financial?.discountRate || 0.12;
+        if (discountRate < 0.10) {
+            insights.push({
+                icon: 'percent',
+                title: 'Low Discount Rate',
+                content: `${(discountRate * 100).toFixed(1)}% discount rate suggests high confidence in execution and low perceived risk.`,
+                color: '#10b981'
+            });
+        } else if (discountRate > 0.15) {
+            insights.push({
+                icon: 'percent',
+                title: 'High Discount Rate',
+                content: `${(discountRate * 100).toFixed(1)}% discount rate reflects higher risk assumptions or uncertainty.`,
+                color: '#ef4444'
+            });
+        }
+
+        // Render insights
+        container.innerHTML = insights.map(insight => `
+            <div class="insight-card" style="border-left: 3px solid ${insight.color}; padding: var(--spacing-md); background: var(--surface); border-radius: var(--radius);">
+                <div style="display: flex; align-items: start; gap: var(--spacing-sm);">
+                    <i data-lucide="${insight.icon}" style="width: 20px; height: 20px; color: ${insight.color}; flex-shrink: 0; margin-top: 2px;"></i>
                     <div style="flex: 1;">
-                        <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 4px;">${tile.title}</div>
-                        <div style="font-size: 24px; font-weight: 700; color: var(--text-primary); line-height: 1.2;">
-                            ${tile.value}
-                            ${tile.subtitle ? `<div style="font-size: 14px; font-weight: 400; color: var(--text-secondary); margin-top: 2px;">${tile.subtitle}</div>` : ''}
-                        </div>
+                        <h4 style="margin: 0 0 8px 0; font-size: 14px; font-weight: 600; color: var(--text-primary);">${insight.title}</h4>
+                        <p style="margin: 0; font-size: 13px; color: var(--text-secondary); line-height: 1.5;">${insight.content}</p>
                     </div>
                 </div>
-
-                <!-- AI Insight Overlay -->
-                ${hasAI ? `
-                    <div style="
-                        margin-top: var(--spacing-md);
-                        padding-top: var(--spacing-md);
-                        border-top: 1px solid var(--border-color);
-                    ">
-                        <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 8px;">
-                            <i data-lucide="sparkles" style="width: 16px; height: 16px; color: ${tile.color};"></i>
-                            <span style="font-size: 12px; font-weight: 600; color: var(--text-primary);">AI Insight</span>
-                        </div>
-                        <p style="font-size: 13px; color: var(--text-secondary); line-height: 1.5; margin: 0 0 12px 0;">
-                            ${aiData.insight}
-                        </p>
-
-                        ${xFeeds.length > 0 ? `
-                            <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border-color);">
-                                <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 8px;">
-                                    <i data-lucide="twitter" style="width: 16px; height: 16px; color: #1DA1F2;"></i>
-                                    <span style="font-size: 12px; font-weight: 600; color: var(--text-primary);">X Feed Context</span>
-                                </div>
-                                <ul style="margin: 0; padding-left: 20px; font-size: 12px; color: var(--text-secondary); line-height: 1.6;">
-                                    ${xFeeds.map(feed => {
-                                        // Handle both object format and string format
-                                        const feedObj = typeof feed === 'object' && feed !== null ? feed : {
-                                            account: feed.match(/@(\w+)/)?.[0] || '@unknown',
-                                            content: feed,
-                                            isKeyAccount: feed.includes('@elonmusk') || feed.includes('@CathieDWood') || feed.toLowerCase().includes('cathie') || feed.toLowerCase().includes('wood'),
-                                            accountName: feed.includes('@elonmusk') ? 'Elon Musk' : feed.includes('@CathieDWood') ? 'Cathie Wood' : feed.match(/@(\w+)/)?.[1] || 'Unknown'
-                                        };
-                                        
-                                        const accountColor = feedObj.isKeyAccount ? '#0066cc' : '#666666';
-                                        const accountBg = feedObj.isKeyAccount ? 'rgba(0, 102, 204, 0.1)' : 'transparent';
-                                        const accountBorder = feedObj.isKeyAccount ? '1px solid rgba(0, 102, 204, 0.3)' : 'none';
-                                        const badgeIcon = feedObj.account === '@elonmusk' ? 'zap' : feedObj.account === '@CathieDWood' ? 'trending-up' : 'user';
-                                        
-                                        return `
-                                            <li style="margin-bottom: 8px; padding: 8px; background: ${accountBg}; border-left: ${accountBorder}; border-radius: 4px;">
-                                                ${feedObj.isKeyAccount ? `
-                                                    <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 4px;">
-                                                        <i data-lucide="${badgeIcon}" style="width: 14px; height: 14px; color: ${accountColor};"></i>
-                                                        <span style="font-weight: 600; color: ${accountColor}; font-size: 11px;">
-                                                            ${feedObj.accountName || feedObj.account}
-                                                        </span>
-                                                        <span style="font-size: 10px; color: var(--text-secondary); background: rgba(0, 102, 204, 0.15); padding: 2px 6px; border-radius: 3px; font-weight: 500;">
-                                                            KEY ACCOUNT
-                                                        </span>
-                                                    </div>
-                                                ` : `
-                                                    <div style="display: flex; align-items: center; gap: 4px; margin-bottom: 4px;">
-                                                        <span style="font-weight: 500; color: ${accountColor}; font-size: 11px;">
-                                                            ${feedObj.account}
-                                                        </span>
-                                                    </div>
-                                                `}
-                                                <div style="color: var(--text-secondary); line-height: 1.5; margin-left: ${feedObj.isKeyAccount ? '20px' : '0'};">
-                                                    ${feedObj.content || feed}
-                                                </div>
-                                            </li>
-                                        `;
-                                    }).join('')}
-                                </ul>
-                            </div>
-                        ` : ''}
-
-                        ${risks.length > 0 ? `
-                            <div style="margin-top: 12px;">
-                                <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 8px;">
-                                    <i data-lucide="alert-triangle" style="width: 16px; height: 16px; color: #ef4444;"></i>
-                                    <span style="font-size: 12px; font-weight: 600; color: var(--text-primary);">Risks</span>
-                                </div>
-                                <ul style="margin: 0; padding-left: 20px; font-size: 12px; color: #ef4444; line-height: 1.6;">
-                                    ${risks.map(risk => `<li style="margin-bottom: 4px;">${risk}</li>`).join('')}
-                                </ul>
-                            </div>
-                        ` : ''}
-
-                        ${opportunities.length > 0 ? `
-                            <div style="margin-top: 12px;">
-                                <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 8px;">
-                                    <i data-lucide="trending-up" style="width: 16px; height: 16px; color: #10b981;"></i>
-                                    <span style="font-size: 12px; font-weight: 600; color: var(--text-primary);">Opportunities</span>
-                                </div>
-                                <ul style="margin: 0; padding-left: 20px; font-size: 12px; color: #10b981; line-height: 1.6;">
-                                    ${opportunities.map(opp => `<li style="margin-bottom: 4px;">${opp}</li>`).join('')}
-                                </ul>
-                            </div>
-                        ` : ''}
-                    </div>
-                ` : `
-                    <div style="
-                        margin-top: var(--spacing-md);
-                        padding-top: var(--spacing-md);
-                        border-top: 1px solid var(--border-color);
-                        text-align: center;
-                        font-size: 12px;
-                        color: var(--text-secondary);
-                    ">
-                        <i data-lucide="loader" class="spinning" style="width: 16px; height: 16px; display: inline-block; margin-right: 6px;"></i>
-                        Generating AI insights...
-                    </div>
-                `}
             </div>
-        `;
-    }
+        `).join('');
 
-    generateKeyInsights(data, inputs) {
-        // Legacy function kept for compatibility - now calls enhanced version
-        this.generateEnhancedInsightTiles(data, inputs);
+        if (window.lucide) window.lucide.createIcons();
     }
 
     generateValueDrivers(data, inputs) {
@@ -6964,24 +6631,7 @@ class ValuationApp {
                 },
                 earth: {
                     adjustedValue: mcStats.earthValue?.mean || 0,
-                    terminalValue: mcStats.earthValue?.mean || 0,
-                    // Include cash flow timeline data from Monte Carlo response
-                    cashFlow: data.earth?.cashFlow || [],
-                    presentValue: data.earth?.presentValue || [],
-                    // Generate revenue array for table display
-                    revenue: data.earth?.cashFlow ? data.earth.cashFlow.map((cf, i) => ({
-                        year: cf.year || 2024 + i,
-                        value: cf.value * 3, // Estimate revenue as 3x cash flow
-                        breakdown: {
-                            starlink: cf.value * 2.25,
-                            starshield: cf.value * 0.3,
-                            launch: cf.value * 0.45
-                        }
-                    })) : [],
-                    costs: data.earth?.cashFlow ? data.earth.cashFlow.map((cf, i) => ({
-                        year: cf.year || 2024 + i,
-                        value: cf.value * 1.5 // Estimate costs
-                    })) : []
+                    terminalValue: mcStats.earthValue?.mean || 0
                 },
                 mars: {
                     adjustedValue: mcStats.marsValue?.mean || 0,
@@ -6992,19 +6642,7 @@ class ValuationApp {
             // Update dashboard with Monte Carlo mean values
             // Mark as allowed since this is Monte Carlo data
             dashboardData._allowDeterministic = false; // This is Monte Carlo, not deterministic
-            
-            // Debug: Log cash flow data
-            console.log('📊 Dashboard update with cash flow:', {
-                hasCashFlow: !!dashboardData.earth?.cashFlow,
-                cashFlowLength: dashboardData.earth?.cashFlow?.length || 0,
-                firstValue: dashboardData.earth?.cashFlow?.[0]?.value,
-                lastValue: dashboardData.earth?.cashFlow?.[dashboardData.earth?.cashFlow?.length - 1]?.value
-            });
-            
             this.updateDashboard(dashboardData);
-            
-            // Also update currentData so charts can access it
-            this.currentData = dashboardData;
             
             // Store Monte Carlo results as the primary valuation data
             this.currentData = dashboardData;
@@ -10687,9 +10325,8 @@ class ValuationApp {
                 'openai:gpt-4-turbo': 'GPT-4 Turbo',
                 'openai:gpt-4': 'GPT-4',
                 'openai:gpt-3.5-turbo': 'GPT-3.5 Turbo',
-                'grok:grok-3': 'Grok-3',
-                'grok:grok-2': 'Grok-2 (Deprecated)',
-                'grok:grok-beta': 'Grok Beta (Deprecated)'
+                'grok:grok-2': 'Grok-2',
+                'grok:grok-beta': 'Grok Beta'
             };
             currentDisplay.textContent = modelNames[this.aiModel] || this.aiModel;
         }
@@ -11436,6 +11073,330 @@ class ValuationApp {
         if (svg && svg.querySelectorAll('line').length === 0) {
             svg.remove();
         }
+    }
+
+    // ==================== TERMINAL DASHBOARD ====================
+
+    async generateDashboardLayout(data, inputs) {
+        const gridContainer = document.getElementById('dashboardGrid');
+        if (!gridContainer) return;
+
+        gridContainer.innerHTML = '<div style="grid-column: 1 / -1; display: flex; align-items: center; justify-content: center; color: var(--text-secondary); padding: var(--spacing-xl);"><div style="text-align: center;"><i data-lucide="loader" class="spinning" style="width: 32px; height: 32px; margin: 0 auto 16px; display: block;"></i><p>Generating terminal layout...</p></div></div>';
+        if (window.lucide) window.lucide.createIcons();
+
+        try {
+            const response = await fetch('/api/insights/dashboard-layout', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ data, inputs, gridColumns: 4 })
+            });
+            const result = await response.json();
+            
+            if (result.success && result.layout) {
+                await this.renderDashboardGrid(result.layout.tiles, data, inputs, gridContainer);
+            } else {
+                await this.generateDashboardLayoutFallback(data, inputs, gridContainer);
+            }
+        } catch (error) {
+            console.error('Error generating dashboard layout:', error);
+            await this.generateDashboardLayoutFallback(data, inputs, gridContainer);
+        }
+    }
+
+    async generateDashboardLayoutFallback(data, inputs, gridContainer) {
+        const totalValue = data.total?.value || 0;
+        const earthValue = data.earth?.adjustedValue || 0;
+        const marsValue = data.mars?.adjustedValue || 0;
+        const earthPercent = totalValue > 0 ? (earthValue / totalValue) * 100 : 0;
+        const marsPercent = totalValue > 0 ? (marsValue / totalValue) * 100 : 0;
+
+        const formatBillion = (value) => {
+            if (value >= 1000) return `$${(value / 1000).toFixed(1)}T`;
+            return `$${value.toFixed(1)}B`;
+        };
+
+        const allTiles = [
+            { id: 'total-valuation', icon: 'zap', title: 'Total Enterprise Value', value: formatBillion(totalValue), color: '#0066cc', size: 'horizontal', insightType: 'valuation', data: { totalValue, earthValue, marsValue } },
+            { id: 'earth-operations', icon: 'globe', title: 'Earth Operations', value: `${earthPercent.toFixed(1)}%`, subtitle: formatBillion(earthValue), color: '#10b981', size: 'square', insightType: 'starlink-earth', data: { earthValue, earthPercent } },
+            { id: 'mars-operations', icon: 'rocket', title: 'Mars Operations', value: `${marsPercent.toFixed(1)}%`, subtitle: formatBillion(marsValue), color: '#f59e0b', size: 'square', insightType: 'mars-optionality', data: { marsValue, marsPercent } },
+            { id: 'revenue-growth', icon: 'trending-up', title: 'Revenue Growth', value: '25.0%', color: '#10b981', size: 'square', insightType: 'financial', data: {} },
+            { id: 'margin-expansion', icon: 'arrow-up', title: 'Margin Expansion', value: '15.0%', color: '#10b981', size: 'square', insightType: 'financial', data: {} },
+            { id: 'capex-efficiency', icon: 'zap', title: 'Capex Efficiency', value: '85.0%', color: '#0066cc', size: 'square', insightType: 'financial', data: {} },
+            { id: 'x-posts', icon: 'message-square', title: 'Key X Posts', value: 'Recent', color: '#1da1f2', size: 'horizontal', insightType: 'x-feeds', data: {}, isSpecialTile: true },
+            { id: 'news', icon: 'newspaper', title: 'Recent News', value: 'Latest', color: '#ef4444', size: 'horizontal', insightType: 'news', data: {}, isSpecialTile: true },
+            { id: 'comprehensive-overview', icon: 'layout-dashboard', title: 'Comprehensive Overview', value: 'Summary', color: '#0066cc', size: 'large', insightType: 'valuation-summary', data: { totalValue, earthValue, marsValue } }
+        ];
+
+        const tiles = this.packGridTiles(allTiles, 4);
+        await this.renderDashboardGrid(tiles, data, inputs, gridContainer);
+    }
+
+    async renderDashboardGrid(tiles, data, inputs, gridContainer) {
+        gridContainer.innerHTML = '';
+        gridContainer.style.display = 'grid';
+        gridContainer.style.gridTemplateColumns = 'repeat(4, 1fr)';
+        gridContainer.style.gridAutoRows = 'minmax(150px, auto)';
+        gridContainer.style.gap = 'var(--spacing-sm)';
+        gridContainer.style.height = 'fit-content';
+        gridContainer.style.maxHeight = '100%';
+        gridContainer.style.overflow = 'hidden';
+
+        for (const tile of tiles) {
+            let insightData = null;
+            if (data && tile.insightType) {
+                try {
+                    const response = await fetch('/api/insights/enhanced', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            valuationData: data,
+                            inputs: inputs,
+                            tileId: tile.id,
+                            tileTitle: tile.title,
+                            tileValue: tile.value,
+                            context: {
+                                metric: tile.title,
+                                value: tile.value,
+                                subtitle: tile.subtitle,
+                                tileType: tile.insightType
+                            }
+                        })
+                    });
+                    const result = await response.json();
+                    insightData = result.success ? result.data : null;
+                } catch (error) {
+                    console.error(`Error fetching insight for tile ${tile.id}:`, error);
+                }
+            }
+            const tileHTML = this.renderDashboardTile(tile, insightData);
+            const tempDiv = document.createElement('div');
+            tempDiv.innerHTML = tileHTML.trim();
+            const tileElement = tempDiv.firstElementChild;
+            if (tileElement) {
+                gridContainer.appendChild(tileElement);
+            }
+        }
+        if (window.lucide) window.lucide.createIcons();
+    }
+
+    packGridTiles(tiles, gridColumns) {
+        const occupied = new Set();
+        const isAvailable = (col, row, width, height) => {
+            for (let r = row; r < row + height; r++) {
+                for (let c = col; c < col + width; c++) {
+                    if (c >= gridColumns || occupied.has(`${c},${r}`)) {
+                        return false;
+                    }
+                }
+            }
+            return true;
+        };
+        const markOccupied = (col, row, width, height) => {
+            for (let r = row; r < row + height; r++) {
+                for (let c = col; c < col + width; c++) {
+                    occupied.add(`${c},${r}`);
+                }
+            }
+        };
+
+        const tilePriority = { 'large': 0, '2x2': 0, 'vertical': 1, '1x2': 1, 'horizontal': 2, '2x1': 2, 'square': 3 };
+        const sortedTiles = [...tiles].sort((a, b) => {
+            return (tilePriority[a.size] || 3) - (tilePriority[b.size] || 3);
+        });
+
+        const placedTiles = [];
+        for (const tile of sortedTiles) {
+            let placed = false;
+            let width = 1;
+            let height = 1;
+            if (tile.size === 'horizontal' || tile.size === '2x1') {
+                width = 2;
+                height = 1;
+            } else if (tile.size === 'vertical' || tile.size === '1x2') {
+                width = 1;
+                height = 2;
+            } else if (tile.size === 'large' || tile.size === '2x2') {
+                width = 2;
+                height = 2;
+            }
+
+            for (let row = 0; row < 20 && !placed; row++) {
+                for (let col = 0; col <= gridColumns - width && !placed; col++) {
+                    if (isAvailable(col, row, width, height)) {
+                        tile.gridColumn = `${col + 1} / ${col + width + 1}`;
+                        tile.gridRow = `${row + 1} / ${row + height + 1}`;
+                        markOccupied(col, row, width, height);
+                        placedTiles.push(tile);
+                        placed = true;
+                    }
+                }
+            }
+        }
+        return placedTiles;
+    }
+
+    renderDashboardTile(tile, aiData) {
+        const tileStyles = {
+            square: { gridColumn: tile.gridColumn || 'auto', gridRow: tile.gridRow || 'auto' },
+            horizontal: { gridColumn: tile.gridColumn || 'span 2', gridRow: tile.gridRow || 'auto' },
+            '2x1': { gridColumn: tile.gridColumn || 'span 2', gridRow: tile.gridRow || 'auto' },
+            vertical: { gridColumn: tile.gridColumn || 'auto', gridRow: tile.gridRow || 'span 2' },
+            '1x2': { gridColumn: tile.gridColumn || 'auto', gridRow: tile.gridRow || 'span 2' },
+            large: { gridColumn: tile.gridColumn || 'span 2', gridRow: tile.gridRow || 'span 2' },
+            '2x2': { gridColumn: tile.gridColumn || 'span 2', gridRow: tile.gridRow || 'span 2' }
+        };
+
+        const style = tileStyles[tile.size] || tileStyles.square;
+        const hasAI = aiData && aiData.insight;
+        const isLarge = tile.size === 'large' || tile.size === '2x2';
+        const isVertical = tile.size === 'vertical' || tile.size === '1x2';
+        const isHorizontal = tile.size === 'horizontal' || tile.size === '2x1';
+        
+        const titleSize = isLarge ? '8px' : '7px';
+        const valueSize = isLarge ? '20px' : (isVertical ? '16px' : '14px');
+        const subtitleSize = isLarge ? '10px' : '9px';
+        const insightSize = isLarge ? '18px' : (isVertical ? '16px' : (isHorizontal ? '14px' : '12px'));
+        const iconSize = isLarge ? '12px' : (isVertical ? '10px' : '8px');
+        const iconContainerSize = isLarge ? '20px' : (isVertical ? '16px' : '14px');
+
+        const isSpecialTile = tile.isSpecialTile;
+        const specialContent = isSpecialTile && aiData ? this.renderSpecialTileContent(tile, aiData) : '';
+        
+        return `
+            <div class="dashboard-tile" style="
+                grid-column: ${style.gridColumn};
+                grid-row: ${style.gridRow};
+                background: var(--surface);
+                border: 1px solid var(--border-color);
+                border-radius: var(--radius);
+                padding: ${isLarge ? '4px' : (isVertical ? '3px' : '2px')};
+                display: flex;
+                flex-direction: column;
+                transition: all 0.2s;
+                cursor: pointer;
+                min-height: 150px;
+                position: relative;
+                justify-content: flex-start;
+                gap: 0;
+                overflow: hidden;
+                height: 100%;
+            " onmouseover="this.style.boxShadow='0 4px 12px rgba(0,0,0,0.1)'; this.style.borderColor='${tile.color}'; this.style.transform='translateY(-2px)'" onmouseout="this.style.boxShadow='none'; this.style.borderColor='var(--border-color)'; this.style.transform='none'">
+                <div style="display: flex; align-items: start; gap: 2px; margin-bottom: ${hasAI && !isSpecialTile ? '1px' : '2px'}; flex-shrink: 0;">
+                    <div style="
+                        width: ${iconContainerSize};
+                        height: ${iconContainerSize};
+                        min-width: ${iconContainerSize};
+                        min-height: ${iconContainerSize};
+                        max-width: ${iconContainerSize};
+                        max-height: ${iconContainerSize};
+                        border-radius: 2px;
+                        background: ${tile.color}08;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        flex-shrink: 0;
+                    ">
+                        <i data-lucide="${tile.icon}" style="width: ${iconSize}; height: ${iconSize}; max-width: ${iconSize}; max-height: ${iconSize}; color: ${tile.color};"></i>
+                    </div>
+                    <div style="flex: 1; min-width: 0; overflow: hidden; max-width: calc(100% - ${iconContainerSize} - 4px);">
+                        <div style="font-size: ${titleSize}; color: var(--text-secondary); margin-bottom: 0px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.2px; line-height: 1.0;">${tile.title}</div>
+                        <div style="font-size: ${valueSize}; font-weight: 700; color: var(--text-primary); line-height: 1.0;">
+                            ${tile.value}
+                            ${tile.subtitle ? `<div style="font-size: ${subtitleSize}; font-weight: 500; color: var(--text-secondary); margin-top: 0px;">${tile.subtitle}</div>` : ''}
+                        </div>
+                    </div>
+                </div>
+                ${isSpecialTile ? specialContent : (hasAI ? `
+                    <div style="
+                        margin-top: 2px;
+                        padding-top: 2px;
+                        border-top: 1px solid var(--border-color);
+                        font-size: ${insightSize};
+                        color: var(--text-secondary);
+                        line-height: 1.2;
+                        flex: 1;
+                        overflow: hidden;
+                        display: flex;
+                        flex-direction: column;
+                        min-height: 0;
+                    ">
+                        <div style="
+                            overflow: hidden;
+                            text-overflow: ellipsis;
+                            display: -webkit-box;
+                            -webkit-line-clamp: ${isLarge ? '14' : (isVertical ? '11' : (isHorizontal ? '7' : '6'))};
+                            -webkit-box-orient: vertical;
+                            flex: 1;
+                            word-wrap: break-word;
+                            overflow-wrap: break-word;
+                        ">
+                            ${aiData.insight}
+                        </div>
+                    </div>
+                ` : '')}
+            </div>
+        `;
+    }
+
+    renderSpecialTileContent(tile, aiData) {
+        const isLarge = tile.size === 'large' || tile.size === '2x2';
+        const isHorizontal = tile.size === 'horizontal' || tile.size === '2x1';
+        const isVertical = tile.size === 'vertical' || tile.size === '1x2';
+        
+        if (tile.id === 'x-posts' && aiData.xFeeds && Array.isArray(aiData.xFeeds) && aiData.xFeeds.length > 0) {
+            const postCount = isLarge ? 8 : (isHorizontal ? 5 : (isVertical ? 4 : 3));
+            const fontSize = isLarge ? '14px' : (isHorizontal ? '13px' : '12px');
+            const maxHeight = isLarge ? 'calc(100% - 40px)' : (isHorizontal ? 'calc(100% - 35px)' : 'calc(100% - 30px)');
+            const charLimit = isLarge ? 250 : (isHorizontal ? 200 : 150);
+            
+            return `
+                <div style="margin-top: 2px; padding-top: 2px; border-top: 1px solid var(--border-color); display: flex; flex-direction: column; gap: 4px; flex: 1; overflow-y: auto; min-height: 0; max-height: ${maxHeight};">
+                    ${aiData.xFeeds.slice(0, postCount).map(post => `
+                        <div style="font-size: ${fontSize}; line-height: 1.4; padding: 4px 0; border-bottom: 1px solid rgba(0,0,0,0.05);">
+                            <div style="font-weight: 600; color: ${post.isKeyAccount ? tile.color : 'var(--text-secondary)'}; margin-bottom: 2px; font-size: ${parseInt(fontSize) - 1}px;">
+                                ${post.accountName || post.account}
+                            </div>
+                            <div style="color: var(--text-primary); word-wrap: break-word; line-height: 1.3;">
+                                ${(post.content || '').substring(0, charLimit)}${(post.content || '').length > charLimit ? '...' : ''}
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+            `;
+        } else if (tile.id === 'news' && aiData.news && Array.isArray(aiData.news) && aiData.news.length > 0) {
+            const itemCount = isLarge ? 8 : (isHorizontal ? 5 : (isVertical ? 4 : 3));
+            const fontSize = isLarge ? '14px' : (isHorizontal ? '13px' : '12px');
+            const maxHeight = isLarge ? 'calc(100% - 40px)' : (isHorizontal ? 'calc(100% - 35px)' : 'calc(100% - 30px)');
+            const charLimit = isLarge ? 250 : (isHorizontal ? 200 : 150);
+            
+            return `
+                <div style="margin-top: 2px; padding-top: 2px; border-top: 1px solid var(--border-color); display: flex; flex-direction: column; gap: 4px; flex: 1; overflow-y: auto; min-height: 0; max-height: ${maxHeight};">
+                    ${aiData.news.slice(0, itemCount).map(item => `
+                        <div style="font-size: ${fontSize}; line-height: 1.4; padding: 4px 0; border-bottom: 1px solid rgba(0,0,0,0.05);">
+                            <div style="font-weight: 600; color: ${tile.color}; margin-bottom: 2px; font-size: ${parseInt(fontSize) - 1}px;">
+                                ${item.title || item.source || 'News'}
+                            </div>
+                            <div style="color: var(--text-primary); word-wrap: break-word; line-height: 1.3;">
+                                ${(item.summary || item.content || '').substring(0, charLimit)}${(item.summary || item.content || '').length > charLimit ? '...' : ''}
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+            `;
+        }
+        return '';
+    }
+
+    async refreshDashboardInsights() {
+        if (!this.currentData) {
+            alert('Please calculate a valuation first');
+            return;
+        }
+        const gridContainer = document.getElementById('dashboardGrid');
+        if (!gridContainer) return;
+        
+        // Clear cached insights by regenerating layout
+        await this.generateDashboardLayout(this.currentData, this.getInputs());
     }
 }
 

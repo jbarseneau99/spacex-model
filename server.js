@@ -10,6 +10,7 @@ const Mach33Lib = require('./lib/mach33lib');
 const ValuationAlgorithms = require('./lib/valuation-algorithms');
 const CalculationEngine = require('./lib/calculation-engine');
 const FactorModelsService = require('./services/factor-models');
+const LaunchDataService = require('./services/launch-data');
 
 const app = express();
 const PORT = process.env.PORT || 2999;
@@ -47,6 +48,7 @@ let modelStructure = null;
 let valuationAlgorithms = null; // Keep for validation/testing
 const calculationEngine = new CalculationEngine(); // Primary calculation engine
 const factorModelsService = new FactorModelsService();
+const launchDataService = new LaunchDataService();
 
 function loadData() {
   try {
@@ -260,6 +262,209 @@ app.get('/api/insights', (req, res) => {
   // Calculate insights from the data
   const insights = calculateInsights();
   res.json(insights);
+});
+
+// Generate dashboard layout (Bloomberg Terminal Style)
+app.post('/api/insights/dashboard-layout', async (req, res) => {
+  try {
+    const { data, inputs, gridColumns = 4 } = req.body;
+    
+    // For now, return a structured layout format
+    // AI will generate this in the future
+    const totalValue = data?.total?.value || 0;
+    const earthValue = data?.earth?.adjustedValue || 0;
+    const marsValue = data?.mars?.adjustedValue || 0;
+    const earthPercent = totalValue > 0 ? (earthValue / totalValue) * 100 : 0;
+    const marsPercent = totalValue > 0 ? (marsValue / totalValue) * 100 : 0;
+
+    const formatBillion = (value) => {
+      if (value >= 1000) return `$${(value / 1000).toFixed(1)}T`;
+      return `$${value.toFixed(1)}B`;
+    };
+
+    // Generate layout structure (AI will enhance this later)
+    const layout = {
+      gridColumns: gridColumns,
+      tiles: [
+        {
+          id: 'total-valuation',
+          icon: 'zap',
+          title: 'Total Enterprise Value',
+          value: formatBillion(totalValue),
+          color: '#0066cc',
+          size: 'horizontal',
+          gridColumn: '1 / 3',
+          gridRow: '1 / 2',
+          insightType: 'valuation',
+          data: { totalValue, earthValue, marsValue }
+        },
+        {
+          id: 'earth-operations',
+          icon: 'globe',
+          title: 'Earth Operations',
+          value: `${earthPercent.toFixed(1)}%`,
+          subtitle: formatBillion(earthValue),
+          color: '#10b981',
+          size: 'square',
+          gridColumn: '3 / 4',
+          gridRow: '1 / 2',
+          insightType: 'starlink-earth',
+          data: { earthValue, earthPercent }
+        },
+        {
+          id: 'mars-operations',
+          icon: 'rocket',
+          title: 'Mars Operations',
+          value: `${marsPercent.toFixed(1)}%`,
+          subtitle: formatBillion(marsValue),
+          color: '#f59e0b',
+          size: 'square',
+          gridColumn: '4 / 5',
+          gridRow: '1 / 2',
+          insightType: 'mars',
+          data: { marsValue, marsPercent }
+        },
+        {
+          id: 'starlink-penetration',
+          icon: 'trending-up',
+          title: 'Starlink Penetration',
+          value: `${((inputs?.earth?.starlinkPenetration || 0) * 100).toFixed(1)}%`,
+          color: '#10b981',
+          size: 'square',
+          gridColumn: '1 / 2',
+          gridRow: '2 / 3',
+          insightType: 'starlink-earth',
+          data: { penetration: inputs?.earth?.starlinkPenetration || 0 }
+        },
+        {
+          id: 'launch-volume',
+          icon: 'rocket',
+          title: 'Launch Volume',
+          value: `${inputs?.earth?.launchVolume || 0}/year`,
+          color: '#0066cc',
+          size: 'square',
+          gridColumn: '2 / 3',
+          gridRow: '2 / 3',
+          insightType: 'launch',
+          data: { launchVolume: inputs?.earth?.launchVolume || 0 }
+        },
+        {
+          id: 'discount-rate',
+          icon: 'percent',
+          title: 'Discount Rate',
+          value: `${((inputs?.financial?.discountRate || 0.12) * 100).toFixed(1)}%`,
+          color: inputs?.financial?.discountRate < 0.10 ? '#10b981' : inputs?.financial?.discountRate > 0.15 ? '#ef4444' : '#f59e0b',
+          size: 'vertical',
+          gridColumn: '3 / 4',
+          gridRow: '2 / 4',
+          insightType: 'risk',
+          data: { discountRate: inputs?.financial?.discountRate || 0.12 }
+        },
+        {
+          id: 'mars-timeline',
+          icon: 'calendar',
+          title: 'Mars Timeline',
+          value: `${inputs?.mars?.firstColonyYear || 2030}`,
+          color: '#f59e0b',
+          size: 'square',
+          gridColumn: '4 / 5',
+          gridRow: '2 / 3',
+          insightType: 'mars',
+          data: { firstColonyYear: inputs?.mars?.firstColonyYear || 2030 }
+        },
+        // Add 2x2 large tile for comprehensive overview
+        {
+          id: 'comprehensive-overview',
+          icon: 'layout-dashboard',
+          title: 'Comprehensive Overview',
+          value: 'Analysis',
+          color: '#0066cc',
+          size: '2x2',
+          gridColumn: '1 / 3',
+          gridRow: '3 / 5',
+          insightType: 'valuation',
+          data: { totalValue, earthValue, marsValue }
+        },
+        // X Posts Tile
+        {
+          id: 'x-posts',
+          icon: 'message-square',
+          title: 'Key X Posts',
+          value: 'Recent',
+          color: '#1da1f2',
+          size: 'horizontal',
+          gridColumn: '3 / 5',
+          gridRow: '4 / 5',
+          insightType: 'x-feeds',
+          data: {},
+          isSpecialTile: true
+        },
+        // News Tile
+        {
+          id: 'news',
+          icon: 'newspaper',
+          title: 'Recent News',
+          value: 'Latest',
+          color: '#ef4444',
+          size: 'horizontal',
+          gridColumn: '1 / 3',
+          gridRow: '5 / 6',
+          insightType: 'news',
+          data: {},
+          isSpecialTile: true
+        }
+      ]
+    };
+
+    res.json({ success: true, layout });
+  } catch (error) {
+    console.error('Error generating dashboard layout:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Launch Data API Endpoints
+app.get('/api/data/launches/recent', async (req, res) => {
+  try {
+    const limit = parseInt(req.query.limit) || 10;
+    const launches = await launchDataService.getRecentSpaceXLaunches(limit);
+    res.json({ success: true, launches });
+  } catch (error) {
+    console.error('Error fetching recent launches:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.get('/api/data/launches/stats', async (req, res) => {
+  try {
+    const stats = await launchDataService.getSpaceXLaunchStats();
+    res.json({ success: true, stats });
+  } catch (error) {
+    console.error('Error fetching launch stats:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.get('/api/data/launches/upcoming', async (req, res) => {
+  try {
+    const limit = parseInt(req.query.limit) || 5;
+    const launches = await launchDataService.getUpcomingLaunches(limit);
+    res.json({ success: true, launches });
+  } catch (error) {
+    console.error('Error fetching upcoming launches:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.get('/api/data/launches/starship', async (req, res) => {
+  try {
+    const limit = parseInt(req.query.limit) || 10;
+    const launches = await launchDataService.getStarshipLaunches(limit);
+    res.json({ success: true, launches });
+  } catch (error) {
+    console.error('Error fetching Starship launches:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
 });
 
 // Get scenarios - load from database, fallback to defaults if none exist
@@ -3895,7 +4100,7 @@ app.post('/api/insights/bandwidth-economics', (req, res) => {
 // Enhanced insights endpoint with Grok, web search, and X feed access
 app.post('/api/insights/enhanced', async (req, res) => {
   try {
-    const { data, inputs, insightType } = req.body;
+    const { data, inputs, insightType, context } = req.body;
     // Use grok-3 as default (grok-beta and grok-2 were deprecated)
     let requestedModel = req.headers['x-ai-model'] || 'grok:grok-3';
     
@@ -3911,18 +4116,89 @@ app.post('/api/insights/enhanced', async (req, res) => {
     const earthPercent = totalValue > 0 ? (earthValue / totalValue) * 100 : 0;
     const marsPercent = totalValue > 0 ? (marsValue / totalValue) * 100 : 0;
     
+    // Get tile-specific context
+    const tileContext = context || {};
+    const tileMetric = tileContext.metric || 'General Valuation';
+    const tileValue = tileContext.value || 'N/A';
+    const tileId = data?.tileId || '';
+    
+    // Special handling for X Posts tile
+    if (insightType === 'x-feeds') {
+      const prompt = `You have access to X (Twitter) feeds. Provide the 3-5 most relevant recent posts about SpaceX, Starlink, or related topics.
+
+PRIORITIZE posts from key accounts:
+- @elonmusk (SpaceX CEO)
+- @CathieDWood (ARK Invest CEO)  
+- Arron Burnet (Mach33)
+- Vlad
+- Other influential SpaceX investors/analysts
+
+Return ONLY a JSON object with this exact format:
+{
+  "xFeeds": [
+    {
+      "account": "@elonmusk",
+      "content": "full tweet text here",
+      "isKeyAccount": true,
+      "accountName": "Elon Musk"
+    }
+  ]
+}`;
+      
+      try {
+        const aiResponse = await callAIAPI(requestedModel, prompt, 1000);
+        const jsonMatch = aiResponse.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          const result = JSON.parse(jsonMatch[0]);
+          return res.json({ success: true, data: { xFeeds: result.xFeeds || [] } });
+        }
+      } catch (error) {
+        console.error('[Enhanced Insights] Error fetching X feeds:', error);
+      }
+      return res.json({ success: true, data: { xFeeds: [] } });
+    }
+    
+    // Special handling for News tile
+    if (insightType === 'news') {
+      const prompt = `Provide 3-5 recent news articles about SpaceX, Starlink, or related topics. Return ONLY a JSON object:
+{
+  "news": [
+    {
+      "title": "Article Title",
+      "summary": "Brief summary of the article",
+      "source": "Source Name"
+    }
+  ]
+}`;
+      
+      try {
+        const aiResponse = await callAIAPI(requestedModel, prompt, 1000);
+        const jsonMatch = aiResponse.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          const result = JSON.parse(jsonMatch[0]);
+          return res.json({ success: true, data: { news: result.news || [] } });
+        }
+      } catch (error) {
+        console.error('[Enhanced Insights] Error fetching news:', error);
+      }
+      return res.json({ success: true, data: { news: [] } });
+    }
+    
     // Build context for RAG from documentation
     const ragContext = await getRAGContext(insightType, data, inputs);
     
-    // Create prompt for Grok with X feed access
-    const prompt = `You are analyzing SpaceX valuation data. Use your access to X (Twitter) feeds to provide real-time insights.
+    // Create prompt for Grok with X feed access - TILE SPECIFIC
+    const prompt = `You are analyzing SpaceX valuation data for a SPECIFIC METRIC tile in a Bloomberg Terminal-style dashboard.
 
-Valuation Data:
+FOCUS ON THIS SPECIFIC METRIC ONLY:
+- Metric Name: "${tileMetric}"
+- Metric Value: "${tileValue}"
+- Tile ID: "${tileId}"
+
+Background Context (for reference only):
 - Total Enterprise Value: $${(totalValue / 1000).toFixed(1)}T
 - Earth Operations Value: $${(earthValue / 1000).toFixed(1)}T (${earthPercent.toFixed(1)}%)
 - Mars Operations Value: $${(marsValue / 1000).toFixed(1)}T (${marsPercent.toFixed(1)}%)
-
-Key Inputs:
 - Starlink Penetration: ${((inputs?.earth?.starlinkPenetration || 0) * 100).toFixed(1)}%
 - Launch Volume: ${inputs?.earth?.launchVolume || 0}/year
 - Discount Rate: ${((inputs?.financial?.discountRate || 0.12) * 100).toFixed(1)}%
@@ -3931,13 +4207,15 @@ Key Inputs:
 Relevant Context from Documentation:
 ${ragContext}
 
-Please provide:
-1. A concise insight about this data point (2-3 sentences)
-2. Real-time context from X feeds about SpaceX, Starlink, or related topics
-   - PRIORITIZE and HIGHLIGHT posts from key accounts: @elonmusk (SpaceX CEO), @CathieDWood (ARK Invest CEO), and other influential SpaceX investors/analysts
-   - Include the account handle and indicate if it's from a key account
-3. Market sentiment or recent developments that might affect this valuation
-4. Any risks or opportunities highlighted by current discussions
+CRITICAL: Provide insights SPECIFICALLY about "${tileMetric}" (value: ${tileValue}). Do NOT repeat generic valuation information. Focus ONLY on:
+1. What THIS SPECIFIC METRIC means and why THIS VALUE matters
+2. Recent X posts SPECIFICALLY about ${tileMetric} (not general SpaceX posts)
+   - PRIORITIZE posts from: @elonmusk, @CathieDWood, Arron Burnet (Mach33), Vlad
+   - Only include posts RELEVANT to ${tileMetric}
+3. How THIS METRIC'S VALUE affects the overall valuation
+4. Risks/opportunities SPECIFIC to ${tileMetric}
+
+Keep it concise (2-3 sentences max). Make it UNIQUE to this metric.
 
 Format your response as JSON with:
 {
@@ -3954,6 +4232,18 @@ Format your response as JSON with:
       "content": "tweet content",
       "isKeyAccount": true,
       "accountName": "Cathie Wood"
+    },
+    {
+      "account": "@arronburnet",
+      "content": "tweet content",
+      "isKeyAccount": true,
+      "accountName": "Arron Burnet"
+    },
+    {
+      "account": "@vlad",
+      "content": "tweet content",
+      "isKeyAccount": true,
+      "accountName": "Vlad"
     },
     {
       "account": "@username",
@@ -4012,17 +4302,32 @@ Format your response as JSON with:
                 // Try to extract account handle
                 const accountMatch = feed.match(/@(\w+)/);
                 const account = accountMatch ? `@${accountMatch[1]}` : '@unknown';
-                const isKeyAccount = account === '@elonmusk' || account === '@CathieDWood' || 
-                                   account.toLowerCase().includes('cathie') || 
-                                   account.toLowerCase().includes('wood');
+                const accountLower = account.toLowerCase();
+                const feedLower = feed.toLowerCase();
+                
+                // Check for key accounts
+                let isKeyAccount = false;
+                let accountName = account.replace('@', '');
+                
+                if (accountLower === '@elonmusk' || feedLower.includes('@elonmusk')) {
+                    isKeyAccount = true;
+                    accountName = 'Elon Musk';
+                } else if (accountLower === '@cathiedwood' || feedLower.includes('@cathiedwood') || feedLower.includes('cathie') || feedLower.includes('wood')) {
+                    isKeyAccount = true;
+                    accountName = 'Cathie Wood';
+                } else if (feedLower.includes('arron') || feedLower.includes('burnet') || feedLower.includes('mach33')) {
+                    isKeyAccount = true;
+                    accountName = 'Arron Burnet';
+                } else if (feedLower.includes('vlad')) {
+                    isKeyAccount = true;
+                    accountName = 'Vlad';
+                }
                 
                 return {
                   account: account,
                   content: feed,
                   isKeyAccount: isKeyAccount,
-                  accountName: account === '@elonmusk' ? 'Elon Musk' : 
-                              account === '@CathieDWood' ? 'Cathie Wood' : 
-                              account.replace('@', '')
+                  accountName: accountName
                 };
               }
               return feed;
@@ -4378,6 +4683,191 @@ app.put('/api/tam-data/:id', async (req, res) => {
 // Serve main page
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
+// AI Agent Chat Endpoint
+app.post('/api/agent/chat', async (req, res) => {
+  try {
+    const { message, systemPrompt, context, history } = req.body;
+    const requestedModel = req.headers['x-ai-model'] || 'grok:grok-3';
+    
+    if (!message) {
+      return res.json({ success: false, error: 'Message is required' });
+    }
+
+    // Build conversation history
+    const messages = [];
+    
+    // Add system prompt if provided
+    if (systemPrompt) {
+      messages.push({
+        role: 'system',
+        content: systemPrompt
+      });
+    }
+
+    // Add conversation history (last 10 messages)
+    if (history && Array.isArray(history)) {
+      history.forEach(msg => {
+        if (msg.role && msg.content) {
+          messages.push({
+            role: msg.role === 'assistant' ? 'assistant' : 'user',
+            content: msg.content
+          });
+        }
+      });
+    }
+
+    // Add context about current state
+    if (context) {
+      const contextMessage = `Current Context:
+- Current View: ${context.currentView || 'Unknown'}
+- Has Valuation Data: ${context.currentData ? 'Yes' : 'No'}
+${context.currentData ? `- Total Value: $${((context.currentData.total?.value || 0) / 1000).toFixed(1)}T` : ''}
+${context.inputs ? `- Key Inputs: Starlink Penetration ${((context.inputs.earth?.starlinkPenetration || 0) * 100).toFixed(1)}%, Launch Volume ${context.inputs.earth?.launchVolume || 0}/year` : ''}
+
+User Question: ${message}`;
+
+      messages.push({
+        role: 'user',
+        content: contextMessage
+      });
+    } else {
+      messages.push({
+        role: 'user',
+        content: message
+      });
+    }
+
+    // Call AI API with conversation history
+    let aiResponse;
+    try {
+      // Determine provider from model string
+      let provider = 'anthropic';
+      let actualModel = requestedModel;
+      
+      if (requestedModel.startsWith('openai:')) {
+        provider = 'openai';
+        actualModel = requestedModel.replace('openai:', '');
+      } else if (requestedModel.startsWith('grok:')) {
+        provider = 'grok';
+        actualModel = requestedModel.replace('grok:', '');
+      }
+
+      if (provider === 'grok') {
+        const apiKey = process.env.GROK_API_KEY || process.env.XAI_API_KEY;
+        if (!apiKey) {
+          throw new Error('GROK_API_KEY not configured');
+        }
+
+        const response = await fetch('https://api.x.ai/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiKey}`
+          },
+          body: JSON.stringify({
+            model: actualModel || 'grok-2',
+            messages: messages,
+            max_tokens: 2000,
+            temperature: 0.7
+          })
+        });
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(`Grok API error: ${response.status} - ${errorText}`);
+        }
+
+        const data = await response.json();
+        aiResponse = data.choices?.[0]?.message?.content || 'Sorry, I could not generate a response.';
+      } else if (provider === 'openai') {
+        const apiKey = process.env.OPENAI_API_KEY;
+        if (!apiKey) {
+          throw new Error('OPENAI_API_KEY not configured');
+        }
+
+        const response = await fetch('https://api.openai.com/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiKey}`
+          },
+          body: JSON.stringify({
+            model: actualModel || 'gpt-4o',
+            messages: messages,
+            max_tokens: 2000,
+            temperature: 0.7
+          })
+        });
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(`OpenAI API error: ${response.status} - ${errorText}`);
+        }
+
+        const data = await response.json();
+        aiResponse = data.choices?.[0]?.message?.content || 'Sorry, I could not generate a response.';
+      } else {
+        // Use Anthropic (Claude)
+        const apiKey = process.env.ANTHROPIC_API_KEY;
+        if (!apiKey) {
+          throw new Error('ANTHROPIC_API_KEY not configured');
+        }
+
+        // Convert messages format for Anthropic
+        const anthropicMessages = messages
+          .filter(m => m.role !== 'system')
+          .map(m => ({
+            role: m.role === 'assistant' ? 'assistant' : 'user',
+            content: m.content
+          }));
+
+        const systemMessage = messages.find(m => m.role === 'system')?.content || '';
+
+        const response = await fetch('https://api.anthropic.com/v1/messages', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': apiKey,
+            'anthropic-version': '2023-06-01'
+          },
+          body: JSON.stringify({
+            model: actualModel || 'claude-opus-4-1-20250805',
+            max_tokens: 2000,
+            system: systemMessage,
+            messages: anthropicMessages,
+            temperature: 0.7
+          })
+        });
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(`Anthropic API error: ${response.status} - ${errorText}`);
+        }
+
+        const data = await response.json();
+        aiResponse = data.content?.[0]?.text || 'Sorry, I could not generate a response.';
+      }
+
+      res.json({
+        success: true,
+        response: aiResponse
+      });
+    } catch (error) {
+      console.error('Agent chat API error:', error);
+      res.json({
+        success: false,
+        error: error.message || 'Failed to generate response'
+      });
+    }
+  } catch (error) {
+    console.error('Agent chat endpoint error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Internal server error'
+    });
+  }
 });
 
 // Initialize
