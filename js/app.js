@@ -1180,10 +1180,17 @@ class ValuationApp {
         // Update Earth cash flow table
         if (data.earth) {
             try {
+                console.log('📊 updateDashboard: Updating cash flow table with data:', {
+                    hasCashFlow: !!data.earth.cashFlow,
+                    cashFlowLength: data.earth.cashFlow?.length || 0,
+                    firstValue: data.earth.cashFlow?.[0]?.value
+                });
                 this.updateEarthCashFlowTable(data.earth);
             } catch (err) {
                 console.error('Error updating Earth cash flow table:', err);
             }
+        } else {
+            console.warn('⚠️ updateDashboard: No earth data provided');
         }
         // Revenue breakdown chart needs earth.revenue array
         if (data.earth && data.earth.revenue && Array.isArray(data.earth.revenue)) {
