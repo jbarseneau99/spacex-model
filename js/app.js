@@ -1177,17 +1177,20 @@ class ValuationApp {
             console.log('⏸️ Skipping cash flow timeline chart - no cash flow data available');
         }
         
-        // Update Earth cash flow table
+        // Update Earth cash flow tables (both main dashboard and Financials tab)
         if (data.earth) {
             try {
-                console.log('📊 updateDashboard: Updating cash flow table with data:', {
+                console.log('📊 updateDashboard: Updating cash flow tables with data:', {
                     hasCashFlow: !!data.earth.cashFlow,
                     cashFlowLength: data.earth.cashFlow?.length || 0,
                     firstValue: data.earth.cashFlow?.[0]?.value
                 });
+                // Update main dashboard cash flow table
+                this.updateCashFlowTable(data.earth);
+                // Update Financials tab cash flow table
                 this.updateEarthCashFlowTable(data.earth);
             } catch (err) {
-                console.error('Error updating Earth cash flow table:', err);
+                console.error('Error updating cash flow tables:', err);
             }
         } else {
             console.warn('⚠️ updateDashboard: No earth data provided');
@@ -1510,17 +1513,27 @@ class ValuationApp {
 
         earthData.cashFlow.forEach((item, index) => {
             const row = document.createElement('tr');
-            const year = item.year || index + 2024;
-            const revenue = item.value + (item.breakdown?.costs || 0) + (item.breakdown?.capex || 0); // Reconstruct revenue
-            const costs = item.breakdown?.costs || earthData.costs[index]?.value || 0;
-            const capex = item.breakdown?.capex || 0;
-            const cashFlow = item.value;
-            const pv = earthData.presentValue[index]?.value || 0;
-            const cumulativePV = earthData.presentValue[index]?.cumulative || 0;
+            const year = item.year || (2024 + index);
             
-            // Get revenue from revenue array if available
-            const revenueItem = earthData.revenue[index];
-            const actualRevenue = revenueItem?.value || revenue;
+            // Get revenue from revenue array if available, otherwise estimate
+            const revenueItem = earthData.revenue && earthData.revenue[index];
+            const actualRevenue = revenueItem ? (typeof revenueItem === 'object' ? revenueItem.value : revenueItem) : (item.value * 3); // Estimate revenue as 3x cash flow
+            
+            // Get costs from costs array if available, otherwise estimate
+            const costs = earthData.costs && earthData.costs[index] ? 
+                (typeof earthData.costs[index] === 'object' ? earthData.costs[index].value : earthData.costs[index]) : 
+                (actualRevenue * 0.6); // Estimate costs as 60% of revenue
+            
+            // Estimate capex (not in cash flow data, so derive from revenue)
+            const capex = actualRevenue * 0.15; // Estimate capex as 15% of revenue
+            
+            const cashFlow = item.value; // Already in billions
+            const pv = earthData.presentValue && earthData.presentValue[index] ? 
+                (typeof earthData.presentValue[index] === 'object' ? earthData.presentValue[index].value : earthData.presentValue[index]) : 
+                0;
+            const cumulativePV = earthData.presentValue && earthData.presentValue[index] ? 
+                (typeof earthData.presentValue[index] === 'object' ? earthData.presentValue[index].cumulative : 0) : 
+                0;
             
             row.innerHTML = `
                 <td>${year}</td>
