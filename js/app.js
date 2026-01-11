@@ -1162,8 +1162,16 @@ class ValuationApp {
                 console.error('Error updating cash flow timeline chart:', err);
             }
         } else {
-            // Monte Carlo results don't have cash flow timeline - skip chart update
-            console.log('⏸️ Skipping cash flow timeline chart - Monte Carlo results don\'t include timeline data');
+            // Try to get cash flow from Monte Carlo results if available
+            if (data.earth && data.earth.cashFlow && Array.isArray(data.earth.cashFlow)) {
+                try {
+                    this.updateCashFlowTimelineChart(data);
+                } catch (err) {
+                    console.error('Error updating cash flow timeline chart from Monte Carlo:', err);
+                }
+            } else {
+                console.log('⏸️ Skipping cash flow timeline chart - no cash flow data available');
+            }
         }
         // Revenue breakdown chart needs earth.revenue array
         if (data.earth && data.earth.revenue && Array.isArray(data.earth.revenue)) {
