@@ -1362,8 +1362,8 @@ body {
     align-items: center;
     justify-content: center;
     overflow: hidden;
-    min-height: 60px; /* Smaller height to show more charts */
-    max-height: 80px; /* Limit max height */
+    min-height: 80px; /* Increased height for better curve visibility */
+    max-height: 120px; /* Increased max height */
 }
 
 .tile-mini-chart {
@@ -1387,8 +1387,8 @@ body {
 .bloomberg-dense .tile-visualization {
     padding: 1px;
     border-width: 0.5px;
-    min-height: 50px; /* Smaller for dense mode */
-    max-height: 65px;
+    min-height: 70px; /* Increased for better curve visibility even in dense mode */
+    max-height: 100px;
 }
 
 .bloomberg-dense .tile-content-dual {
@@ -3313,6 +3313,88 @@ textarea:focus {
     width: 12px;
     height: 12px;
     color: var(--text-secondary);
+}
+
+/* Voice Mode Styles */
+.agent-chat-input-container.voice-mode .agent-chat-input {
+    display: none;
+}
+
+.agent-chat-input-container.voice-mode .agent-voice-record-btn {
+    display: flex !important;
+}
+
+.agent-voice-record-btn {
+    display: none;
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    height: 44px;
+    border-radius: var(--radius);
+    background: var(--primary-color);
+    color: white;
+    border: none;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.agent-voice-record-btn:hover {
+    background: var(--primary-color-dark, #0052a3);
+    transform: scale(1.05);
+}
+
+.agent-voice-record-btn.recording {
+    background: #dc3545;
+    animation: pulse 1.5s ease-in-out infinite;
+}
+
+.agent-voice-record-btn.recording:hover {
+    background: #c82333;
+}
+
+.agent-voice-stop-btn {
+    display: none;
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    height: 44px;
+    border-radius: var(--radius);
+    background: #ff6b6b;
+    color: white;
+    border: none;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.agent-voice-stop-btn:hover {
+    background: #ee5a52;
+    transform: scale(1.05);
+}
+
+.agent-chat-input-container.voice-mode .agent-voice-stop-btn {
+    display: flex !important;
+}
+
+.agent-chat-input-container.speaking .agent-voice-stop-btn {
+    display: flex !important;
+}
+
+@keyframes pulse {
+    0%, 100% {
+        box-shadow: 0 0 0 0 rgba(220, 53, 69, 0.7);
+    }
+    50% {
+        box-shadow: 0 0 0 10px rgba(220, 53, 69, 0);
+    }
+}
+
+.agent-header-btn.active {
+    background: rgba(0, 102, 204, 0.2);
+    color: var(--primary-color);
+}
+
+.agent-header-btn.active i {
+    color: var(--primary-color);
 }
 
 /* Agent Thinking Message - Subtle spinner for context change detection */

@@ -4077,6 +4077,9 @@
             Chart.register(zoomPlugin);
         }
     </script>
+    <script src="/js/grok-voice-service.js"></script>
+    <!-- Enhanced Agent System (additive, feature-flagged, disabled by default) -->
+    <script src="/js/agent-enhanced/loader.js"></script>
     <script src="/js/app.js"></script>
     <script>
         // Initialize Lucide icons
@@ -4132,6 +4135,9 @@
                 </div>
             </div>
             <div class="agent-header-right">
+                <button class="icon-button agent-header-btn" id="agentVoiceToggleBtn" title="Toggle Voice/Text Mode">
+                    <i data-lucide="mic" id="agentVoiceToggleIcon"></i>
+                </button>
                 <button class="icon-button agent-header-btn" id="agentCommentaryToggleBtn" title="Toggle Context Commentary">
                     <i data-lucide="message-square"></i>
                 </button>
@@ -4166,6 +4172,12 @@
                     placeholder="Type your message here..."
                     rows="2"
                 ></textarea>
+                <button class="btn btn-icon agent-voice-record-btn" id="agentVoiceRecordBtn" title="Start Recording" style="display: none;">
+                    <i data-lucide="mic" id="agentVoiceRecordIcon"></i>
+                </button>
+                <button class="btn btn-icon agent-voice-stop-btn" id="agentVoiceStopBtn" title="Stop Audio" style="display: none;">
+                    <i data-lucide="square" id="agentVoiceStopIcon"></i>
+                </button>
                 <button class="btn btn-primary" id="agentSendBtn" title="Send">
                     <i data-lucide="send"></i>
                 </button>

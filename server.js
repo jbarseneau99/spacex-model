@@ -6,6 +6,8 @@ const path = require('path');
 const fs = require('fs');
 const mongoose = require('mongoose');
 const fetch = require('node-fetch');
+const http = require('http');
+const WebSocket = require('ws');
 const Mach33Lib = require('./lib/mach33lib');
 const ValuationAlgorithms = require('./lib/valuation-algorithms');
 const CalculationEngine = require('./lib/calculation-engine');
@@ -13,6 +15,7 @@ const FactorModelsService = require('./services/factor-models');
 const LaunchDataService = require('./services/launch-data');
 
 const app = express();
+const server = http.createServer(app);
 const PORT = process.env.PORT || 2999;
 
 // Database connection - Use spacex_valuation database
@@ -325,16 +328,24 @@ app.post('/api/insights/dashboard-layout', async (req, res) => {
           data: { marsValue, marsPercent }
         },
         {
-          id: 'starlink-penetration',
-          icon: 'trending-up',
-          title: 'Starlink Penetration',
-          value: `${((inputs?.earth?.starlinkPenetration || 0) * 100).toFixed(1)}%`,
+          id: 'featured-insight',
+          icon: 'image',
+          title: 'Featured Insight',
+          value: '',
           color: '#10b981',
           size: 'square',
           gridColumn: '1 / 2',
           gridRow: '2 / 3',
-          insightType: 'starlink-earth',
-          data: { penetration: inputs?.earth?.starlinkPenetration || 0 }
+          insightType: 'image-comments',
+          contentType: 'image-comments',
+          isSpecialTile: true, // Mark as special tile to skip chart rendering
+          data: { 
+            penetration: inputs?.earth?.starlinkPenetration || 0,
+            earthValue: earthValue,
+            marsValue: marsValue,
+            totalValue: totalValue,
+            inputs: inputs
+          }
         },
         {
           id: 'launch-volume',
@@ -349,19 +360,6 @@ app.post('/api/insights/dashboard-layout', async (req, res) => {
           data: { launchVolume: inputs?.earth?.launchVolume || 0 }
         },
         {
-          id: 'discount-rate',
-          icon: 'percent',
-          title: 'Discount Rate',
-          value: `${((inputs?.financial?.discountRate || 0.12) * 100).toFixed(1)}%`,
-          color: inputs?.financial?.discountRate < 0.10 ? '#10b981' : inputs?.financial?.discountRate > 0.15 ? '#ef4444' : '#f59e0b',
-          size: 'vertical',
-          gridColumn: '3 / 4',
-          gridRow: '2 / 4',
-          insightType: 'risk',
-          data: { discountRate: inputs?.financial?.discountRate || 0.12 }
-        },
-        // News Tile - Under Discount Rate, 1 column by 1 row
-        {
           id: 'news',
           icon: 'newspaper',
           title: 'Recent News',
@@ -369,10 +367,23 @@ app.post('/api/insights/dashboard-layout', async (req, res) => {
           color: '#ef4444',
           size: 'square',
           gridColumn: '3 / 4',
-          gridRow: '4 / 5',
+          gridRow: '2 / 3',
           insightType: 'news',
+          contentType: 'news',
           data: {},
           isSpecialTile: true
+        },
+        {
+          id: 'discount-rate',
+          icon: 'percent',
+          title: 'Discount Rate',
+          value: `${((inputs?.financial?.discountRate || 0.12) * 100).toFixed(1)}%`,
+          color: inputs?.financial?.discountRate < 0.10 ? '#10b981' : inputs?.financial?.discountRate > 0.15 ? '#ef4444' : '#f59e0b',
+          size: 'vertical',
+          gridColumn: '3 / 4',
+          gridRow: '3 / 5',
+          insightType: 'risk',
+          data: { discountRate: inputs?.financial?.discountRate || 0.12 }
         },
         {
           id: 'mars-timeline',
@@ -397,6 +408,7 @@ app.post('/api/insights/dashboard-layout', async (req, res) => {
           gridColumn: '4 / 5',
           gridRow: '3 / 5',
           insightType: 'x-feeds',
+          contentType: 'x-feeds',
           data: {},
           isSpecialTile: true
         },
@@ -2211,8 +2223,32 @@ app.post('/api/attribution', async (req, res) => {
     let baseModel = null;
     if (baseModelId) {
       baseModel = await ValuationModel.findById(baseModelId).lean();
+      if (!baseModel) {
+        return res.status(404).json({
+          success: false,
+          error: 'Base model not found'
+        });
+      }
+    } else if (baseInputs) {
+      // If baseInputs provided but no baseModelId, create a temporary model object from inputs
+      // This happens when "Current Model" is selected but not saved
+      baseModel = {
+        _id: 'current-model',
+        name: 'Current Model (Unsaved)',
+        inputs: baseInputs,
+        results: {} // Will use current results if available
+      };
+      console.log('[Attribution API] Using current model inputs (unsaved model)');
     } else {
+      // Fallback: get most recent model
       baseModel = await ValuationModel.findOne().sort({ createdAt: -1 }).lean();
+      if (!baseModel) {
+        return res.status(404).json({
+          success: false,
+          error: 'No base model found and no current model inputs provided'
+        });
+      }
+      console.log('[Attribution API] Using most recent model as base (fallback)');
     }
     
     // Get comparison model
@@ -2224,46 +2260,329 @@ app.post('/api/attribution', async (req, res) => {
       });
     }
     
+    // Ensure models are different
+    if (baseModel._id === compareModel._id) {
+      return res.status(400).json({
+        success: false,
+        error: 'Base model and comparison model must be different'
+      });
+    }
+    
+    console.log('[Attribution API] Comparing models:', {
+      baseModelId: baseModel._id,
+      baseModelName: baseModel.name,
+      compareModelId: compareModel._id,
+      compareModelName: compareModel.name
+    });
+    
     const baseResults = baseModel?.results || {};
     const compareResults = compareModel?.results || {};
     
-    const baseValue = baseResults.total?.value || (baseResults.earth?.adjustedValue || 0) + (baseResults.mars?.adjustedValue || 0) || 0;
-    const compareValue = compareResults.total?.value || (compareResults.earth?.adjustedValue || 0) + (compareResults.mars?.adjustedValue || 0) || 0;
+    // Detect if models are spreadsheet reference models
+    const baseIsSpreadsheetReference = baseModel.isBaseline === true || 
+                                       baseModel.baselineSource === 'spreadsheet' ||
+                                       baseResults.monteCarlo?.spreadsheetReference !== undefined;
+    const compareIsSpreadsheetReference = compareModel.isBaseline === true || 
+                                          compareModel.baselineSource === 'spreadsheet' ||
+                                          compareResults.monteCarlo?.spreadsheetReference !== undefined;
+    
+    console.log('[Attribution API] Model types:', {
+      baseIsSpreadsheetReference,
+      compareIsSpreadsheetReference,
+      baseIsBaseline: baseModel.isBaseline,
+      compareIsBaseline: compareModel.isBaseline
+    });
+    
+    // Use Monte Carlo results if available, otherwise fall back to deterministic results
+    // Priority: monteCarlo.base > monteCarlo.mean > monteCarlo.statistics.total.mean > total.value > calculated sum
+    const getModelValue = (results) => {
+      // Check for Monte Carlo base value first (most accurate - deterministic base used in MC)
+      if (results.monteCarlo?.base !== undefined && results.monteCarlo.base !== null && !isNaN(results.monteCarlo.base)) {
+        return results.monteCarlo.base;
+      }
+      // Check for Monte Carlo mean value (statistical mean from simulation)
+      if (results.monteCarlo?.mean !== undefined && results.monteCarlo.mean !== null && !isNaN(results.monteCarlo.mean)) {
+        return results.monteCarlo.mean;
+      }
+      // Check for Monte Carlo statistics object (from saved simulations)
+      if (results.monteCarlo?.statistics?.total?.mean !== undefined && 
+          results.monteCarlo.statistics.total.mean !== null && 
+          !isNaN(results.monteCarlo.statistics.total.mean)) {
+        return results.monteCarlo.statistics.total.mean;
+      }
+      // Check for deterministic total value
+      if (results.total?.value !== undefined && results.total.value !== null && !isNaN(results.total.value)) {
+        return results.total.value;
+      }
+      // Fallback: calculate from components
+      const earthValue = results.earth?.adjustedValue || results.total?.breakdown?.earth || 0;
+      const marsValue = results.mars?.adjustedValue || results.total?.breakdown?.mars || 0;
+      return earthValue + marsValue;
+    };
+    
+    const baseValue = getModelValue(baseResults);
+    const compareValue = getModelValue(compareResults);
     const totalChange = compareValue - baseValue;
     
+    // Log which value source was used
+    const getValueSource = (results) => {
+      if (results.monteCarlo?.base !== undefined && results.monteCarlo.base !== null && !isNaN(results.monteCarlo.base)) {
+        return 'Monte Carlo base';
+      }
+      if (results.monteCarlo?.mean !== undefined && results.monteCarlo.mean !== null && !isNaN(results.monteCarlo.mean)) {
+        return 'Monte Carlo mean';
+      }
+      if (results.monteCarlo?.statistics?.total?.mean !== undefined) {
+        return 'Monte Carlo statistics mean';
+      }
+      if (results.total?.value !== undefined) {
+        return 'Deterministic total';
+      }
+      return 'Calculated sum';
+    };
+    
+    const baseSource = getValueSource(baseResults);
+    const compareSource = getValueSource(compareResults);
+    
+    console.log('[Attribution API] Valuation sources:', {
+      baseValue,
+      baseSource,
+      compareValue,
+      compareSource,
+      totalChange,
+      baseHasMonteCarlo: !!baseResults.monteCarlo,
+      compareHasMonteCarlo: !!compareResults.monteCarlo,
+      baseMonteCarloKeys: baseResults.monteCarlo ? Object.keys(baseResults.monteCarlo) : [],
+      compareMonteCarloKeys: compareResults.monteCarlo ? Object.keys(compareResults.monteCarlo) : []
+    });
+    
     // Get inputs for both models
-    const baseInputsData = baseInputs || baseModel?.inputs || {};
+    // CRITICAL: If baseModelId is provided, ALWAYS use baseModel.inputs from database
+    // Only use baseInputs if baseModelId is NOT provided (unsaved current model)
+    const baseInputsData = (baseModelId && baseModel?.inputs) ? baseModel.inputs : (baseInputs || baseModel?.inputs || {});
     const compareInputs = compareModel?.inputs || {};
     
-    // Calculate Greeks using same logic as /api/greeks endpoint
-    // Simplified calculation - in production would reuse Greeks calculation function
-    const baseEarthValue = baseResults.earth?.adjustedValue || baseResults.total?.breakdown?.earth || 6739;
-    const baseMarsValue = baseResults.mars?.adjustedValue || baseResults.total?.breakdown?.mars || 8.8;
+    // Log which inputs are being used
+    console.log('[Attribution API] Input sources:', {
+      baseModelIdProvided: !!baseModelId,
+      baseUsingProvidedInputs: !baseModelId && !!baseInputs,
+      baseUsingDatabaseInputs: !!baseModelId && !!baseModel?.inputs,
+      baseModelHasInputs: !!baseModel?.inputs,
+      baseInputsKeys: baseInputsData ? Object.keys(baseInputsData).join(', ') : 'none',
+      compareInputsKeys: compareInputs ? Object.keys(compareInputs).join(', ') : 'none',
+      baseDilutionFactor: baseInputsData?.financial?.dilutionFactor,
+      baseDiscountRate: baseInputsData?.financial?.discountRate,
+      baseStarlinkPenetration: baseInputsData?.earth?.starlinkPenetration,
+      baseLaunchVolume: baseInputsData?.earth?.launchVolume,
+      compareDilutionFactor: compareInputs?.financial?.dilutionFactor,
+      compareDiscountRate: compareInputs?.financial?.discountRate,
+      compareStarlinkPenetration: compareInputs?.earth?.starlinkPenetration,
+      compareLaunchVolume: compareInputs?.earth?.launchVolume
+    });
     
-    // Estimate Greeks based on base values (simplified)
-    const greeks = {
-      earth: {
-        delta: {
-          'Starlink Penetration': { value: 45000, unit: '$B/%' },
-          'Launch Volume': { value: 1200, unit: '$B/launch' }
-        },
-        rho: {
-          'Discount Rate': { value: -35000, unit: '$B/%' }
+    // Calculate Greeks dynamically for BOTH models using the same logic as /api/greeks endpoint
+    // This ensures we have accurate Greeks for each model's specific inputs
+    console.log('[Attribution API] Calculating Greeks for both models...');
+    
+    // Helper function to calculate Greeks for a model (reuse logic from /api/greeks)
+    const calculateGreeksForModel = async (inputs, modelResults, modelName) => {
+      try {
+        // Import Mach33Lib (same as /api/greeks endpoint)
+        const Mach33Lib = require('./lib/mach33lib.js');
+        
+        // Get base values from model results
+        // Greeks calculation works with deterministic valuations - simulations not required
+        const baseEarthValue = modelResults.earth?.adjustedValue || 
+                               modelResults.total?.breakdown?.earth || 
+                               (modelResults.total?.value ? modelResults.total.value * 0.99 : 6739);
+        const baseMarsValue = modelResults.mars?.adjustedValue || 
+                              modelResults.total?.breakdown?.mars || 
+                              (modelResults.total?.value ? modelResults.total.value * 0.01 : 8.8);
+        
+        // If we don't have base values, we can't calculate Greeks accurately
+        if (!baseEarthValue && !baseMarsValue && !modelResults.total?.value) {
+          console.warn(`[Attribution API] ⚠️ No base values found for ${modelName} - cannot calculate Greeks`);
+          return null;
         }
-      },
-      mars: {
-        delta: {
-          'Colony Year': { value: -850, unit: '$B/year' },
-          'Population Growth': { value: 3500, unit: '$B/%' }
-        },
-        theta: {
-          'Time Decay': { value: -0.88, unit: '$B/year' }
-        },
-        rho: {
-          'Discount Rate': { value: -35000, unit: '$B/%' }
-        }
+        
+        // Create valuation function wrapper (similar to /api/greeks)
+        const calculateValuationWithBump = async (inputPath, bumpedValue) => {
+          const pathParts = inputPath.split('.');
+          const modifiedInputs = JSON.parse(JSON.stringify(inputs));
+          
+          // Handle special paths
+          if (inputPath === 'discountRate') {
+            const baseRate = inputs.financial?.discountRate || 0.12;
+            const pvFactor = Math.pow(1 + baseRate, 10);
+            const newPvFactor = Math.pow(1 + bumpedValue, 10);
+            const pvMultiplier = newPvFactor / pvFactor;
+            return {
+              earth: baseEarthValue * pvMultiplier,
+              mars: baseMarsValue * pvMultiplier,
+              total: (baseEarthValue + baseMarsValue) * pvMultiplier
+            };
+          }
+          
+          // Handle normal paths
+          if (pathParts.length === 2) {
+            const [category, field] = pathParts;
+            if (modifiedInputs[category]) {
+              modifiedInputs[category][field] = bumpedValue;
+            }
+          }
+          
+          // Calculate multipliers (simplified version)
+          let earthMultiplier = 1.0;
+          let marsMultiplier = 1.0;
+          
+          if (modifiedInputs.earth) {
+            const basePenetration = inputs.earth?.starlinkPenetration || 0.15;
+            if (modifiedInputs.earth.starlinkPenetration !== undefined) {
+              earthMultiplier *= Math.pow(modifiedInputs.earth.starlinkPenetration / basePenetration, 0.95);
+            }
+            const baseLaunchVolume = inputs.earth?.launchVolume || 150;
+            if (modifiedInputs.earth.launchVolume !== undefined) {
+              earthMultiplier *= Math.pow(modifiedInputs.earth.launchVolume / baseLaunchVolume, 0.98);
+            }
+          }
+          
+          if (modifiedInputs.mars) {
+            const baseColonyYear = inputs.mars?.firstColonyYear || 2030;
+            if (modifiedInputs.mars.firstColonyYear !== undefined) {
+              const yearsDiff = baseColonyYear - modifiedInputs.mars.firstColonyYear;
+              marsMultiplier *= Math.pow(1.1, yearsDiff);
+            }
+            const basePopGrowth = inputs.mars?.populationGrowth || 0.15;
+            if (modifiedInputs.mars.populationGrowth !== undefined) {
+              marsMultiplier *= Math.pow(modifiedInputs.mars.populationGrowth / basePopGrowth, 0.97);
+            }
+          }
+          
+          return {
+            earth: baseEarthValue * earthMultiplier,
+            mars: baseMarsValue * marsMultiplier,
+            total: (baseEarthValue * earthMultiplier) + (baseMarsValue * marsMultiplier)
+          };
+        };
+        
+        // Initialize Mach33Lib with settings
+        const lib = new Mach33Lib({
+          method: 'finite-difference',
+          bumpSizes: {
+            percentage: 0.01,
+            absolute: 1,
+            rate: 0.001  // 0.1% for discount rate
+          },
+          useCentralDifference: true
+        });
+        
+        // Calculate Greeks using Mach33Lib
+        const greeks = await lib.calculateAllGreeks(calculateValuationWithBump, inputs);
+        
+        console.log(`[Attribution API] ✅ Calculated Greeks for ${modelName}`);
+        console.log(`[Attribution API] DEBUG Greeks structure:`, {
+          hasEarthRho: !!greeks.earth?.rho,
+          hasMarsRho: !!greeks.mars?.rho,
+          hasTotalRho: !!greeks.total?.rho,
+          earthRhoKeys: greeks.earth?.rho ? Object.keys(greeks.earth.rho) : [],
+          marsRhoKeys: greeks.mars?.rho ? Object.keys(greeks.mars.rho) : [],
+          totalRhoKeys: greeks.total?.rho ? Object.keys(greeks.total.rho) : [],
+          discountRateRhoEarth: greeks.earth?.rho?.['Discount Rate']?.value,
+          discountRateRhoMars: greeks.mars?.rho?.['Discount Rate']?.value,
+          discountRateRhoTotal: greeks.total?.rho?.['Discount Rate']?.value
+        });
+        return greeks;
+      } catch (error) {
+        console.warn(`[Attribution API] ⚠️ Error calculating Greeks for ${modelName}, using fallback:`, error.message);
+        return null;
       }
     };
+    
+    // Calculate Greeks for both models
+    const baseGreeks = await calculateGreeksForModel(baseInputsData, baseResults, 'base model');
+    const compareGreeks = await calculateGreeksForModel(compareInputs, compareResults, 'compare model');
+    
+    // Use calculated Greeks if available, otherwise use fallback
+    // For attribution, we'll use the base model's Greeks (or average if both available)
+    let greeks = baseGreeks;
+    
+    console.log(`[Attribution API] DEBUG: Using Greeks from:`, {
+      hasBaseGreeks: !!baseGreeks,
+      hasCompareGreeks: !!compareGreeks,
+      baseGreeksRho: baseGreeks?.earth?.rho?.['Discount Rate']?.value || baseGreeks?.mars?.rho?.['Discount Rate']?.value || 'not found',
+      compareGreeksRho: compareGreeks?.earth?.rho?.['Discount Rate']?.value || compareGreeks?.mars?.rho?.['Discount Rate']?.value || 'not found'
+    });
+    
+    if (!greeks && compareGreeks) {
+      greeks = compareGreeks;
+      console.log('[Attribution API] Using compare model Greeks (base model Greeks unavailable)');
+    } else if (baseGreeks && compareGreeks) {
+      // Both available - could average them, but for now use base model's
+      console.log('[Attribution API] Both models have Greeks - using base model Greeks for attribution');
+    }
+    
+    // Fallback to hardcoded Greeks if calculation failed for both
+    // Note: Greeks don't require simulations - they use finite difference on deterministic valuations
+    // If calculation failed, it's likely due to missing base values or calculation errors
+    if (!greeks) {
+      console.warn('[Attribution API] ⚠️ Using fallback hardcoded Greeks (calculation failed for both models)');
+      console.warn('[Attribution API] This may happen if models lack base valuation results');
+      const baseEarthValue = baseResults.earth?.adjustedValue || baseResults.total?.breakdown?.earth || baseValue * 0.99 || 6739;
+      const baseMarsValue = baseResults.mars?.adjustedValue || baseResults.total?.breakdown?.mars || baseValue * 0.01 || 8.8;
+      
+      // Expanded fallback Greeks - includes more inputs
+      greeks = {
+        earth: {
+          delta: {
+            'Starlink Penetration': { value: 45000, unit: '$B/%' },
+            'Launch Volume': { value: 1200, unit: '$B/launch' },
+            'Bandwidth Price Decline': { value: -2000, unit: '$B/%' },
+            'Launch Price Decline': { value: -1500, unit: '$B/%' }
+          },
+          rho: {
+            'Discount Rate': { value: -35000, unit: '$B/%' }
+          },
+          gamma: {},
+          vega: {},
+          theta: {}
+        },
+        mars: {
+          delta: {
+            'Colony Year': { value: -850, unit: '$B/year' },
+            'Population Growth': { value: 3500, unit: '$B/%' },
+            'Transport Cost Decline': { value: 4000, unit: '$B/%' }
+          },
+          theta: {
+            'Time Decay': { value: -0.88, unit: '$B/year' }
+          },
+          rho: {
+            'Discount Rate': { value: -35000, unit: '$B/%' }
+          },
+          gamma: {},
+          vega: {}
+        },
+        total: {
+          delta: {},
+          gamma: {},
+          vega: {},
+          theta: {},
+          rho: {}
+        }
+      };
+      
+      console.log('[Attribution API] Fallback Greeks will be used - attribution may be less accurate');
+    }
+    
+    console.log('[Attribution API] Using Greeks:', {
+      hasBaseGreeks: !!baseGreeks,
+      hasCompareGreeks: !!compareGreeks,
+      usingFallback: !baseGreeks && !compareGreeks,
+      greeksStructure: greeks ? JSON.stringify(Object.keys(greeks), null, 2) : 'null',
+      earthDeltaKeys: greeks?.earth?.delta ? Object.keys(greeks.earth.delta) : [],
+      marsDeltaKeys: greeks?.mars?.delta ? Object.keys(greeks.mars.delta) : [],
+      marsThetaKeys: greeks?.mars?.theta ? Object.keys(greeks.mars.theta) : [],
+      earthRhoKeys: greeks?.earth?.rho ? Object.keys(greeks.earth.rho) : []
+    });
     
     // Calculate input changes
     const inputChanges = {};
@@ -2271,11 +2590,110 @@ app.post('/api/attribution', async (req, res) => {
       const [category, field] = path.split('.');
       const baseVal = baseInputsData[category]?.[field];
       const compareVal = compareInputs[category]?.[field];
+      
+      // Log all comparisons for debugging
+      if (baseVal !== undefined || compareVal !== undefined) {
+        console.log(`[Attribution API] Comparing ${path}: base=${baseVal}, compare=${compareVal}, bothDefined=${baseVal !== undefined && compareVal !== undefined}`);
+      }
+      
       if (baseVal !== undefined && compareVal !== undefined) {
-        return compareVal - baseVal;
+        const change = compareVal - baseVal;
+        // Log ALL changes, even small ones
+        if (Math.abs(change) > 0.0000001) {
+          console.log(`[Attribution API] ✅ Input change ${path}: ${baseVal} -> ${compareVal} (change: ${change})`);
+        } else {
+          console.log(`[Attribution API] ⚪ No change ${path}: ${baseVal} == ${compareVal}`);
+        }
+        return change;
+      } else {
+        // Log missing values for debugging
+        if (baseVal === undefined && compareVal === undefined) {
+          // Both undefined - field doesn't exist in either model (normal for optional fields)
+          console.log(`[Attribution API] ⚪ Both undefined ${path}: field doesn't exist in either model`);
+        } else {
+          console.log(`[Attribution API] ⚠️ One undefined ${path}: base=${baseVal}, compare=${compareVal}`);
+        }
       }
       return 0;
     };
+    
+    // Check for additional input fields that might differ
+    const checkAllInputFields = () => {
+      const allFields = new Set();
+      
+      // Collect all fields from both models
+      Object.keys(baseInputsData).forEach(category => {
+        if (baseInputsData[category] && typeof baseInputsData[category] === 'object') {
+          Object.keys(baseInputsData[category]).forEach(field => {
+            allFields.add(`${category}.${field}`);
+          });
+        }
+      });
+      
+      Object.keys(compareInputs).forEach(category => {
+        if (compareInputs[category] && typeof compareInputs[category] === 'object') {
+          Object.keys(compareInputs[category]).forEach(field => {
+            allFields.add(`${category}.${field}`);
+          });
+        }
+      });
+      
+      // Check each field for differences
+      const differences = [];
+      console.log(`[Attribution API] Checking ${allFields.size} total input fields for differences...`);
+      
+      allFields.forEach(path => {
+        const change = calculateChange(path);
+        // Use a smaller threshold to catch more differences
+        if (Math.abs(change) > 0.0000001) {
+          differences.push({ path, change });
+          console.log(`[Attribution API] ✅ Difference found: ${path} = ${change}`);
+        }
+      });
+      
+      if (differences.length > 0) {
+        console.log(`[Attribution API] ✅ Found ${differences.length} input differences:`, differences.map(d => `${d.path}: ${d.change}`).join(', '));
+      } else {
+        console.warn(`[Attribution API] ⚠️ NO input differences found after checking ${allFields.size} fields!`);
+        console.warn(`[Attribution API] This means the models have identical inputs but different valuations.`);
+        console.warn(`[Attribution API] Base inputs sample:`, JSON.stringify({
+          earth: Object.keys(baseInputsData.earth || {}).slice(0, 5).reduce((acc, k) => {
+            acc[k] = baseInputsData.earth[k];
+            return acc;
+          }, {}),
+          mars: Object.keys(baseInputsData.mars || {}).slice(0, 5).reduce((acc, k) => {
+            acc[k] = baseInputsData.mars[k];
+            return acc;
+          }, {})
+        }, null, 2));
+        console.warn(`[Attribution API] Compare inputs sample:`, JSON.stringify({
+          earth: Object.keys(compareInputs.earth || {}).slice(0, 5).reduce((acc, k) => {
+            acc[k] = compareInputs.earth[k];
+            return acc;
+          }, {}),
+          mars: Object.keys(compareInputs.mars || {}).slice(0, 5).reduce((acc, k) => {
+            acc[k] = compareInputs.mars[k];
+            return acc;
+          }, {})
+        }, null, 2));
+      }
+      
+      return differences;
+    };
+    
+    console.log('[Attribution API] Base inputs summary:', {
+      earth: Object.keys(baseInputsData.earth || {}).length,
+      mars: Object.keys(baseInputsData.mars || {}).length,
+      financial: Object.keys(baseInputsData.financial || {}).length
+    });
+    console.log('[Attribution API] Compare inputs summary:', {
+      earth: Object.keys(compareInputs.earth || {}).length,
+      mars: Object.keys(compareInputs.mars || {}).length,
+      financial: Object.keys(compareInputs.financial || {}).length
+    });
+    
+    // Check all input fields for differences
+    checkAllInputFields();
     
     // Calculate PnL attribution
     let deltaPnL = 0;
@@ -2288,60 +2706,117 @@ app.post('/api/attribution', async (req, res) => {
     
     // Earth inputs
     const earthPenetrationChange = calculateChange('earth.starlinkPenetration');
+    console.log(`[Attribution API] Earth penetration change: ${earthPenetrationChange}`);
+    console.log(`[Attribution API] DEBUG: baseInputsData.earth.starlinkPenetration = ${baseInputsData?.earth?.starlinkPenetration}`);
+    console.log(`[Attribution API] DEBUG: compareInputs.earth.starlinkPenetration = ${compareInputs?.earth?.starlinkPenetration}`);
     if (earthPenetrationChange !== 0) {
       const delta = greeks.earth.delta['Starlink Penetration']?.value || 0;
-      const contribution = delta * earthPenetrationChange * 100; // Convert to percentage
-      deltaPnL += contribution;
+      const gamma = greeks.earth.gamma['Starlink Penetration']?.value || 0;
+      console.log(`[Attribution API] DEBUG: Starlink Penetration delta = ${delta}, gamma = ${gamma}`);
+      // Delta contribution: delta is in $B per unit change
+      // For percentage inputs: delta is $B per 1% change (bumpSize = 0.01)
+      // So delta = (vUp - vDown) / (2 * 0.01) = (vUp - vDown) / 0.02
+      // For a 2% change (0.02), contribution = delta * 0.02 / 0.01 = delta * 2
+      // But delta already accounts for 1% bump, so for 2% change: delta * 2
+      const changeInPercentPoints = earthPenetrationChange * 100; // Convert 0.02 to 2
+      const deltaContribution = delta * changeInPercentPoints;
+      
+      // Gamma contribution: gamma is in $B per (%²) change
+      // Gamma = (vUp - 2*vBase + vDown) / (0.01²) = (vUp - 2*vBase + vDown) / 0.0001
+      // For a 2% change: 0.5 * gamma * (2)² = 0.5 * gamma * 4
+      // But gamma values are inflated due to small denominator, so scale appropriately
+      // The issue is gamma is calculated per (0.01)², so we need to scale by (change/0.01)²
+      const gammaContribution = 0.5 * gamma * changeInPercentPoints * changeInPercentPoints * 0.0001;
+      console.log(`[Attribution API] DEBUG: Starlink Penetration delta contribution = ${deltaContribution}, gamma contribution = ${gammaContribution}`);
+      deltaPnL += deltaContribution;
+      gammaPnL += gammaContribution;
       details.push({
         input: 'Starlink Penetration',
         change: `${earthPenetrationChange >= 0 ? '+' : ''}${(earthPenetrationChange * 100).toFixed(2)}%`,
-        deltaPnL: contribution,
-        gammaPnL: 0,
+        deltaPnL: deltaContribution,
+        gammaPnL: gammaContribution,
         vegaPnL: 0,
-        totalContribution: contribution
+        totalContribution: deltaContribution + gammaContribution
       });
+      console.log(`[Attribution API] ✅ Added Starlink Penetration to details, total details count: ${details.length}`);
+    } else {
+      console.log(`[Attribution API] ⚠️ Starlink Penetration change is ZERO - skipping`);
     }
     
     const launchVolumeChange = calculateChange('earth.launchVolume');
+    console.log(`[Attribution API] Launch volume change: ${launchVolumeChange}`);
+    console.log(`[Attribution API] DEBUG: baseInputsData.earth.launchVolume = ${baseInputsData?.earth?.launchVolume}`);
+    console.log(`[Attribution API] DEBUG: compareInputs.earth.launchVolume = ${compareInputs?.earth?.launchVolume}`);
     if (launchVolumeChange !== 0) {
       const delta = greeks.earth.delta['Launch Volume']?.value || 0;
-      const contribution = delta * launchVolumeChange;
-      deltaPnL += contribution;
+      const gamma = greeks.earth.gamma['Launch Volume']?.value || 0;
+      console.log(`[Attribution API] DEBUG: Launch Volume delta = ${delta}, gamma = ${gamma}`);
+      // Launch Volume: delta is in $B per unit change (bumpSize = 1)
+      // So delta = (vUp - vDown) / (2 * 1) = (vUp - vDown) / 2
+      // For a 15 unit change: delta * 15
+      const deltaContribution = delta * launchVolumeChange;
+      // Gamma: calculated per unit², so for 15 unit change: 0.5 * gamma * 15²
+      const gammaContribution = 0.5 * gamma * launchVolumeChange * launchVolumeChange;
+      console.log(`[Attribution API] DEBUG: Launch Volume delta contribution = ${deltaContribution}, gamma contribution = ${gammaContribution}`);
+      deltaPnL += deltaContribution;
+      gammaPnL += gammaContribution;
       details.push({
         input: 'Launch Volume',
         change: `${launchVolumeChange >= 0 ? '+' : ''}${launchVolumeChange.toFixed(0)}`,
-        deltaPnL: contribution,
-        gammaPnL: 0,
+        deltaPnL: deltaContribution,
+        gammaPnL: gammaContribution,
         vegaPnL: 0,
-        totalContribution: contribution
+        totalContribution: deltaContribution + gammaContribution
       });
+      console.log(`[Attribution API] ✅ Added Launch Volume to details, total details count: ${details.length}`);
+    } else {
+      console.log(`[Attribution API] ⚠️ Launch Volume change is ZERO - skipping`);
     }
     
     // Mars inputs
     const colonyYearChange = calculateChange('mars.firstColonyYear');
+    console.log(`[Attribution API] Colony year change: ${colonyYearChange}`);
     if (colonyYearChange !== 0) {
-      const delta = greeks.mars.delta['Colony Year']?.value || 0;
-      const theta = greeks.mars.theta['Time Decay']?.value || 0;
+      const delta = greeks.mars?.delta?.['Colony Year']?.value || 0;
+      const gamma = greeks.mars?.gamma?.['Colony Year']?.value || 0;
+      const theta = greeks.mars?.theta?.['Time Decay']?.value || 0;
+      console.log(`[Attribution API] Colony Year Greeks - Delta: ${delta}, Gamma: ${gamma}, Theta: ${theta}`);
       const deltaContribution = delta * colonyYearChange;
+      const gammaContribution = 0.5 * gamma * Math.pow(colonyYearChange, 2);
       const thetaContribution = theta * Math.abs(colonyYearChange);
+      console.log(`[Attribution API] Colony Year contributions - Delta: ${deltaContribution}, Gamma: ${gammaContribution}, Theta: ${thetaContribution}`);
       deltaPnL += deltaContribution;
+      gammaPnL += gammaContribution;
       thetaPnL += thetaContribution;
       details.push({
         input: 'Colony Year',
         change: `${colonyYearChange >= 0 ? '+' : ''}${colonyYearChange.toFixed(0)} years`,
         deltaPnL: deltaContribution,
-        gammaPnL: 0,
+        gammaPnL: gammaContribution,
         vegaPnL: 0,
         thetaPnL: thetaContribution,
-        totalContribution: deltaContribution + thetaContribution
+        totalContribution: deltaContribution + gammaContribution + thetaContribution
       });
+    } else {
+      console.log('[Attribution API] Colony Year: No change detected');
     }
     
     // Discount rate
     const discountRateChange = calculateChange('financial.discountRate');
+    console.log(`[Attribution API] Discount rate change: ${discountRateChange}`);
+    console.log(`[Attribution API] DEBUG: baseInputsData.financial.discountRate = ${baseInputsData?.financial?.discountRate}`);
+    console.log(`[Attribution API] DEBUG: compareInputs.financial.discountRate = ${compareInputs?.financial?.discountRate}`);
     if (discountRateChange !== 0) {
-      const rho = greeks.earth.rho['Discount Rate']?.value || 0;
-      const contribution = rho * discountRateChange * 100; // Convert to percentage
+      const rho = greeks.earth?.rho?.['Discount Rate']?.value || greeks.mars?.rho?.['Discount Rate']?.value || 0;
+      console.log(`[Attribution API] Discount Rate Rho: ${rho}`);
+      // Rho is in $B per 0.1% change (bumpSize = 0.001)
+      // So rho = (vUp - vDown) / (2 * 0.001) = (vUp - vDown) / 0.002
+      // For a 2% change (0.02), convert to 0.1% units: 0.02 / 0.001 = 20
+      // Contribution = rho * 20
+      const changeInBasisPoints = discountRateChange * 100; // Convert 0.02 to 2 percentage points
+      const changeInRhoUnits = changeInBasisPoints * 10; // Convert to 0.1% units (2% = 20 * 0.1%)
+      const contribution = rho * changeInRhoUnits;
+      console.log(`[Attribution API] Discount Rate Rho contribution: ${contribution} (change: ${changeInBasisPoints}%, in rho units: ${changeInRhoUnits})`);
       rhoPnL += contribution;
       details.push({
         input: 'Discount Rate',
@@ -2352,19 +2827,250 @@ app.post('/api/attribution', async (req, res) => {
         rhoPnL: contribution,
         totalContribution: contribution
       });
+      console.log(`[Attribution API] ✅ Added Discount Rate to details, total details count: ${details.length}`);
+    } else {
+      console.log('[Attribution API] ⚠️ Discount Rate change is ZERO - skipping');
     }
+    
+    // Check ALL input fields for changes and add attribution for each
+    // First, get all input differences
+    const allInputDifferences = checkAllInputFields();
+    
+    // Map of input paths to their display names and Greek types
+    const inputMetadata = {
+      'earth.starlinkPenetration': { name: 'Starlink Penetration', greek: 'delta', category: 'earth' },
+      'earth.launchVolume': { name: 'Launch Volume', greek: 'delta', category: 'earth' },
+      'earth.bandwidthPriceDecline': { name: 'Bandwidth Price Decline', greek: 'delta', category: 'earth' },
+      'earth.launchPriceDecline': { name: 'Launch Price Decline', greek: 'delta', category: 'earth' },
+      'mars.firstColonyYear': { name: 'Colony Year', greek: 'delta+theta', category: 'mars' },
+      'mars.populationGrowth': { name: 'Population Growth', greek: 'delta', category: 'mars' },
+      'mars.transportCostDecline': { name: 'Transport Cost Decline', greek: 'delta', category: 'mars' },
+      'financial.discountRate': { name: 'Discount Rate', greek: 'rho', category: 'financial' },
+      'financial.terminalGrowth': { name: 'Terminal Growth', greek: 'delta', category: 'financial' },
+      'financial.dilutionFactor': { name: 'Dilution Factor', greek: 'delta', category: 'financial' }
+    };
+    
+    // Process all input differences and add attribution
+    console.log(`[Attribution API] Processing ${allInputDifferences.length} input differences...`);
+    allInputDifferences.forEach(({ path, change }) => {
+      const metadata = inputMetadata[path];
+      const inputName = metadata?.name || path.split('.').pop().replace(/([A-Z])/g, ' $1').trim();
+      
+      console.log(`[Attribution API] Processing difference: ${path} = ${change}`);
+      
+      // Skip if already processed (starlinkPenetration, launchVolume, colonyYear, discountRate)
+      if (path === 'earth.starlinkPenetration' || 
+          path === 'earth.launchVolume' || 
+          path === 'mars.firstColonyYear' || 
+          path === 'financial.discountRate') {
+        console.log(`[Attribution API] ⏭️ Skipping ${path} - already processed above`);
+        return; // Already processed above
+      }
+      
+      // Try to get actual Greeks first, fall back to estimation if not available
+      let deltaContribution = 0;
+      let gammaContribution = 0;
+      
+      // Try to get delta and gamma from Greeks
+      if (metadata) {
+        const category = metadata.category;
+        const label = metadata.name;
+        const delta = greeks[category]?.delta?.[label]?.value || 0;
+        const gamma = greeks[category]?.gamma?.[label]?.value || 0;
+        
+        if (path.includes('Growth') || path.includes('Penetration') || path.includes('Decline') || path.includes('Factor')) {
+          // Percentage-based: convert change to percentage points
+          const changeInPercentPoints = change * 100;
+          deltaContribution = delta * changeInPercentPoints;
+          // Gamma: scale by (change_in_percentage_points)^2 * bumpSize²
+          // Since gamma is calculated with bumpSize=0.01, we need to scale properly
+          gammaContribution = 0.5 * gamma * changeInPercentPoints * changeInPercentPoints * 0.0001;
+        } else if (path.includes('Year')) {
+          // Year-based: delta in $B/year, gamma in $B/year²
+          deltaContribution = delta * change;
+          gammaContribution = 0.5 * gamma * change * change;
+        } else {
+          // Other numeric inputs
+          deltaContribution = delta * change;
+          gammaContribution = 0.5 * gamma * change * change;
+        }
+      }
+      
+      // Fallback estimation if Greeks not available
+      if (deltaContribution === 0 && gammaContribution === 0) {
+        const absChange = Math.abs(change);
+        
+        if (path.includes('Growth') || path.includes('Penetration') || path.includes('Decline')) {
+          // Percentage-based inputs: estimate impact as change * baseValue * sensitivity
+          const sensitivity = path.includes('Population') ? 3500 :
+                             path.includes('Bandwidth') ? -2000 :
+                             path.includes('Launch') ? -1500 :
+                             path.includes('Transport') ? 4000 :
+                             2000;
+          deltaContribution = change * 100 * sensitivity;
+        } else if (path.includes('Year')) {
+          const sensitivity = -850;
+          deltaContribution = change * sensitivity;
+        } else {
+          const baseVal = baseInputsData[path.split('.')[0]]?.[path.split('.')[1]] || 1;
+          const percentChange = (change / baseVal) * 100;
+          deltaContribution = percentChange * baseValue * 0.01;
+        }
+      }
+      
+      // Add to totals
+      deltaPnL += deltaContribution;
+      gammaPnL += gammaContribution;
+      
+      console.log(`[Attribution API] ✅ Adding ${inputName}: deltaContribution = ${deltaContribution}, gammaContribution = ${gammaContribution}`);
+      
+      details.push({
+        input: inputName,
+        change: path.includes('Year') ? `${change >= 0 ? '+' : ''}${change.toFixed(0)} years` :
+                path.includes('Growth') || path.includes('Penetration') || path.includes('Decline') || path.includes('Rate') || path.includes('Factor') ?
+                `${change >= 0 ? '+' : ''}${(change * 100).toFixed(2)}%` :
+                `${change >= 0 ? '+' : ''}${change.toFixed(2)}`,
+        deltaPnL: deltaContribution,
+        gammaPnL: gammaContribution,
+        vegaPnL: 0,
+        thetaPnL: 0,
+        rhoPnL: 0,
+        totalContribution: deltaContribution + gammaContribution,
+        note: gammaContribution > 0 ? `Using calculated Gamma` : `Estimated impact (no specific Greek defined)`
+      });
+      
+      console.log(`[Attribution API] ✅ Added ${inputName} to details, total details count: ${details.length}`);
+    });
+    
+    console.log(`[Attribution API] After processing allInputDifferences: details.length = ${details.length}, deltaPnL = ${deltaPnL}`);
+    
+    // If no details were calculated but valuations differ, add an "unexplained difference" entry
+    console.log(`[Attribution API] Final check: details.length = ${details.length}, totalChange = ${totalChange}, allInputDifferences.length = ${allInputDifferences.length}`);
+    if (details.length === 0 && Math.abs(totalChange) > 0.01) {
+      console.warn('[Attribution API] ⚠️ No input differences found but valuations differ:', {
+        baseValue,
+        compareValue,
+        totalChange,
+        inputDifferencesFound: allInputDifferences.length,
+        baseDilutionFactor: baseInputsData?.financial?.dilutionFactor,
+        compareDilutionFactor: compareInputs?.financial?.dilutionFactor,
+        baseDiscountRate: baseInputsData?.financial?.discountRate,
+        compareDiscountRate: compareInputs?.financial?.discountRate,
+        baseStarlinkPenetration: baseInputsData?.earth?.starlinkPenetration,
+        compareStarlinkPenetration: compareInputs?.earth?.starlinkPenetration,
+        baseLaunchVolume: baseInputsData?.earth?.launchVolume,
+        compareLaunchVolume: compareInputs?.earth?.launchVolume
+      });
+      
+      // If there are input differences but they weren't processed, add them now
+      if (allInputDifferences.length > 0) {
+        const otherChangesText = allInputDifferences.map(d => `${d.path}: ${d.change}`).join(', ');
+        details.push({
+          input: 'Other Input Changes',
+          change: otherChangesText,
+          deltaPnL: 0,
+          gammaPnL: 0,
+          vegaPnL: 0,
+          thetaPnL: 0,
+          rhoPnL: 0,
+          totalContribution: totalChange,
+          note: `Inputs changed but attribution not calculated: ${otherChangesText}. Total valuation change: ${totalChange.toFixed(1)}B`
+        });
+        // Attribute the change to delta as a proxy
+        deltaPnL = totalChange;
+      } else {
+        // Check if comparing spreadsheet reference vs calculated model
+        let note = 'Valuations differ but no input differences detected. This may be due to time decay, model structure changes, or inputs not included in attribution calculation.';
+        let inputName = 'Unexplained Difference';
+        
+        if (baseIsSpreadsheetReference || compareIsSpreadsheetReference) {
+          const spreadsheetModel = baseIsSpreadsheetReference ? baseModel.name : compareModel.name;
+          const calculatedModel = baseIsSpreadsheetReference ? compareModel.name : baseModel.name;
+          inputName = 'Calculation Method Difference';
+          note = `Comparing spreadsheet reference model ("${spreadsheetModel}") with calculated model ("${calculatedModel}"). The difference (${totalChange > 0 ? '+' : ''}${totalChange.toFixed(1)}B) is due to calculation method differences, not input differences. The spreadsheet model uses hardcoded reference values from Excel, while the calculated model uses Monte Carlo simulation results.`;
+          console.log('[Attribution API] 📊 Spreadsheet reference comparison detected:', {
+            spreadsheetModel,
+            calculatedModel,
+            difference: totalChange.toFixed(1) + 'B',
+            reason: 'Calculation method difference (spreadsheet reference vs Monte Carlo simulation)'
+          });
+        }
+        
+        // Add an "unexplained difference" entry to show the valuation change
+        details.push({
+          input: inputName,
+          change: baseIsSpreadsheetReference || compareIsSpreadsheetReference ? 
+                 'Calculation method difference (spreadsheet reference vs Monte Carlo)' :
+                 'Model structure or unmeasured inputs',
+          deltaPnL: 0,
+          gammaPnL: 0,
+          vegaPnL: 0,
+          thetaPnL: 0,
+          rhoPnL: 0,
+          totalContribution: totalChange,
+          note: note
+        });
+        // Attribute the change to delta as a proxy (but note it's not true delta attribution)
+        deltaPnL = totalChange;
+      }
+    } else if (details.length === 0) {
+      console.warn('[Attribution API] ⚠️ No attribution details calculated - inputs are identical and valuations match');
+    }
+    
+    // Log which inputs changed and which Greeks were used
+    const inputsWithChanges = details.map(d => ({
+      input: d.input,
+      change: d.change,
+      deltaPnL: d.deltaPnL,
+      thetaPnL: d.thetaPnL,
+      rhoPnL: d.rhoPnL,
+      gammaPnL: d.gammaPnL,
+      vegaPnL: d.vegaPnL
+    }));
+    
+    console.log('[Attribution API] Inputs with changes:', inputsWithChanges);
+    console.log('[Attribution API] Greeks used:', {
+      hasDelta: !!greeks.earth?.delta || !!greeks.mars?.delta,
+      hasTheta: !!greeks.mars?.theta,
+      hasRho: !!greeks.earth?.rho || !!greeks.mars?.rho,
+      hasGamma: !!greeks.earth?.gamma || !!greeks.mars?.gamma,
+      hasVega: !!greeks.earth?.vega || !!greeks.mars?.vega,
+      earthDeltaKeys: greeks.earth?.delta ? Object.keys(greeks.earth.delta) : [],
+      marsDeltaKeys: greeks.mars?.delta ? Object.keys(greeks.mars.delta) : [],
+      marsThetaKeys: greeks.mars?.theta ? Object.keys(greeks.mars.theta) : [],
+      earthRhoKeys: greeks.earth?.rho ? Object.keys(greeks.earth.rho) : []
+    });
+    
+    const attributionResult = {
+      deltaPnL,
+      gammaPnL,
+      vegaPnL,
+      thetaPnL,
+      rhoPnL,
+      details
+    };
+    
+    console.log('[Attribution API] Final attribution totals:', {
+      deltaPnL,
+      gammaPnL,
+      vegaPnL,
+      thetaPnL,
+      rhoPnL,
+      totalGreeks: deltaPnL + gammaPnL + vegaPnL + thetaPnL + rhoPnL,
+      totalChange,
+      detailsCount: details.length,
+      baseValue,
+      compareValue,
+      baseModelId: baseModel?._id,
+      compareModelId: compareModel?._id,
+      baseModelName: baseModel?.name,
+      compareModelName: compareModel?.name
+    });
     
     res.json({
       success: true,
       data: {
-        attribution: {
-          deltaPnL,
-          gammaPnL,
-          vegaPnL,
-          thetaPnL,
-          rhoPnL,
-          details
-        },
+        attribution: attributionResult,
         totalChange,
         baseValue,
         compareValue
@@ -4787,85 +5493,415 @@ app.post('/api/insights/enhanced', async (req, res) => {
       console.log(`[Enhanced Insights] Tile: ${tileId || '(none)'}, Size: ${tileSize}, InsightType: ${actualInsightType}, Limits:`, contentLimits);
     }
     
-    // Special handling for X Posts tile
+    // Special handling for X Posts tile - Fetch REAL tweets with REAL timestamps
     if (actualInsightType === 'x-feeds') {
-      const prompt = `You have access to X (Twitter) feeds. Provide the 3-5 most relevant recent posts about SpaceX, Starlink, or related topics.
-
-PRIORITIZE posts from key accounts:
-- @elonmusk (SpaceX CEO)
-- @CathieDWood (ARK Invest CEO)  
-- Arron Burnet (Mach33)
-- Vlad
-- Other influential SpaceX investors/analysts
-
-Return ONLY a JSON object with this exact format:
-{
-  "xFeeds": [
-    {
-      "account": "@elonmusk",
-      "content": "full tweet text here",
-      "isKeyAccount": true,
-      "accountName": "Elon Musk"
-    }
-  ]
-}`;
+      const twitterBearerToken = process.env.TWITTER_BEARER_TOKEN;
       
-      try {
-        const aiResponse = await callAIAPI(requestedModel, prompt, 1000);
-        const jsonMatch = aiResponse.match(/\{[\s\S]*\}/);
-        if (jsonMatch) {
-          const result = JSON.parse(jsonMatch[0]);
-          return res.json({ success: true, data: { xFeeds: result.xFeeds || [] } });
+      if (twitterBearerToken) {
+        try {
+          // Fetch real tweets from key SpaceX-related accounts
+          const keyAccounts = ['elonmusk', 'SpaceX', 'CathieDWood', 'aaronburnett', 'VladSaigau']; // Verified accounts
+          const allTweets = [];
+          
+          // Strategy: Get recent tweets from key accounts, then filter for relevance
+          // First, get recent tweets from Aaron and Vlad (they're the tool builders/users)
+          // Also get tweets from Cathie Wood (partner, not builder)
+          const builderAccounts = ['aaronburnett', 'VladSaigau'];
+          const partnerAccounts = ['CathieDWood'];
+          const builderTweets = [];
+          const partnerTweets = [];
+          
+          // Fetch tweets from builders (Aaron and Vlad)
+          for (const account of builderAccounts) {
+            try {
+              const accountUrl = `https://api.twitter.com/2/tweets/search/recent?query=from:${account}&max_results=10&tweet.fields=created_at,author_id,public_metrics,text&expansions=author_id&user.fields=name,username`;
+              
+              const accountResponse = await fetch(accountUrl, {
+                headers: {
+                  'Authorization': `Bearer ${twitterBearerToken}`,
+                  'Content-Type': 'application/json'
+                }
+              });
+              
+              if (accountResponse.ok) {
+                const accountData = await accountResponse.json();
+                const tweets = accountData.data || [];
+                const users = accountData.includes?.users || [];
+                
+                tweets.forEach(tweet => {
+                  const user = users.find(u => u.id === tweet.author_id);
+                  if (!user) return;
+                  
+                  const tweetText = tweet.text.toLowerCase();
+                  // Check if tweet is relevant to SpaceX/Starlink/Mars/space industry
+                  const isRelevant = tweetText.includes('spacex') || 
+                                    tweetText.includes('starlink') || 
+                                    tweetText.includes('starship') ||
+                                    tweetText.includes('mars') ||
+                                    tweetText.includes('space') ||
+                                    tweetText.includes('rocket') ||
+                                    tweetText.includes('satellite') ||
+                                    tweetText.includes('elon') ||
+                                    tweetText.includes('musk') ||
+                                    tweetText.includes('tesla') || // Tesla often related to SpaceX
+                                    tweetText.includes('valuation') || // Valuation-related tweets from builders
+                                    tweetText.includes('model') ||
+                                    tweetText.includes('financial');
+                  
+                  // Only include relevant tweets from builders (as requested: "if they are relevant")
+                  if (!isRelevant) return;
+                  
+                  const accountName = user.name || user.username;
+                  const username = user.username;
+                  
+                  const dateObj = new Date(tweet.created_at);
+                  if (isNaN(dateObj.getTime())) return;
+                  
+                  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+                  const formattedDate = `${months[dateObj.getMonth()]} ${dateObj.getDate()}, ${dateObj.getFullYear()}`;
+                  
+                  builderTweets.push({
+                    account: `@${username}`,
+                    content: tweet.text,
+                    isKeyAccount: true,
+                    accountName: accountName,
+                    date: formattedDate,
+                    timestamp: tweet.created_at,
+                    url: `https://twitter.com/${username}/status/${tweet.id}`,
+                    relevanceScore: 2 // Relevant tweets from builders
+                  });
+                });
+              }
+            } catch (error) {
+              console.error(`[Enhanced Insights] Error fetching tweets from ${account}:`, error);
+            }
+          }
+          
+          // Fetch tweets from partners (Cathie Wood)
+          for (const account of partnerAccounts) {
+            try {
+              const accountUrl = `https://api.twitter.com/2/tweets/search/recent?query=from:${account}&max_results=10&tweet.fields=created_at,author_id,public_metrics,text&expansions=author_id&user.fields=name,username`;
+              
+              const accountResponse = await fetch(accountUrl, {
+                headers: {
+                  'Authorization': `Bearer ${twitterBearerToken}`,
+                  'Content-Type': 'application/json'
+                }
+              });
+              
+              if (accountResponse.ok) {
+                const accountData = await accountResponse.json();
+                const tweets = accountData.data || [];
+                const users = accountData.includes?.users || [];
+                
+                tweets.forEach(tweet => {
+                  const user = users.find(u => u.id === tweet.author_id);
+                  if (!user) return;
+                  
+                  const tweetText = tweet.text.toLowerCase();
+                  // Check if tweet is relevant to SpaceX/Starlink/Mars/space industry
+                  const isRelevant = tweetText.includes('spacex') || 
+                                    tweetText.includes('starlink') || 
+                                    tweetText.includes('starship') ||
+                                    tweetText.includes('mars') ||
+                                    tweetText.includes('space') ||
+                                    tweetText.includes('rocket') ||
+                                    tweetText.includes('satellite') ||
+                                    tweetText.includes('elon') ||
+                                    tweetText.includes('musk') ||
+                                    tweetText.includes('tesla') ||
+                                    tweetText.includes('valuation') ||
+                                    tweetText.includes('model') ||
+                                    tweetText.includes('financial');
+                  
+                  // Only include relevant tweets from partners
+                  if (!isRelevant) return;
+                  
+                  const accountName = user.name || user.username;
+                  const username = user.username;
+                  
+                  const dateObj = new Date(tweet.created_at);
+                  if (isNaN(dateObj.getTime())) return;
+                  
+                  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+                  const formattedDate = `${months[dateObj.getMonth()]} ${dateObj.getDate()}, ${dateObj.getFullYear()}`;
+                  
+                  partnerTweets.push({
+                    account: `@${username}`,
+                    content: tweet.text,
+                    isKeyAccount: true,
+                    accountName: accountName,
+                    date: formattedDate,
+                    timestamp: tweet.created_at,
+                    url: `https://twitter.com/${username}/status/${tweet.id}`,
+                    relevanceScore: 2 // Relevant tweets from partners
+                  });
+                });
+              }
+            } catch (error) {
+              console.error(`[Enhanced Insights] Error fetching tweets from partner ${account}:`, error);
+            }
+          }
+          
+          // Also search for SpaceX-related tweets from all key accounts (including Elon and SpaceX)
+          try {
+            const searchQuery = encodeURIComponent('(SpaceX OR Starlink OR Starship) (from:elonmusk OR from:SpaceX)');
+            const twitterUrl = `https://api.twitter.com/2/tweets/search/recent?query=${searchQuery}&max_results=10&tweet.fields=created_at,author_id,public_metrics,text&expansions=author_id&user.fields=name,username`;
+            
+            const twitterResponse = await fetch(twitterUrl, {
+              headers: {
+                'Authorization': `Bearer ${twitterBearerToken}`,
+                'Content-Type': 'application/json'
+              }
+            });
+            
+              if (twitterResponse.ok) {
+                const twitterData = await twitterResponse.json();
+                const tweets = twitterData.data || [];
+                const users = twitterData.includes?.users || [];
+                
+                tweets.forEach(tweet => {
+                  const user = users.find(u => u.id === tweet.author_id);
+                  if (!user) return;
+                  
+                  const accountName = user.name || user.username;
+                  const username = user.username;
+                  
+                  const dateObj = new Date(tweet.created_at);
+                  if (isNaN(dateObj.getTime())) return;
+                  
+                  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+                  const formattedDate = `${months[dateObj.getMonth()]} ${dateObj.getDate()}, ${dateObj.getFullYear()}`;
+                  
+                  // Map usernames to display names
+                  const displayNames = {
+                    'elonmusk': 'Elon Musk',
+                    'spacex': 'SpaceX',
+                    'cathiedwood': 'Cathie Wood',
+                    'aaronburnett': 'Aaron Burnett',
+                    'vladsaigau': 'Vlad Saigau'
+                  };
+                  
+                  const normalizedUsername = username.toLowerCase();
+                  const displayName = displayNames[normalizedUsername] || accountName;
+                  
+                  allTweets.push({
+                    account: `@${username}`,
+                    content: tweet.text,
+                    isKeyAccount: keyAccounts.map(a => a.toLowerCase()).includes(normalizedUsername),
+                    accountName: displayName,
+                    date: formattedDate,
+                    timestamp: tweet.created_at,
+                    url: `https://twitter.com/${username}/status/${tweet.id}`,
+                    relevanceScore: 3 // High relevance for SpaceX-specific tweets
+                  });
+                });
+              } else {
+                const errorText = await twitterResponse.text();
+                console.warn(`[Enhanced Insights] Twitter API error:`, twitterResponse.status, errorText);
+              }
+            } catch (error) {
+              console.error(`[Enhanced Insights] Error fetching tweets:`, error);
+            }
+          
+          // Combine builder tweets, partner tweets, and SpaceX-specific tweets
+          const combinedTweets = [...builderTweets, ...partnerTweets, ...allTweets];
+          
+          if (combinedTweets.length > 0) {
+            // Remove duplicates (same tweet ID)
+            const uniqueTweets = [];
+            const seenIds = new Set();
+            
+            combinedTweets.forEach(tweet => {
+              const tweetId = tweet.url.split('/status/')[1];
+              if (!seenIds.has(tweetId)) {
+                seenIds.add(tweetId);
+                uniqueTweets.push(tweet);
+              }
+            });
+            
+            // Sort by relevance score (higher first), then by timestamp (newest first), limit to 5
+            const sortedTweets = uniqueTweets
+              .sort((a, b) => {
+                // First sort by relevance score (higher = more relevant)
+                if (b.relevanceScore !== a.relevanceScore) {
+                  return (b.relevanceScore || 0) - (a.relevanceScore || 0);
+                }
+                // Then by timestamp (newest first)
+                return new Date(b.timestamp) - new Date(a.timestamp);
+              })
+              .slice(0, 5)
+              .map(tweet => {
+                // Remove relevanceScore before returning (not needed in frontend)
+                const { relevanceScore, ...tweetData } = tweet;
+                return tweetData;
+              });
+            
+            console.log(`[Enhanced Insights] ✅ Fetched ${sortedTweets.length} REAL tweets (${builderTweets.length} from builders, ${partnerTweets.length} from partners, ${allTweets.length} SpaceX-specific)`);
+            return res.json({ success: true, data: { xFeeds: sortedTweets } });
+          }
+        } catch (error) {
+          console.error('[Enhanced Insights] Error fetching real X feeds:', error);
         }
-      } catch (error) {
-        console.error('[Enhanced Insights] Error fetching X feeds:', error);
+      } else {
+        console.warn('[Enhanced Insights] Twitter Bearer Token not configured');
       }
+      
+      // Fallback: Return empty array if no real tweets available
+      console.warn('[Enhanced Insights] No real tweets available, returning empty array');
       return res.json({ success: true, data: { xFeeds: [] } });
     }
     
-    // Special handling for News tile
+    // Special handling for News tile - Fetch REAL news articles
     if (actualInsightType === 'news') {
-      const prompt = `You are a financial news analyst. Provide 3-5 recent, real news articles about SpaceX, Starlink, Mars missions, or related space industry topics. 
-
-CRITICAL: Return ONLY valid JSON. Include real, specific news items with titles and summaries. If you don't have recent news, provide relevant general SpaceX/Starlink news items.
-
-Return ONLY a JSON object:
-{
-  "news": [
-    {
-      "title": "Specific Article Title",
-      "summary": "Detailed summary of the article (at least 50 characters)",
-      "source": "Source Name"
-    }
-  ]
-}`;
-      
       try {
-        const aiResponse = await callAIAPI(requestedModel, prompt, 1500);
-        const jsonMatch = aiResponse.match(/\{[\s\S]*\}/);
-        if (jsonMatch) {
-          const result = JSON.parse(jsonMatch[0]);
-          const newsItems = result.news || [];
+        // Use Google Custom Search API to fetch real news articles
+        const googleApiKey = process.env.GOOGLE_SEARCH_API_KEY;
+        const googleCseId = process.env.GOOGLE_SEARCH_ENGINE_ID;
+        
+        if (googleApiKey && googleCseId) {
+          // Search for recent SpaceX/Starlink news
+          const searchQuery = 'SpaceX OR Starlink OR Starship news site:techcrunch.com OR site:reuters.com OR site:spacenews.com OR site:theverge.com OR site:arstechnica.com';
+          const searchUrl = `https://www.googleapis.com/customsearch/v1?key=${googleApiKey}&cx=${googleCseId}&q=${encodeURIComponent(searchQuery)}&num=5&safe=active&dateRestrict=d7`; // Last 7 days
           
-          // Validate news items have content
-          const validNews = newsItems.filter(item => 
-            item && 
-            (item.title || item.summary) && 
-            (item.title || '').trim().length > 0 &&
-            (item.summary || item.content || '').trim().length > 10
-          );
+          console.log('[Enhanced Insights] Fetching real news from Google Search API...');
+          const searchResponse = await fetch(searchUrl);
           
-          if (validNews.length > 0) {
-            return res.json({ success: true, data: { news: validNews } });
+          if (searchResponse.ok) {
+            const searchData = await searchResponse.json();
+            const searchResults = searchData.items || [];
+            
+            // Process real search results into news format
+            const realNews = searchResults.map((item, index) => {
+              // Extract source from displayLink or parse from URL
+              let source = item.displayLink || '';
+              if (source.includes('techcrunch.com')) source = 'TechCrunch';
+              else if (source.includes('reuters.com')) source = 'Reuters';
+              else if (source.includes('spacenews.com')) source = 'SpaceNews';
+              else if (source.includes('theverge.com')) source = 'The Verge';
+              else if (source.includes('arstechnica.com')) source = 'Ars Technica';
+              else source = source.replace('www.', '').split('.')[0];
+              
+              // Extract REAL publication date and timestamp from article metadata
+              const publishedDate = item.pagemap?.metatags?.[0]?.['article:published_time'] || 
+                                   item.pagemap?.metatags?.[0]?.['og:updated_time'] ||
+                                   item.pagemap?.metatags?.[0]?.['datePublished'] ||
+                                   null;
+              
+              let formattedDate = '';
+              let timestamp = null;
+              
+              if (publishedDate) {
+                const dateObj = new Date(publishedDate);
+                if (!isNaN(dateObj.getTime())) {
+                  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+                  formattedDate = `${months[dateObj.getMonth()]} ${dateObj.getDate()}, ${dateObj.getFullYear()}`;
+                  timestamp = dateObj.toISOString(); // Store full timestamp
+                }
+              }
+              
+              // If no valid date found, skip this article (we only want articles with real timestamps)
+              if (!formattedDate) {
+                return null;
+              }
+              
+              // Extract thumbnail from pagemap (og:image, twitter:image, or cse_image)
+              let thumbnail = '';
+              if (item.pagemap?.cse_image?.[0]?.src) {
+                thumbnail = item.pagemap.cse_image[0].src;
+              } else if (item.pagemap?.metatags?.[0]?.['og:image']) {
+                thumbnail = item.pagemap.metatags[0]['og:image'];
+              } else if (item.pagemap?.metatags?.[0]?.['twitter:image']) {
+                thumbnail = item.pagemap.metatags[0]['twitter:image'];
+              } else if (item.pagemap?.metatags?.[0]?.['twitter:image:src']) {
+                thumbnail = item.pagemap.metatags[0]['twitter:image:src'];
+              }
+              
+              // Ensure thumbnail is absolute URL
+              if (thumbnail && !thumbnail.match(/^https?:\/\//i)) {
+                const urlObj = new URL(item.link);
+                thumbnail = `${urlObj.protocol}//${urlObj.host}${thumbnail.startsWith('/') ? '' : '/'}${thumbnail}`;
+              }
+              
+              return {
+                title: item.title || 'News Article',
+                summary: item.snippet || item.htmlSnippet?.replace(/<[^>]*>/g, '') || 'No summary available',
+                source: source || 'News Source',
+                date: formattedDate,
+                timestamp: timestamp, // Include full ISO timestamp
+                url: item.link || item.formattedUrl || '',
+                thumbnail: thumbnail || undefined
+              };
+            }).filter(item => item && item.url && item.title && item.date); // Only include items with URL, title, and REAL date
+            
+            if (realNews.length > 0) {
+              console.log(`[Enhanced Insights] ✅ Fetched ${realNews.length} REAL news articles with thumbnails`);
+              return res.json({ success: true, data: { news: realNews } });
+            } else {
+              console.warn('[Enhanced Insights] No real news articles found from Google Search');
+            }
           } else {
-            console.warn('[Enhanced Insights] News API returned invalid/empty news items');
+            const errorText = await searchResponse.text();
+            console.error('[Enhanced Insights] Google Search API error:', searchResponse.status, errorText);
           }
+        } else {
+          console.warn('[Enhanced Insights] Google Search API credentials not configured');
         }
       } catch (error) {
-        console.error('[Enhanced Insights] Error fetching news:', error);
+        console.error('[Enhanced Insights] Error fetching real news:', error);
+      }
+      
+      // Fallback: Try NewsAPI if configured
+      const newsApiKey = process.env.NEWS_API_KEY;
+      if (newsApiKey) {
+        try {
+          const newsApiUrl = `https://newsapi.org/v2/everything?q=SpaceX OR Starlink OR Starship&language=en&sortBy=publishedAt&pageSize=5&apiKey=${newsApiKey}`;
+          console.log('[Enhanced Insights] Trying NewsAPI as fallback...');
+          const newsResponse = await fetch(newsApiUrl);
+          
+          if (newsResponse.ok) {
+            const newsData = await newsResponse.json();
+            const articles = newsData.articles || [];
+            
+            const realNews = articles.map(article => {
+              if (!article.publishedAt) return null; // Skip articles without publication date
+              
+              const dateObj = new Date(article.publishedAt);
+              if (isNaN(dateObj.getTime())) return null; // Skip invalid dates
+              
+              const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+              const formattedDate = `${months[dateObj.getMonth()]} ${dateObj.getDate()}, ${dateObj.getFullYear()}`;
+              
+              return {
+                title: article.title || 'News Article',
+                summary: article.description || article.content?.substring(0, 200) || 'No summary available',
+                source: article.source?.name || 'News Source',
+                date: formattedDate,
+                timestamp: article.publishedAt, // Include full ISO timestamp from API
+                url: article.url || '',
+                thumbnail: article.urlToImage || undefined
+              };
+            }).filter(item => item && item.url && item.title && item.date); // Only include items with URL, title, and REAL date
+            
+            if (realNews.length > 0) {
+              console.log(`[Enhanced Insights] ✅ Fetched ${realNews.length} REAL news articles from NewsAPI`);
+              return res.json({ success: true, data: { news: realNews } });
+            }
+          }
+        } catch (error) {
+          console.error('[Enhanced Insights] NewsAPI error:', error);
+        }
       }
       
       // Fallback: Return sample news if API fails
+      const today = new Date();
+      const formatDate = (date) => {
+        const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+        return `${months[date.getMonth()]} ${date.getDate()}, ${date.getFullYear()}`;
+      };
+      
+      // Include thumbnail URLs in fallback news
+      
       return res.json({ 
         success: true, 
         data: { 
@@ -4873,28 +5909,329 @@ Return ONLY a JSON object:
             {
               title: "SpaceX Starship Test Flight",
               summary: "SpaceX continues testing Starship for future Mars missions. Recent test flights show progress toward reusability goals.",
-              source: "SpaceX Updates"
+              source: "SpaceX Updates",
+              date: formatDate(new Date(today.getTime() - 2 * 24 * 60 * 60 * 1000)), // 2 days ago
+              url: "https://www.spacex.com/updates"
             },
             {
               title: "Starlink Global Expansion",
               summary: "Starlink expands coverage to new regions, increasing global internet access. Subscriber growth continues to accelerate.",
-              source: "Industry News"
+              source: "Industry News",
+              date: formatDate(new Date(today.getTime() - 5 * 24 * 60 * 60 * 1000)), // 5 days ago
+              url: "https://www.spacex.com/starlink"
             },
             {
               title: "Mars Mission Timeline",
               summary: "SpaceX maintains target for first crewed Mars mission by 2030. Starship development critical to timeline.",
-              source: "Space News"
+              source: "Space News",
+              date: formatDate(new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000)), // 7 days ago
+              url: "https://www.spacex.com/mars"
             }
           ]
         } 
       });
     }
     
+    // Special handling for Image+Comments tile - Find article for topic discovery, generate model-aware commentary
+    if (actualInsightType === 'image-comments') {
+      try {
+        const googleApiKey = process.env.GOOGLE_SEARCH_API_KEY;
+        const googleCseId = process.env.GOOGLE_SEARCH_ENGINE_ID;
+        
+        // First, get news articles to exclude them
+        let excludeUrls = [];
+        let excludeTitles = [];
+        
+        if (googleApiKey && googleCseId) {
+          try {
+            const newsQuery = 'SpaceX OR Starlink OR Starship news site:techcrunch.com OR site:reuters.com OR site:spacenews.com OR site:theverge.com OR site:arstechnica.com';
+            const newsSearchUrl = `https://www.googleapis.com/customsearch/v1?key=${googleApiKey}&cx=${googleCseId}&q=${encodeURIComponent(newsQuery)}&num=5&safe=active&dateRestrict=d7`;
+            const newsSearchResponse = await fetch(newsSearchUrl);
+            
+            if (newsSearchResponse.ok) {
+              const newsData = await newsSearchResponse.json();
+              const newsItems = newsData.items || [];
+              excludeUrls = newsItems.map(item => item.link).filter(Boolean);
+              excludeTitles = newsItems.map(item => item.title).filter(Boolean);
+            }
+          } catch (error) {
+            console.warn('[Enhanced Insights] Could not fetch news for exclusion:', error.message);
+          }
+        }
+        
+        // Search for visual/technical articles (different focus from news)
+        if (googleApiKey && googleCseId) {
+          // Search with visual/technical focus - different from general news
+          // Prioritize queries that typically have high-quality images
+          const visualQueries = [
+            'Starlink satellite constellation image',
+            'SpaceX Starship launch photo',
+            'Starlink coverage map image',
+            'SpaceX rocket landing image',
+            'Mars Starship mission image',
+            'Starlink terminal installation image',
+            'SpaceX Falcon Heavy launch image',
+            'Starlink satellite deployment image',
+            'SpaceX mission control image',
+            'Starlink global coverage image'
+          ];
+          
+          // Try queries until we find a good article with image
+          let selectedArticle = null;
+          let discoveredTopic = '';
+          let imageUrl = '';
+          
+          for (const query of visualQueries) {
+            try {
+              const searchUrl = `https://www.googleapis.com/customsearch/v1?key=${googleApiKey}&cx=${googleCseId}&q=${encodeURIComponent(query)}&num=3&safe=active&dateRestrict=d30`; // Last 30 days
+              const searchResponse = await fetch(searchUrl);
+              
+              if (searchResponse.ok) {
+                const searchData = await searchResponse.json();
+                const articles = searchData.items || [];
+                
+                // Score and sort articles by image quality
+                const articlesWithImages = [];
+                for (const item of articles) {
+                  if (excludeUrls.includes(item.link) || excludeTitles.includes(item.title)) {
+                    continue; // Skip if in news tile
+                  }
+                  
+                  // Extract image URL
+                  let itemImageUrl = '';
+                  if (item.pagemap?.cse_image?.[0]?.src) {
+                    itemImageUrl = item.pagemap.cse_image[0].src;
+                  } else if (item.pagemap?.metatags?.[0]?.['og:image']) {
+                    itemImageUrl = item.pagemap.metatags[0]['og:image'];
+                  } else if (item.pagemap?.metatags?.[0]?.['twitter:image']) {
+                    itemImageUrl = item.pagemap.metatags[0]['twitter:image'];
+                  } else if (item.pagemap?.metatags?.[0]?.['twitter:image:src']) {
+                    itemImageUrl = item.pagemap.metatags[0]['twitter:image:src'];
+                  }
+                  
+                  if (itemImageUrl) {
+                    // Ensure image is absolute URL
+                    if (!itemImageUrl.match(/^https?:\/\//i)) {
+                      try {
+                        const urlObj = new URL(item.link);
+                        itemImageUrl = `${urlObj.protocol}//${urlObj.host}${itemImageUrl.startsWith('/') ? '' : '/'}${itemImageUrl}`;
+                      } catch (e) {
+                        itemImageUrl = '';
+                      }
+                    }
+                    
+                    // Filter and score
+                    if (itemImageUrl && itemImageUrl.match(/^https?:\/\//i)) {
+                      const blockedDomains = ['lookaside.fbsbx.com', 'facebook.com', 'fbcdn.net', 'instagram.com', 'cdninstagram.com', 'linkedin.com', 'licdn.com'];
+                      const blockedPaths = ['/api/', '/og/', '/generate', '/render', '/proxy'];
+                      // Prioritize high-quality news and space industry sources
+                      const preferredDomains = [
+                        'spacenews.com',
+                        'techcrunch.com',
+                        'nasa.gov',
+                        'cnbc.com',
+                        'forbes.com',
+                        'reuters.com',
+                        'ap.org',
+                        'gettyimages.com',
+                        'spacex.com',
+                        'theverge.com',
+                        'arstechnica.com',
+                        'bloomberg.com',
+                        'wsj.com',
+                        'nytimes.com'
+                      ];
+                      
+                      try {
+                        const imageHost = new URL(itemImageUrl).hostname.toLowerCase();
+                        const imagePath = new URL(itemImageUrl).pathname.toLowerCase();
+                        const isBlockedDomain = blockedDomains.some(domain => imageHost.includes(domain));
+                        const isBlockedPath = blockedPaths.some(path => imagePath.includes(path));
+                        const hasImageExtension = /\.(jpg|jpeg|png|gif|webp|svg|bmp)(\?|$)/i.test(itemImageUrl);
+                        const isPreferredSource = preferredDomains.some(domain => imageHost.includes(domain));
+                        
+                        if (!isBlockedDomain && !(isBlockedPath && !hasImageExtension)) {
+                          item._imageUrl = itemImageUrl;
+                          item._imageScore = (isPreferredSource ? 2 : 0) + (hasImageExtension ? 1 : 0);
+                          articlesWithImages.push(item);
+                          const qualityNote = isPreferredSource ? ' (preferred source)' : '';
+                          const extensionNote = hasImageExtension ? ' (has extension)' : '';
+                          console.log(`[Enhanced Insights] ✅ Found article with image (score: ${item._imageScore})${qualityNote}${extensionNote}: ${item.title?.substring(0, 50)}...`);
+                        }
+                      } catch (e) {
+                        // Skip invalid URLs
+                      }
+                    }
+                  }
+                }
+                
+                // Sort by image quality score (highest first), then use best one
+                articlesWithImages.sort((a, b) => (b._imageScore || 0) - (a._imageScore || 0));
+                
+                // Use the best article (highest score) - already filtered and scored
+                if (articlesWithImages.length > 0) {
+                  const bestArticle = articlesWithImages[0];
+                  selectedArticle = bestArticle;
+                  discoveredTopic = bestArticle.title || query;
+                  imageUrl = bestArticle._imageUrl;
+                  console.log(`[Enhanced Insights] ✅ Selected BEST article with image (score: ${bestArticle._imageScore}): ${discoveredTopic.substring(0, 50)}...`);
+                  break; // Found best article, stop searching queries
+                }
+              }
+            } catch (error) {
+              console.warn(`[Enhanced Insights] Error searching for visual article with query "${query}":`, error.message);
+            }
+          }
+          
+          // Check if we found a valid article after all queries
+          if (selectedArticle) {
+            // Image URL already extracted and validated in the loop above
+            // Re-extract to ensure we have it stored in imageUrl variable
+            let finalImageUrl = '';
+            if (selectedArticle.pagemap?.cse_image?.[0]?.src) {
+              finalImageUrl = selectedArticle.pagemap.cse_image[0].src;
+            } else if (selectedArticle.pagemap?.metatags?.[0]?.['og:image']) {
+              finalImageUrl = selectedArticle.pagemap.metatags[0]['og:image'];
+            } else if (selectedArticle.pagemap?.metatags?.[0]?.['twitter:image']) {
+              finalImageUrl = selectedArticle.pagemap.metatags[0]['twitter:image'];
+            }
+            
+            if (finalImageUrl && !finalImageUrl.match(/^https?:\/\//i)) {
+              try {
+                const urlObj = new URL(selectedArticle.link);
+                finalImageUrl = `${urlObj.protocol}//${urlObj.host}${finalImageUrl.startsWith('/') ? '' : '/'}${finalImageUrl}`;
+              } catch (e) {
+                finalImageUrl = '';
+              }
+            }
+            
+            // Final validation - filter out blocked domains
+            if (finalImageUrl) {
+              const blockedDomains = [
+                'lookaside.fbsbx.com',
+                'facebook.com',
+                'fbcdn.net',
+                'instagram.com',
+                'cdninstagram.com',
+                'linkedin.com',
+                'licdn.com'
+              ];
+              
+              try {
+                const imageHost = new URL(finalImageUrl).hostname.toLowerCase();
+                const isBlocked = blockedDomains.some(domain => imageHost.includes(domain));
+                
+                if (isBlocked) {
+                  console.log(`[Enhanced Insights] ⚠️ Blocked image domain detected: ${imageHost}, skipping article: ${selectedArticle.title?.substring(0, 50) || 'unknown'}`);
+                  selectedArticle = null;
+                  finalImageUrl = '';
+                  imageUrl = '';
+                } else {
+                  imageUrl = finalImageUrl;
+                  console.log(`[Enhanced Insights] ✅ Using image from domain: ${imageHost}`);
+                }
+              } catch (e) {
+                finalImageUrl = '';
+                imageUrl = '';
+              }
+            } else {
+              imageUrl = finalImageUrl;
+            }
+          }
+          
+          // Check if we found a valid article with valid image
+          if (selectedArticle && imageUrl) {
+            
+            // Extract topic from article title/content
+            const articleTitle = selectedArticle.title || '';
+            const articleSnippet = selectedArticle.snippet || '';
+            const topicContext = `${articleTitle}. ${articleSnippet}`;
+            
+            // Prepare model context for commentary generation
+            const modelContext = {
+              penetration: (inputs?.earth?.starlinkPenetration || 0) * 100,
+              earthValue: earthValue,
+              marsValue: marsValue,
+              totalValue: totalValue,
+              launchVolume: inputs?.earth?.launchVolume || 0,
+              firstColonyYear: inputs?.mars?.firstColonyYear || 0,
+              discountRate: (inputs?.financial?.discountRate || 0) * 100,
+              modelName: context?.modelName || 'Current Model'
+            };
+            
+            // Generate model-aware commentary using AI
+            const commentaryPrompt = `Generate concise commentary (2-3 sentences) about "${discoveredTopic}" in the context of a SpaceX valuation model.
+
+Model Context:
+- Starlink Penetration: ${modelContext.penetration.toFixed(1)}%
+- Earth Operations Value: $${(modelContext.earthValue / 1000).toFixed(2)}T
+- Mars Operations Value: $${(modelContext.marsValue / 1000).toFixed(2)}T
+- Total Enterprise Value: $${(modelContext.totalValue / 1000).toFixed(2)}T
+- Launch Volume: ${modelContext.launchVolume} launches/year
+- First Mars Colony Year: ${modelContext.firstColonyYear || 'N/A'}
+- Discount Rate: ${modelContext.discountRate.toFixed(1)}%
+
+Article Context (for topic reference only - do not quote article content):
+${topicContext.substring(0, 300)}
+
+Generate OUR analysis of this topic using OUR model's specific values. Focus on:
+1. How this topic relates to our model's assumptions
+2. Model-specific implications and valuation drivers
+3. Connect the topic to our model's actual values
+
+Keep it concise, model-focused, and analytical. Do not reference the article directly - use it only to understand the topic.`;
+
+            let commentary = '';
+            try {
+              const maxTokens = contentLimits?.chars ? Math.min(300, contentLimits.chars * 2) : 300;
+              commentary = await callAIAPI(requestedModel, commentaryPrompt, maxTokens, null);
+              
+              // Clean up commentary (remove quotes, extra whitespace)
+              commentary = commentary.trim().replace(/^["']|["']$/g, '').replace(/\n+/g, ' ');
+              
+              if (!commentary || commentary.length < 20) {
+                // Fallback commentary if AI fails
+                commentary = `Our model's ${modelContext.penetration.toFixed(1)}% Starlink penetration assumption drives $${(modelContext.earthValue / 1000).toFixed(2)}T in Earth Operations value, reflecting ambitious market capture expectations.`;
+              }
+            } catch (error) {
+              console.error('[Enhanced Insights] Error generating commentary:', error);
+              // Fallback commentary
+              commentary = `Our model's ${modelContext.penetration.toFixed(1)}% Starlink penetration assumption drives $${(modelContext.earthValue / 1000).toFixed(2)}T in Earth Operations value, reflecting ambitious market capture expectations.`;
+            }
+            
+            if (imageUrl && commentary) {
+              console.log(`[Enhanced Insights] ✅ Generated image-comments tile with topic: "${discoveredTopic}"`);
+              console.log(`[Enhanced Insights] ✅ Image URL (valid): ${imageUrl.substring(0, 80)}...`);
+              console.log(`[Enhanced Insights] ✅ Commentary length: ${commentary.length} chars`);
+              return res.json({ 
+                success: true, 
+                data: { 
+                  imageComments: {
+                    image: imageUrl,
+                    commentary: commentary,
+                    topic: discoveredTopic,
+                    articleUrl: selectedArticle.link
+                  }
+                } 
+              });
+            } else {
+              console.warn(`[Enhanced Insights] ⚠️ Missing image or commentary. Image: ${imageUrl ? 'present' : 'missing'}, Commentary: ${commentary ? 'present' : 'missing'}`);
+            }
+          }
+        }
+      } catch (error) {
+        console.error('[Enhanced Insights] Error generating image-comments:', error);
+      }
+      
+      // Fallback: Return empty if no article found
+      return res.json({ success: true, data: { imageComments: null } });
+    }
+    
     // Build context for RAG from documentation
     const ragContext = await getRAGContext(insightType, data, inputs);
     
     // Create SYSTEM PROMPT for critical instructions (more reliable than user prompt)
-    const systemPrompt = `You are a financial analyst creating insights for a Bloomberg Terminal-style dashboard tile.
+    const systemPrompt = `You are a financial analyst creating insights for a Bloomberg Terminal-style dashboard tile. This tool is built and used by Vlad Saigau (@VladSaigau) and Aaron Burnett (@aaronburnett) at Mach33. Cathie Wood (@CathieDWood) is a partner.
 
 CRITICAL REQUIREMENTS - YOU MUST FOLLOW THESE:
 1. ALWAYS include 2-3 clickable links in EVERY insight using format [link text|view:dashboard] for internal navigation or [link text|url:https://example.com] for external URLs
@@ -4908,7 +6245,9 @@ CRITICAL REQUIREMENTS - YOU MUST FOLLOW THESE:
    - For METRIC tiles (revenue, valuation, growth, etc.): ALWAYS use "chart" ONLY - never include "image"
    - For NEWS/EVENT tiles (X posts, news, events): ALWAYS use "image" ONLY - never include "chart"
    - NEVER include both chart AND image - choose ONE based on tile type
-   - Chart format: {"type": "line", "labels": ["2024","2025","2026"], "data": [100,150,200], "label": "Revenue", "sparkline": false}
+   - Chart format (single line): {"type": "line", "labels": ["2024","2025","2026"], "data": [100,150,200], "label": "Revenue", "sparkline": false}
+   - Chart format (multiple lines): {"type": "line", "labels": ["2024","2025","2026"], "datasets": [{"label": "Revenue", "data": [100,150,200], "color": "#0066cc"}, {"label": "Costs", "data": [80,90,100], "color": "#ef4444"}], "sparkline": false}
+   - Chart format (bar chart): {"type": "bar", "labels": ["2024","2025","2026"], "data": [100,150,200], "label": "Revenue", "sparkline": false}
    - Image format: {"url": "https://example.com/image.jpg", "alt": "Description"}
    - If tile is a metric (not news/event), ONLY include chart, do NOT include image`;
 
@@ -4925,7 +6264,10 @@ ${ragContext ? `Docs: ${ragContext.substring(0, 500)}` : ''}
 Focus: What "${tileMetric}" means, why ${tileValue} matters, valuation impact, risks/opportunities. Include 2-3 links: [text|view:path] or [text|url:https://...].
 
 Visualization (REQUIRED - choose ONE):
-- METRIC tiles: chart ONLY: {"type":"line","labels":["2024","2025","2026","2027","2028"],"data":[100,150,200,250,300],"label":"${tileMetric}","sparkline":false}
+- METRIC tiles: chart ONLY - Use variety:
+  * Single line: {"type":"line","labels":["2024","2025","2026","2027","2028"],"data":[100,150,200,250,300],"label":"${tileMetric}","sparkline":false}
+  * Multiple lines (for comparisons): {"type":"line","labels":["2024","2025","2026","2027","2028"],"datasets":[{"label":"Metric 1","data":[100,150,200,250,300],"color":"#0066cc"},{"label":"Metric 2","data":[80,120,180,220,280],"color":"#10b981"}],"sparkline":false}
+  * Bar chart (for discrete comparisons): {"type":"bar","labels":["2024","2025","2026","2027","2028"],"data":[100,150,200,250,300],"label":"${tileMetric}","sparkline":false}
 - NEWS/EVENT tiles: image ONLY: {"url":"https://...","alt":"Description"}
 
 Format your response as JSON:
@@ -4938,6 +6280,24 @@ Format your response as JSON:
     "label": "Metric Name",
     "sparkline": false,
     "fill": false
+  },
+  OR for multiple lines:
+  "chart": {
+    "type": "line",
+    "labels": ["2024", "2025", "2026", "2027", "2028"],
+    "datasets": [
+      {"label": "Revenue", "data": [100, 150, 200, 250, 300], "color": "#0066cc"},
+      {"label": "Costs", "data": [80, 120, 180, 220, 280], "color": "#ef4444"}
+    ],
+    "sparkline": false
+  },
+  OR for bar chart:
+  "chart": {
+    "type": "bar",
+    "labels": ["2024", "2025", "2026", "2027", "2028"],
+    "data": [100, 150, 200, 250, 300],
+    "label": "Metric Name",
+    "sparkline": false
   },
   "image": {
     "url": "https://example.com/image.jpg",
@@ -5494,10 +6854,22 @@ app.post('/api/agent/chat', async (req, res) => {
     const messages = [];
     
     // Add system prompt if provided
-    if (systemPrompt) {
+    let finalSystemPrompt = systemPrompt || '';
+    
+    // Add user/builder information
+    const userInfo = '\n\nUSER CONTEXT: You are assisting Vlad Saigau (@VladSaigau) and Aaron Burnett (@aaronburnett), who built and are using this SpaceX valuation tool at Mach33. Cathie Wood (@CathieDWood) is a partner.';
+    
+    // Add instructions for shorter responses with "Learn more" options
+    if (finalSystemPrompt) {
+      finalSystemPrompt += userInfo + '\n\nCRITICAL: Keep responses concise (2-3 sentences max). End each response with "Learn more: [topic1], [topic2], [topic3]" for deeper dives.';
+    } else {
+      finalSystemPrompt = userInfo + '\n\nKeep responses concise (2-3 sentences max). End each response with "Learn more: [topic1], [topic2], [topic3]" for deeper dives.';
+    }
+    
+    if (finalSystemPrompt) {
       messages.push({
         role: 'system',
-        content: systemPrompt
+        content: finalSystemPrompt
       });
     }
 
@@ -5515,6 +6887,10 @@ app.post('/api/agent/chat', async (req, res) => {
 
     // Build comprehensive context message
     let contextMessage = `User Question: ${message}\n\n`;
+    
+    // Add user/builder information
+    contextMessage += `=== USER INFORMATION ===\n`;
+    contextMessage += `You are assisting Vlad Saigau (@VladSaigau) and Aaron Burnett (@aaronburnett), who built and are using this SpaceX valuation tool at Mach33. Cathie Wood (@CathieDWood) is a partner.\n\n`;
     
     if (context) {
       contextMessage += `=== CURRENT APPLICATION STATE ===\n`;
@@ -5647,7 +7023,7 @@ app.post('/api/agent/chat', async (req, res) => {
             body: JSON.stringify({
               model: actualModel || 'grok-2',
               messages: messages,
-              max_tokens: 2000,
+              max_tokens: 500, // Shorter responses
               temperature: 0.7
             })
           });
@@ -5754,7 +7130,216 @@ app.post('/api/agent/chat', async (req, res) => {
 // Initialize
 loadData();
 
-app.listen(PORT, () => {
+// Grok Voice API - Ephemeral Token Endpoint
+app.post('/api/analyst/browser/voice-token', async (req, res) => {
+  try {
+    const grokApiKey = process.env.GROK_API_KEY || process.env.XAI_API_KEY;
+    
+    if (!grokApiKey) {
+      return res.status(400).json({ error: 'Grok API key not provided' });
+    }
+    
+    // Request ephemeral token from Grok
+    const tokenResponse = await fetch('https://api.x.ai/v1/realtime/client_secrets', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${grokApiKey}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        expires_after: { seconds: 300 } // 5 minutes
+      })
+    });
+    
+    if (!tokenResponse.ok) {
+      const errorText = await tokenResponse.text();
+      return res.status(tokenResponse.status).json({ 
+        error: 'Failed to get ephemeral token',
+        details: errorText 
+      });
+    }
+    
+    const tokenData = await tokenResponse.json();
+    
+    // Return client secret (ephemeral token)
+    return res.json({
+      clientSecret: tokenData.client_secret,
+      expiresAt: tokenData.expires_at
+    });
+  } catch (error) {
+    console.error('Voice token error:', error);
+    return res.status(500).json({ error: 'Failed to get voice token', details: error.message });
+  }
+});
+
+// WebSocket Server for Grok Voice Proxy
+const wss = new WebSocket.Server({ 
+  server: server,
+  path: '/api/analyst/ws/grok-voice'
+});
+
+wss.on('connection', (clientWs, req) => {
+  console.log('🔌 Client WebSocket connected for Grok Voice');
+  
+  const grokApiKey = process.env.GROK_API_KEY || process.env.XAI_API_KEY;
+  
+  if (!grokApiKey) {
+    clientWs.close(1008, 'Grok API key not configured');
+    return;
+  }
+  
+  // Connect to Grok Voice API
+  const grokWs = new WebSocket('wss://api.x.ai/v1/realtime', {
+    headers: { 
+      'Authorization': `Bearer ${grokApiKey}` 
+    }
+  });
+  
+  let grokConnected = false;
+  const messageQueue = []; // Queue messages until Grok is connected
+  
+  // Forward messages from client to Grok
+  clientWs.on('message', (data) => {
+    // Log message type for debugging
+    try {
+      if (Buffer.isBuffer(data) || data instanceof ArrayBuffer) {
+        console.log('📤 Client → Grok: Binary message (audio data)');
+      } else if (typeof data === 'string') {
+        const message = JSON.parse(data);
+        console.log('📤 Client → Grok:', message.type || 'unknown message type');
+        
+        // Log important messages in detail
+        if (message.type === 'session.update') {
+          console.log('📤 Session config sent:', JSON.stringify(message.session, null, 2));
+        } else if (message.type === 'conversation.item.create') {
+          console.log('📤 conversation.item.create sent:', {
+            textLength: message.item?.content?.[0]?.text?.length || 0,
+            textPreview: message.item?.content?.[0]?.text?.substring(0, 50) || 'no text'
+          });
+        } else if (message.type === 'response.create') {
+          console.log('📤 response.create sent:', JSON.stringify(message, null, 2));
+          console.log('✅ This should trigger Grok to generate audio response!');
+        }
+      }
+    } catch (e) {
+      console.log('📤 Client → Grok: Non-JSON message');
+    }
+    
+    if (grokConnected && grokWs.readyState === WebSocket.OPEN) {
+      grokWs.send(data);
+    } else {
+      // Queue message until Grok is connected
+      console.log('⏳ Queuing message until Grok connection is ready...');
+      messageQueue.push(data);
+    }
+  });
+  
+  // Forward messages from Grok to client
+  grokWs.on('message', (data) => {
+    // CRITICAL: Grok sends audio as JSON messages with base64-encoded audio, NOT raw binary!
+    // Per working implementation: All messages from Grok are JSON strings
+    try {
+      // Parse as JSON first (Grok always sends JSON)
+      const messageStr = data.toString();
+      const message = JSON.parse(messageStr);
+      
+      console.log('📨 Grok → Client:', message.type || 'unknown message type');
+      
+      // Log important messages in detail
+      if (message.type === 'session.updated' || message.type === 'session.created') {
+        console.log('✅ Session message received:', JSON.stringify(message, null, 2));
+      } else if (message.type === 'response.create') {
+        console.log('🎬 response.create CONFIRMATION from Grok:', JSON.stringify(message, null, 2));
+        console.log('✅ Grok is now generating audio response!');
+      } else if (message.type === 'response.output_audio.delta' || message.type === 'response.audio.delta') {
+        console.log('🎵🎵🎵 AUDIO CHUNK from Grok! 🎵🎵🎵');
+        console.log('🎵 Message type:', message.type);
+        console.log('🎵 Delta length:', message.delta?.length || 'no delta');
+        console.log('🎵 Audio is base64-encoded in JSON message, NOT binary!');
+      } else if (message.type === 'response.output_audio_transcript.delta' || message.type === 'response.text.delta') {
+        console.log('📝 Transcript delta:', message.delta || message.text || 'no delta');
+      } else if (message.type === 'error') {
+        console.error('❌ ERROR from Grok:', JSON.stringify(message, null, 2));
+      } else if (message.type && message.type.includes('response')) {
+        console.log('📋 Response message:', JSON.stringify(message, null, 2));
+      } else if (message.type === 'conversation.item.created' || message.type === 'conversation.created') {
+        console.log('✅ Conversation item created:', JSON.stringify(message, null, 2));
+      }
+      
+      // Forward JSON message to client (Grok sends JSON, not binary)
+      if (clientWs.readyState === WebSocket.OPEN) {
+        clientWs.send(messageStr);
+        console.log('✅ Forwarded JSON message to client, type:', message.type);
+      } else {
+        console.warn('⚠️ Client WebSocket not open (state:', clientWs.readyState, '), dropping message');
+      }
+    } catch (e) {
+      // If it's not JSON, it might be binary (unlikely but handle it)
+      console.log('⚠️ Grok → Client: Non-JSON message, treating as binary');
+      if (Buffer.isBuffer(data) || data instanceof ArrayBuffer) {
+        const size = Buffer.isBuffer(data) ? data.length : data.byteLength;
+        console.log('📦 Binary message size:', size, 'bytes');
+        if (clientWs.readyState === WebSocket.OPEN) {
+          clientWs.send(data);
+        }
+      } else {
+        // Forward as-is
+        if (clientWs.readyState === WebSocket.OPEN) {
+          clientWs.send(data);
+        }
+      }
+    }
+  });
+  
+  // Handle errors
+  grokWs.on('error', (error) => {
+    console.error('Grok WebSocket error:', error);
+    if (clientWs.readyState === WebSocket.OPEN) {
+      clientWs.close(1011, 'Grok connection error');
+    }
+  });
+  
+  clientWs.on('error', (error) => {
+    console.error('Client WebSocket error:', error);
+    if (grokWs.readyState === WebSocket.OPEN) {
+      grokWs.close();
+    }
+  });
+  
+  // Handle disconnections
+  clientWs.on('close', (code, reason) => {
+    console.log('🔌 Client WebSocket closed:', code, reason.toString());
+    if (grokWs.readyState === WebSocket.OPEN) {
+      grokWs.close();
+    }
+  });
+  
+  grokWs.on('close', (code, reason) => {
+    console.log('🔌 Grok WebSocket closed:', code, reason.toString());
+    grokConnected = false;
+    if (clientWs.readyState === WebSocket.OPEN) {
+      clientWs.close();
+    }
+  });
+  
+  grokWs.on('open', () => {
+    console.log('✅ Grok Voice WebSocket connection established');
+    grokConnected = true;
+    
+    // Send all queued messages
+    console.log(`📤 Sending ${messageQueue.length} queued messages to Grok...`);
+    while (messageQueue.length > 0) {
+      const queuedMessage = messageQueue.shift();
+      if (grokWs.readyState === WebSocket.OPEN) {
+        grokWs.send(queuedMessage);
+      }
+    }
+    console.log('✅ All queued messages sent');
+  });
+});
+
+server.listen(PORT, () => {
   console.log(`\n🚀 SpaceX Valuation Platform running on http://localhost:${PORT}\n`);
+  console.log(`🔌 WebSocket server ready for Grok Voice at ws://localhost:${PORT}/api/analyst/ws/grok-voice\n`);
 });
 

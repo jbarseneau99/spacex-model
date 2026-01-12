@@ -5,6 +5,104 @@
 // Make valuationEngine available globally for scenario comparison
 const valuationEngine = null; // Will be loaded dynamically
 
+/**
+ * CANONICAL TILE CONTENT TYPES
+ * These define what type of content a tile displays
+ */
+const TILE_CONTENT_TYPES = {
+    // Text-only content
+    COMMENTS: 'comments',                    // Comments/text only, no visualization
+    
+    // Image content types
+    IMAGE: 'image',                          // Image only, no text
+    IMAGE_COMMENTS: 'image-comments',        // Image + comments/text
+    
+    // Chart content types
+    CHART: 'chart',                          // Chart only, no text
+    CHART_COMMENTS: 'chart-comments',        // Chart + comments/text (most common)
+    
+    // Table content types
+    TABLE: 'table',                          // Table only, no text
+    TABLE_COMMENTS: 'table-comments',        // Table + comments/text
+    
+    // Special visualization types
+    GAUGE: 'gauge',                          // Gauge/Meter visualization
+    SPARKLINE: 'sparkline',                  // Sparkline (mini chart)
+    METRICS: 'metrics',                     // Metrics card (multiple key numbers)
+    LIST: 'list',                            // List (ordered/unordered)
+    TIMELINE: 'timeline',                    // Timeline visualization
+    HEATMAP: 'heatmap',                      // Heatmap visualization
+    COMPARISON: 'comparison',                // Comparison view (side-by-side)
+    MAP: 'map',                              // Map visualization
+    CODE: 'code',                            // Code/Formula display
+    
+    // Special content types
+    X_FEEDS: 'x-feeds',                      // X/Twitter feed posts
+    NEWS: 'news'                             // News items
+};
+
+/**
+ * Determine tile content type from existing tile properties
+ * Maps legacy properties (isSpecialTile, insightType, tile.id) to canonical content type
+ */
+function determineTileContentType(tile, aiData = null) {
+    // Special tiles (X-feeds, News, Image-Comments)
+    if (tile.isSpecialTile) {
+        if (tile.id === 'x-posts' || tile.insightType === 'x-feeds') {
+            return TILE_CONTENT_TYPES.X_FEEDS;
+        }
+        if (tile.id === 'news' || tile.insightType === 'news') {
+            return TILE_CONTENT_TYPES.NEWS;
+        }
+    }
+    
+    // Check for image-comments tile (explicit type or data structure)
+    if (tile.insightType === 'image-comments' || tile.contentType === 'image-comments') {
+        return TILE_CONTENT_TYPES.IMAGE_COMMENTS;
+    }
+    
+    // If explicit content type is set, use it
+    if (tile.contentType && Object.values(TILE_CONTENT_TYPES).includes(tile.contentType)) {
+        return tile.contentType;
+    }
+    
+    // Determine from AI data and tile properties
+    if (aiData) {
+        // Check for imageComments data structure first
+        if (aiData.imageComments && aiData.imageComments.image && aiData.imageComments.commentary) {
+            return TILE_CONTENT_TYPES.IMAGE_COMMENTS;
+        }
+        
+        const hasChart = aiData.chart && aiData.chart.data && Array.isArray(aiData.chart.data);
+        const hasImage = aiData.image && (aiData.image.url || typeof aiData.image === 'string');
+        const hasTable = aiData.table && (Array.isArray(aiData.table) || typeof aiData.table === 'object');
+        const hasComments = aiData.insight && aiData.insight.trim().length > 0;
+        
+        // Chart types
+        if (hasChart) {
+            return hasComments ? TILE_CONTENT_TYPES.CHART_COMMENTS : TILE_CONTENT_TYPES.CHART;
+        }
+        
+        // Image types
+        if (hasImage) {
+            return hasComments ? TILE_CONTENT_TYPES.IMAGE_COMMENTS : TILE_CONTENT_TYPES.IMAGE;
+        }
+        
+        // Table types
+        if (hasTable) {
+            return hasComments ? TILE_CONTENT_TYPES.TABLE_COMMENTS : TILE_CONTENT_TYPES.TABLE;
+        }
+        
+        // Comments only
+        if (hasComments) {
+            return TILE_CONTENT_TYPES.COMMENTS;
+        }
+    }
+    
+    // Default: chart-comments (most common type for standard tiles)
+    return TILE_CONTENT_TYPES.CHART_COMMENTS;
+}
+
 class ValuationApp {
     constructor() {
         this.currentView = 'dashboard';
@@ -44,6 +142,13 @@ class ValuationApp {
         this.elementSelectionHistory = []; // Track element selections for context // Flag to prevent duplicate generation
         this.agentSystemPrompts = null; // Will be loaded on demand
         this.agentChatHistory = []; // Store chat history for context
+        this.agentVoiceMode = false; // Voice mode toggle (false = text, true = voice)
+        this.agentRecognition = null; // Web Speech API recognition instance
+        this.isRecording = false; // Track if currently recording
+        this.agentSpeechSynthesis = null; // Web Speech Synthesis API instance
+        this.isSpeaking = false; // Track if currently speaking
+        this.grokVoiceService = null; // Grok Voice API service instance
+        this.useGrokVoice = true; // Use Grok Voice API for audio output (when available)
         this.alphaVantageApiKey = localStorage.getItem('alphaVantageApiKey') || '';
         this.financialModelingPrepApiKey = localStorage.getItem('financialModelingPrepApiKey') || '';
         this.tamData = null; // Earth Bandwidth TAM lookup table
@@ -436,13 +541,18 @@ class ValuationApp {
 
     setupEventListeners() {
         // Navigation
-        document.querySelectorAll('.nav-item').forEach(item => {
-            item.addEventListener('click', (e) => {
-                e.preventDefault();
-                const view = item.dataset.view;
-                this.switchView(view);
+        const navItems = document.querySelectorAll('.nav-item');
+        if (navItems && navItems.length > 0) {
+            navItems.forEach(item => {
+                if (item) {
+                    item.addEventListener('click', (e) => {
+                        e.preventDefault();
+                        const view = item.dataset.view;
+                        this.switchView(view);
+                    });
+                }
             });
-        });
+        }
 
         // Calculate button - uses EBITDA multiple approach (consistent for all scenarios)
         document.getElementById('calculateBtn')?.addEventListener('click', () => {
@@ -545,6 +655,21 @@ class ValuationApp {
             this.closeAIAgent();
         });
         
+        // Voice Mode Toggle
+        document.getElementById('agentVoiceToggleBtn')?.addEventListener('click', () => {
+            this.toggleAgentVoiceMode();
+        });
+        
+        // Voice Record Button
+        document.getElementById('agentVoiceRecordBtn')?.addEventListener('click', () => {
+            this.toggleVoiceRecording();
+        });
+        
+        // Voice Stop Button
+        document.getElementById('agentVoiceStopBtn')?.addEventListener('click', () => {
+            this.stopVoiceAudio();
+        });
+        
         // Agent Settings Modal Buttons
         document.getElementById('saveAgentSettingsBtn')?.addEventListener('click', () => {
             this.saveAgentSystemPrompts();
@@ -611,53 +736,71 @@ class ValuationApp {
         });
 
         // Starlink scenario buttons
-        document.querySelectorAll('.scenario-btn').forEach(btn => {
-            btn.addEventListener('click', () => {
-                // Remove active class from all buttons in same group
-                const group = btn.closest('.chart-container') || btn.closest('.section');
-                group.querySelectorAll('.scenario-btn').forEach(b => {
-                    b.classList.remove('active');
-                    b.style.background = '#2a2a2a';
-                    b.style.color = '#888';
-                    b.style.border = '1px solid #444';
-                    b.style.fontWeight = 'normal';
-                });
-                // Add active class to clicked button
-                btn.classList.add('active');
-                btn.style.background = 'white';
-                btn.style.color = '#0066cc';
-                btn.style.border = '1px solid #0066cc';
-                btn.style.fontWeight = '500';
-                // Update chart
-                if (this.currentData && this.currentData.earth) {
-                    const inputs = this.getInputs();
-                    this.updateStarlinkChart(this.currentData.earth, inputs);
+        const scenarioBtns = document.querySelectorAll('.scenario-btn');
+        if (scenarioBtns && scenarioBtns.length > 0) {
+            scenarioBtns.forEach(btn => {
+                if (btn) {
+                    btn.addEventListener('click', () => {
+                        // Remove active class from all buttons in same group
+                        const group = btn.closest('.chart-container') || btn.closest('.section');
+                        if (group) {
+                            group.querySelectorAll('.scenario-btn').forEach(b => {
+                                if (b) {
+                                    b.classList.remove('active');
+                                    b.style.background = '#2a2a2a';
+                                    b.style.color = '#888';
+                                    b.style.border = '1px solid #444';
+                                    b.style.fontWeight = 'normal';
+                                }
+                            });
+                        }
+                        // Add active class to clicked button
+                        btn.classList.add('active');
+                        btn.style.background = 'white';
+                        btn.style.color = '#0066cc';
+                        btn.style.border = '1px solid #0066cc';
+                        btn.style.fontWeight = '500';
+                        // Update chart
+                        if (this.currentData && this.currentData.earth) {
+                            const inputs = this.getInputs();
+                            this.updateStarlinkChart(this.currentData.earth, inputs);
+                        }
+                    });
                 }
             });
-        });
+        }
 
         // Mars launch scaling scenario buttons
-        document.querySelectorAll('.mars-scaling-scenario-btn').forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                const scenario = e.target.dataset.scenario;
-                
-                // Update button states
-                e.target.parentElement.querySelectorAll('.mars-scaling-scenario-btn').forEach(b => {
-                    b.classList.remove('active');
-                    b.style.background = '#2a2a2a';
-                    b.style.color = '#888';
-                });
-                e.target.classList.add('active');
-                e.target.style.background = 'white';
-                e.target.style.color = '#0066cc';
-                e.target.style.fontWeight = '500';
-                
-                // Update chart
-                if (this.currentData?.mars) {
-                    this.updateMarsLaunchScalingChart(this.currentData.mars, this.getInputs(), scenario);
+        const marsScalingBtns = document.querySelectorAll('.mars-scaling-scenario-btn');
+        if (marsScalingBtns && marsScalingBtns.length > 0) {
+            marsScalingBtns.forEach(btn => {
+                if (btn) {
+                    btn.addEventListener('click', (e) => {
+                        const scenario = e.target.dataset.scenario;
+                        
+                        // Update button states
+                        if (e.target.parentElement) {
+                            e.target.parentElement.querySelectorAll('.mars-scaling-scenario-btn').forEach(b => {
+                                if (b) {
+                                    b.classList.remove('active');
+                                    b.style.background = '#2a2a2a';
+                                    b.style.color = '#888';
+                                }
+                            });
+                        }
+                        e.target.classList.add('active');
+                        e.target.style.background = 'white';
+                        e.target.style.color = '#0066cc';
+                        e.target.style.fontWeight = '500';
+                        
+                        // Update chart
+                        if (this.currentData?.mars) {
+                            this.updateMarsLaunchScalingChart(this.currentData.mars, this.getInputs(), scenario);
+                        }
+                    });
                 }
             });
-        });
+        }
 
         // Insights scenario buttons
         document.querySelectorAll('.insight-scenario-btn').forEach(btn => {
@@ -6276,8 +6419,14 @@ class ValuationApp {
         }
 
         try {
-            const baseModelId = document.getElementById('attributionBaseModel')?.value;
+            let baseModelId = document.getElementById('attributionBaseModel')?.value;
             let compareModelId = document.getElementById('attributionCompareModel')?.value;
+            
+            // If "Current Model" is selected (empty value), use the currently loaded model ID
+            if (!baseModelId && this.currentModelId) {
+                baseModelId = this.currentModelId;
+                console.log('[Attribution] Using currently loaded model as base:', baseModelId);
+            }
             
             // For auto-run, try to find a default comparison model if none selected
             if (!compareModelId && silent) {
@@ -6286,7 +6435,13 @@ class ValuationApp {
                     const modelsResult = await modelsResponse.json();
                     if (modelsResult.success && modelsResult.data.length > 1) {
                         // Use the second most recent model as comparison (first is current)
-                        compareModelId = modelsResult.data[1]._id;
+                        // But make sure it's different from baseModelId
+                        const secondModel = modelsResult.data[1]._id;
+                        if (secondModel !== baseModelId) {
+                            compareModelId = secondModel;
+                        } else if (modelsResult.data.length > 2) {
+                            compareModelId = modelsResult.data[2]._id;
+                        }
                     } else if (modelsResult.success && modelsResult.data.length === 1 && this.currentModelId) {
                         // Only one model exists, skip attribution (need at least 2 models)
                         console.log('⏸️ Skipping Attribution - need at least 2 models for comparison');
@@ -6304,9 +6459,39 @@ class ValuationApp {
                 }
                 return;
             }
+            
+            // Ensure base and compare models are different
+            if (baseModelId && baseModelId === compareModelId) {
+                if (!silent) {
+                    alert('Base model and comparison model must be different. Please select two different models.');
+                }
+                console.warn('[Attribution] Base and compare models are the same:', baseModelId);
+                return;
+            }
 
-            // Get base inputs (current or selected model)
-            const baseInputs = baseModelId ? null : this.getInputs();
+            // Get base inputs only if no baseModelId AND no currentModelId
+            // If currentModelId exists, we should use that instead of UI inputs
+            const baseInputs = (baseModelId || this.currentModelId) ? null : this.getInputs();
+            
+            console.log('[Attribution] Comparing models:', {
+                baseModelId: baseModelId || 'Current Model (no ID)',
+                compareModelId,
+                currentModelId: this.currentModelId,
+                usingBaseInputs: !baseModelId,
+                baseModelName: baseModelId ? 'Will fetch from DB' : 'Current Model',
+                compareModelName: compareModelId ? 'Will fetch from DB' : 'Not selected'
+            });
+            
+            // Log request payload
+            const requestPayload = {
+                baseModelId: baseModelId || null,
+                compareModelId: compareModelId,
+                baseInputs: baseInputs
+            };
+            console.log('[Attribution] Request payload:', {
+                ...requestPayload,
+                baseInputs: baseInputs ? `Present (${Object.keys(baseInputs).length} categories)` : 'null'
+            });
             
             const response = await fetch('/api/attribution', {
                 method: 'POST',
@@ -6322,9 +6507,43 @@ class ValuationApp {
 
             const result = await response.json();
             
+            console.log('[Attribution] API Response:', result);
+            
             if (result.success) {
+                console.log('[Attribution] Success - data:', result.data);
+                if (!result.data || !result.data.attribution) {
+                    console.error('[Attribution] Missing attribution data in response:', result);
+                    if (!silent) {
+                        alert('Error: Attribution calculation returned no data. Check console for details.');
+                    }
+                    return;
+                }
+                
+                // Log detailed attribution breakdown
+                const attr = result.data.attribution;
+                console.log('[Attribution] Detailed breakdown:', {
+                    deltaPnL: attr.deltaPnL,
+                    gammaPnL: attr.gammaPnL,
+                    vegaPnL: attr.vegaPnL,
+                    thetaPnL: attr.thetaPnL,
+                    rhoPnL: attr.rhoPnL,
+                    detailsCount: attr.details?.length || 0,
+                    details: attr.details?.map(d => ({
+                        input: d.input,
+                        change: d.change,
+                        deltaPnL: d.deltaPnL,
+                        thetaPnL: d.thetaPnL,
+                        rhoPnL: d.rhoPnL,
+                        totalContribution: d.totalContribution
+                    })) || [],
+                    totalChange: result.data.totalChange,
+                    baseValue: result.data.baseValue,
+                    compareValue: result.data.compareValue
+                });
+                
                 this.displayAttribution(result.data);
             } else {
+                console.error('[Attribution] API Error:', result.error);
                 if (!silent) {
                     alert('Error calculating attribution: ' + result.error);
                 }
@@ -6344,40 +6563,122 @@ class ValuationApp {
     }
 
     displayAttribution(data) {
+        console.log('[Attribution] Displaying attribution data:', data);
+        
+        if (!data) {
+            console.error('[Attribution] No data provided to displayAttribution');
+            return;
+        }
+        
         const { attribution, totalChange, baseValue, compareValue } = data;
+        
+        if (!attribution) {
+            console.error('[Attribution] Missing attribution object in data:', data);
+            return;
+        }
+        
+        console.log('[Attribution] Attribution values:', {
+            deltaPnL: attribution.deltaPnL,
+            gammaPnL: attribution.gammaPnL,
+            vegaPnL: attribution.vegaPnL,
+            thetaPnL: attribution.thetaPnL,
+            rhoPnL: attribution.rhoPnL,
+            details: attribution.details?.length || 0,
+            totalChange,
+            baseValue,
+            compareValue
+        });
         
         // Store data for AI explanation
         this.currentAttributionData = { attribution, totalChange, baseValue, compareValue };
         
-        // Show results
-        document.getElementById('attributionResults').style.display = 'block';
+        // Show results section
+        const resultsSection = document.getElementById('attributionResults');
+        if (!resultsSection) {
+            console.error('[Attribution] attributionResults element not found!');
+            return;
+        }
         
-        // Format values
+        resultsSection.style.display = 'block';
+        resultsSection.style.visibility = 'visible';
+        resultsSection.style.opacity = '1';
+        console.log('[Attribution] Results section displayed');
+        
+        // Scroll to results section after a short delay to ensure it's rendered
+        setTimeout(() => {
+            resultsSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }, 200);
+        
+        // Format values (all attribution values are in billions)
+        // Ensure consistent formatting: values >= 1000B show as T, < 1000B show as B
         const formatValue = (value) => {
-            if (Math.abs(value) >= 1000) {
+            if (value === null || value === undefined || isNaN(value)) return '$0.0B';
+            const absValue = Math.abs(value);
+            // Values >= 1000 billion = trillions
+            if (absValue >= 1000) {
                 return `$${(value / 1000).toFixed(2)}T`;
             }
-            return `$${value.toFixed(1)}B`;
+            // Values < 1000 billion = billions (show 1 decimal)
+            if (absValue >= 0.1) {
+                return `$${value.toFixed(1)}B`;
+            }
+            // Very small values (< 0.1B) show as millions
+            return `$${(value * 1000).toFixed(0)}M`;
         };
         
-        // Update summary cards
-        document.getElementById('attributionTotalChange').textContent = formatValue(totalChange);
-        document.getElementById('attributionDeltaPnL').textContent = formatValue(attribution.deltaPnL || 0);
-        document.getElementById('attributionGammaPnL').textContent = formatValue(attribution.gammaPnL || 0);
-        document.getElementById('attributionVegaPnL').textContent = formatValue(attribution.vegaPnL || 0);
-        document.getElementById('attributionThetaPnL').textContent = formatValue(attribution.thetaPnL || 0);
-        document.getElementById('attributionRhoPnL').textContent = formatValue(attribution.rhoPnL || 0);
+        // Update summary cards with consistent formatting
+        const totalChangeEl = document.getElementById('attributionTotalChange');
+        if (totalChangeEl) {
+            totalChangeEl.textContent = formatValue(totalChange);
+        }
         
-        // Update chart
-        this.updateAttributionChart(attribution, totalChange);
+        const deltaPnLEl = document.getElementById('attributionDeltaPnL');
+        if (deltaPnLEl) {
+            deltaPnLEl.textContent = formatValue(attribution.deltaPnL || 0);
+        }
+        
+        const gammaPnLEl = document.getElementById('attributionGammaPnL');
+        if (gammaPnLEl) {
+            gammaPnLEl.textContent = formatValue(attribution.gammaPnL || 0);
+        }
+        
+        const vegaPnLEl = document.getElementById('attributionVegaPnL');
+        if (vegaPnLEl) {
+            vegaPnLEl.textContent = formatValue(attribution.vegaPnL || 0);
+        }
+        
+        const thetaPnLEl = document.getElementById('attributionThetaPnL');
+        if (thetaPnLEl) {
+            thetaPnLEl.textContent = formatValue(attribution.thetaPnL || 0);
+        }
+        
+        const rhoPnLEl = document.getElementById('attributionRhoPnL');
+        if (rhoPnLEl) {
+            rhoPnLEl.textContent = formatValue(attribution.rhoPnL || 0);
+        }
+        
+        // Update chart (with delay to ensure DOM is ready)
+        setTimeout(() => {
+            try {
+                this.updateAttributionChart(attribution, totalChange);
+            } catch (error) {
+                console.error('[Attribution] Error updating chart:', error);
+            }
+        }, 100);
         
         // Update table
-        this.updateAttributionTable(attribution, totalChange);
+        try {
+            this.updateAttributionTable(attribution, totalChange);
+        } catch (error) {
+            console.error('[Attribution] Error updating table:', error);
+        }
         
         // Initialize AI explanation icons
-        if (window.lucide) window.lucide.createIcons();
+        if (window.lucide) {
+            window.lucide.createIcons();
+        }
         
-        // Note: AI commentary is now triggered via icon click, not auto-generated
+        console.log('[Attribution] Display complete');
     }
 
     // Legacy function - kept for compatibility but AI is now triggered via icon
@@ -6389,7 +6690,26 @@ class ValuationApp {
 
     updateAttributionChart(attribution, totalChange) {
         const ctx = document.getElementById('attributionChart');
-        if (!ctx) return;
+        if (!ctx) {
+            console.error('[Attribution] attributionChart canvas not found!');
+            return;
+        }
+        
+        // Ensure chart container is visible
+        const chartContainer = ctx.closest('.chart-container-half');
+        if (chartContainer) {
+            chartContainer.style.display = 'block';
+            chartContainer.style.visibility = 'visible';
+        }
+        
+        console.log('[Attribution] Updating chart with data:', {
+            deltaPnL: attribution.deltaPnL,
+            gammaPnL: attribution.gammaPnL,
+            vegaPnL: attribution.vegaPnL,
+            thetaPnL: attribution.thetaPnL,
+            rhoPnL: attribution.rhoPnL,
+            totalChange
+        });
         
         if (this.charts.attribution) {
             this.charts.attribution.destroy();
@@ -6407,44 +6727,50 @@ class ValuationApp {
         // Color positive green, negative red
         const colors = values.map(v => v >= 0 ? 'rgba(16, 185, 129, 0.6)' : 'rgba(239, 68, 68, 0.6)');
         
-        this.charts.attribution = new Chart(ctx, {
-            type: 'bar',
-            data: {
-                labels: categories,
-                datasets: [{
-                    label: 'PnL Attribution ($B)',
-                    data: values,
-                    backgroundColor: colors,
-                    borderColor: colors.map(c => c.replace('0.6', '1')),
-                    borderWidth: 1
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                    legend: { display: false },
-                    tooltip: {
-                        callbacks: {
-                            label: function(context) {
-                                const value = context.parsed.y;
-                                const pct = totalChange !== 0 ? ((value / totalChange) * 100).toFixed(1) : 0;
-                                return `${value >= 0 ? '+' : ''}${value.toFixed(1)}B (${pct >= 0 ? '+' : ''}${pct}%)`;
+        try {
+            this.charts.attribution = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: categories,
+                    datasets: [{
+                        label: 'PnL Attribution ($B)',
+                        data: values,
+                        backgroundColor: colors,
+                        borderColor: colors.map(c => c.replace('0.6', '1')),
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    const value = context.parsed.y;
+                                    const pct = totalChange !== 0 ? ((value / totalChange) * 100).toFixed(1) : 0;
+                                    return `${value >= 0 ? '+' : ''}${value.toFixed(1)}B (${pct >= 0 ? '+' : ''}${pct}%)`;
+                                }
                             }
                         }
-                    }
-                },
-                scales: {
-                    y: {
-                        title: {
-                            display: true,
-                            text: 'PnL Contribution ($B)'
-                        },
-                        beginAtZero: false
+                    },
+                    scales: {
+                        y: {
+                            title: {
+                                display: true,
+                                text: 'PnL Contribution ($B)'
+                            },
+                            beginAtZero: false
+                        }
                     }
                 }
-            }
-        });
+            });
+            
+            console.log('[Attribution] Chart created successfully');
+        } catch (error) {
+            console.error('[Attribution] Error creating chart:', error);
+        }
     }
 
     updateAttributionTable(attribution, totalChange) {
@@ -6452,6 +6778,8 @@ class ValuationApp {
         if (!tbody) return;
         
         tbody.innerHTML = '';
+        
+        console.log('[Attribution] Updating table with details:', attribution.details?.length || 0);
         
         if (attribution.details && attribution.details.length > 0) {
             attribution.details.forEach(detail => {
@@ -6470,6 +6798,18 @@ class ValuationApp {
                 
                 tbody.appendChild(row);
             });
+        } else {
+            // Show message when no attribution details
+            const row = document.createElement('tr');
+            row.innerHTML = `
+                <td colspan="7" style="text-align: center; padding: var(--spacing-lg); color: var(--text-secondary);">
+                    <p style="margin: 0 0 var(--spacing-sm) 0; font-weight: 600;">No attribution details found</p>
+                    <p style="margin: 0; font-size: 12px;">The two scenarios have identical inputs, so no PnL attribution can be calculated.</p>
+                    <p style="margin: var(--spacing-sm) 0 0 0; font-size: 12px;">Try comparing scenarios with different input values.</p>
+                </td>
+            `;
+            tbody.appendChild(row);
+            console.warn('[Attribution] No details to display - inputs may be identical');
         }
     }
 
@@ -8867,7 +9207,11 @@ class ValuationApp {
             spacexEbitda = spacexRevenue * 0.20;
         } else {
             // No currentData - try to get from inputs or estimate from valuation
-            console.warn('⚠️ currentData not available, trying to estimate from inputs');
+            // Only log once per session to avoid spam
+            if (!this._hasLoggedNoCurrentData) {
+                console.debug('ℹ️ currentData not available, estimating from inputs');
+                this._hasLoggedNoCurrentData = true;
+            }
             
             if (currentValuation > 0) {
                 // Fallback: estimate revenue from valuation if no Earth data
@@ -8955,9 +9299,15 @@ class ValuationApp {
                 valuationEl.textContent = this.formatCurrency(displayValuation * 1e9);
                 valuationEl.style.color = '';
                 console.log('✅ Updated SpaceX Current Valuation:', valuationEl.textContent);
+                // Reset warning flag when we have data
+                this._hasLoggedNoValuation = false;
             } else {
                 valuationEl.textContent = '--';
-                console.warn('⚠️ No valuation data available - load a model to see valuation');
+                // Only log once per session to avoid spam
+                if (!this._hasLoggedNoValuation) {
+                    console.debug('ℹ️ No valuation data available - load a model to see valuation');
+                    this._hasLoggedNoValuation = true;
+                }
             }
         } else {
             console.warn('⚠️ valuationEl (spacexCurrentValuation) not found');
@@ -13348,16 +13698,15 @@ class ValuationApp {
         // IMPORTANT: mars-operations MUST come before news in this array so it's placed first
         const allTiles = [
             { id: 'total-valuation', icon: 'zap', title: 'Total Enterprise Value', value: formatBillion(totalValue), color: '#0066cc', size: 'horizontal', insightType: 'valuation', data: { totalValue, earthValue, marsValue } },
-            { id: 'comprehensive-overview', icon: 'layout-dashboard', title: 'Comprehensive Overview', value: 'Summary', color: '#0066cc', size: 'large', insightType: 'valuation-summary', data: { totalValue, earthValue, marsValue } },
-            { id: 'mars-timeline', icon: 'calendar', title: 'Mars Timeline', value: `${inputs?.mars?.firstColonyYear || 2030}`, color: '#f59e0b', size: 'square', insightType: 'mars', data: { firstColonyYear: inputs?.mars?.firstColonyYear || 2030 } },
-            { id: 'x-posts', icon: 'message-square', title: 'Key X Posts', value: 'Recent', color: '#1da1f2', size: 'vertical', insightType: 'x-feeds', data: {}, isSpecialTile: true, preferredPosition: { below: 'mars-timeline' } },
+            { id: 'comprehensive-overview', icon: 'layout-dashboard', title: 'Comprehensive Overview', value: 'Summary', color: '#0066cc', size: '2x2', insightType: 'valuation-summary', data: { totalValue, earthValue, marsValue } },
             { id: 'earth-operations', icon: 'globe', title: 'Earth Operations', value: `${earthPercent.toFixed(1)}%`, subtitle: formatBillion(earthValue), color: '#10b981', size: 'square', insightType: 'starlink-earth', data: { earthValue, earthPercent } },
             { id: 'mars-operations', icon: 'rocket', title: 'Mars Operations', value: `${marsPercent.toFixed(1)}%`, subtitle: formatBillion(marsValue), color: '#f59e0b', size: 'square', insightType: 'mars-optionality', data: { marsValue, marsPercent } },
-            { id: 'revenue-growth', icon: 'trending-up', title: 'Revenue Growth', value: '25.0%', color: '#10b981', size: 'square', insightType: 'financial', data: {} },
-            { id: 'margin-expansion', icon: 'arrow-up', title: 'Margin Expansion', value: '15.0%', color: '#10b981', size: 'square', insightType: 'financial', data: {} },
-            { id: 'capex-efficiency', icon: 'zap', title: 'Capex Efficiency', value: '85.0%', color: '#0066cc', size: 'square', insightType: 'financial', data: {} },
-            { id: 'discount-rate', icon: 'percent', title: 'Discount Rate', value: `${((inputs?.financial?.discountRate || 0.12) * 100).toFixed(1)}%`, color: inputs?.financial?.discountRate < 0.10 ? '#10b981' : inputs?.financial?.discountRate > 0.15 ? '#ef4444' : '#f59e0b', size: 'vertical', insightType: 'risk', data: { discountRate: inputs?.financial?.discountRate || 0.12 } },
-            { id: 'news', icon: 'newspaper', title: 'Recent News', value: 'Latest', color: '#ef4444', size: 'square', insightType: 'news', data: {}, isSpecialTile: true, preferredPosition: { below: 'discount-rate' } }
+            { id: 'starlink-penetration', icon: 'trending-up', title: 'Starlink Penetration', value: `${((inputs?.earth?.starlinkPenetration || 0) * 100).toFixed(1)}%`, color: '#10b981', size: 'square', insightType: 'starlink-earth', data: { penetration: inputs?.earth?.starlinkPenetration || 0 } },
+            { id: 'launch-volume', icon: 'rocket', title: 'Launch Volume', value: `${inputs?.earth?.launchVolume || 0}/year`, color: '#0066cc', size: 'square', insightType: 'launch', data: { launchVolume: inputs?.earth?.launchVolume || 0 } },
+            { id: 'mars-timeline', icon: 'calendar', title: 'Mars Timeline', value: `${inputs?.mars?.firstColonyYear || 2030}`, color: '#f59e0b', size: 'square', insightType: 'mars', data: { firstColonyYear: inputs?.mars?.firstColonyYear || 2030 } },
+            { id: 'x-posts', icon: 'message-square', title: 'Key X Posts', value: 'Recent', color: '#1da1f2', size: 'vertical', insightType: 'x-feeds', contentType: TILE_CONTENT_TYPES.X_FEEDS, data: {}, isSpecialTile: true, preferredPosition: { below: 'mars-timeline' } },
+            { id: 'news', icon: 'newspaper', title: 'Recent News', value: 'Latest', color: '#ef4444', size: 'square', insightType: 'news', contentType: TILE_CONTENT_TYPES.NEWS, data: {}, isSpecialTile: true, preferredPosition: { below: 'launch-volume' } },
+            { id: 'discount-rate', icon: 'percent', title: 'Discount Rate', value: `${((inputs?.financial?.discountRate || 0.12) * 100).toFixed(1)}%`, color: inputs?.financial?.discountRate < 0.10 ? '#10b981' : inputs?.financial?.discountRate > 0.15 ? '#ef4444' : '#f59e0b', size: 'vertical', insightType: 'risk', data: { discountRate: inputs?.financial?.discountRate || 0.12 }, preferredPosition: { below: 'news' } }
         ];
 
         const tiles = this.packGridTiles(allTiles, 4);
@@ -13492,8 +13841,17 @@ class ValuationApp {
             if (tileElement) {
                 gridContainer.appendChild(tileElement);
                 
+                // Attach click handler for agent commentary
+                this.attachTileClickHandler(tileElement, tile, cachedInsight);
+                
                 // Render chart if present (for cached insights with charts)
-                if (cachedInsight && cachedInsight.chart) {
+                // Skip chart rendering for special content tiles (X-feeds, News, Image-Comments)
+                const tileContentType = determineTileContentType(tile, cachedInsight);
+                const isSpecialContent = tileContentType === TILE_CONTENT_TYPES.X_FEEDS || 
+                                         tileContentType === TILE_CONTENT_TYPES.NEWS || 
+                                         tileContentType === TILE_CONTENT_TYPES.IMAGE_COMMENTS;
+                
+                if (cachedInsight && cachedInsight.chart && !isSpecialContent) {
                     requestAnimationFrame(() => {
                         setTimeout(() => {
                             const rendered = this.renderTileChart(tile.id, cachedInsight.chart, tile.color);
@@ -13786,7 +14144,13 @@ class ValuationApp {
                                 tileElement.replaceWith(updatedElement);
                                 
                                 // Render chart if present (after DOM update)
-                                if (insightData && insightData.chart) {
+                                // Skip chart rendering for special content tiles (X-feeds, News, Image-Comments)
+                                const tileContentType = determineTileContentType(tile, insightData);
+                                const isSpecialContent = tileContentType === TILE_CONTENT_TYPES.X_FEEDS || 
+                                                         tileContentType === TILE_CONTENT_TYPES.NEWS || 
+                                                         tileContentType === TILE_CONTENT_TYPES.IMAGE_COMMENTS;
+                                
+                                if (insightData && insightData.chart && !isSpecialContent) {
                                     console.log(`[Tile Update] ${tileId}: Rendering chart with data:`, insightData.chart);
                                     // Use multiple frames to ensure DOM is fully ready
                                     requestAnimationFrame(() => {
@@ -13812,6 +14176,9 @@ class ValuationApp {
                                     console.log(`[Tile Update] ${tileId}: No chart data to render`);
                                 }
                             }
+                            
+                            // Attach click handler for agent commentary
+                            this.attachTileClickHandler(updatedElement, tile, insightData);
                         }
                 };
 
@@ -14146,19 +14513,26 @@ class ValuationApp {
         const iconSize = '10px';
         const iconContainerSize = '16px';
 
-        const isSpecialTile = tile.isSpecialTile;
-        const specialContent = isSpecialTile && aiData ? this.renderSpecialTileContent(tile, aiData) : '';
+        // Determine canonical content type
+        const contentType = determineTileContentType(tile, aiData);
+        tile.contentType = contentType; // Store for future reference
         
-        // For special tiles, ignore visualizations - only render special content
-        // Check for visualizations (chart or image) - but skip for special tiles
-        const hasChart = !isSpecialTile && aiData && aiData.chart && aiData.chart.data && Array.isArray(aiData.chart.data);
-        const hasImage = !isSpecialTile && aiData && aiData.image && (aiData.image.url || typeof aiData.image === 'string');
+        // Check if this is a special content type (X-feeds, News, or Image-Comments)
+        const isSpecialContent = contentType === TILE_CONTENT_TYPES.X_FEEDS || 
+                                 contentType === TILE_CONTENT_TYPES.NEWS || 
+                                 contentType === TILE_CONTENT_TYPES.IMAGE_COMMENTS;
+        const specialContent = isSpecialContent && aiData ? this.renderSpecialTileContent(tile, aiData, contentType) : '';
+        
+        // For special content tiles, ignore visualizations - only render special content
+        // Check for visualizations (chart or image) - but skip for special content tiles
+        const hasChart = !isSpecialContent && aiData && aiData.chart && aiData.chart.data && Array.isArray(aiData.chart.data);
+        const hasImage = !isSpecialContent && aiData && aiData.image && (aiData.image.url || typeof aiData.image === 'string');
         const hasVisualization = hasChart || hasImage;
         const visualization = hasChart ? aiData.chart : (hasImage ? aiData.image : null);
         const visualizationType = hasChart ? 'chart' : (hasImage ? 'image' : null);
         
         // Determine layout: prose + visualization (Bloomberg style)
-        const useDualLayout = !isSpecialTile && hasAI && hasVisualization;
+        const useDualLayout = !isSpecialContent && hasAI && hasVisualization;
         
         return `
             <div class="dashboard-tile" data-tile-id="${tile.id}" style="
@@ -14179,7 +14553,7 @@ class ValuationApp {
                 overflow: hidden;
                 height: 100%;
             " onmouseover="this.style.boxShadow='0 4px 12px rgba(0,0,0,0.1)'; this.style.borderColor='${tile.color}'; this.style.transform='translateY(-2px)'" onmouseout="this.style.boxShadow='none'; this.style.borderColor='var(--border-color)'; this.style.transform='none'">
-                <div class="tile-header" style="display: flex; align-items: start; gap: 2px; margin-bottom: ${hasAI && !isSpecialTile ? '1px' : '2px'}; flex-shrink: 0; min-height: fit-content;">
+                <div class="tile-header" style="display: flex; align-items: start; gap: 2px; margin-bottom: ${hasAI && !isSpecialContent ? '1px' : '2px'}; flex-shrink: 0; min-height: fit-content;">
                     <div class="tile-icon-container" style="
                         width: ${iconContainerSize};
                         height: ${iconContainerSize};
@@ -14194,7 +14568,7 @@ class ValuationApp {
                         justify-content: center;
                         flex-shrink: 0;
                     ">
-                        <i data-lucide="${tile.icon}" class="tile-icon" style="width: ${iconSize}; height: ${iconSize}; max-width: ${iconSize}; max-height: ${iconSize}; color: ${tile.color};"></i>
+                        <i data-lucide="${tile.icon || 'circle'}" class="tile-icon" style="width: ${iconSize}; height: ${iconSize}; max-width: ${iconSize}; max-height: ${iconSize}; color: ${tile.color || '#0066cc'};"></i>
                     </div>
                     <div style="flex: 1; min-width: 0; overflow: hidden; max-width: calc(100% - ${iconContainerSize} - 4px);">
                         <div class="tile-title" style="font-size: ${titleSize}; color: var(--text-secondary); margin-bottom: 0px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.2px; line-height: 1.0;">${tile.title}</div>
@@ -14204,7 +14578,7 @@ class ValuationApp {
                         </div>
                     </div>
                 </div>
-                ${isSpecialTile ? specialContent : (isLoading ? `
+                ${isSpecialContent ? specialContent : (isLoading ? `
                     <!-- Loading state with spinner -->
                     <div class="tile-loading" style="
                         margin-top: 2px;
@@ -14238,8 +14612,8 @@ class ValuationApp {
                             <!-- Bloomberg-style: Visualization first (top) -->
                             <div class="tile-visualization" style="
                                 width: 100%;
-                                height: ${isLarge ? '80px' : (isVertical ? '60px' : '50px')};
-                                min-height: ${isLarge ? '80px' : (isVertical ? '60px' : '50px')};
+                                height: ${isLarge ? '120px' : (isVertical ? '100px' : '80px')};
+                                min-height: ${isLarge ? '120px' : (isVertical ? '100px' : '80px')};
                                 flex-shrink: 0;
                                 background: var(--background);
                                 border: 0.5px solid var(--border-color);
@@ -14400,6 +14774,18 @@ class ValuationApp {
             chartCanvas.chartInstance.destroy();
         }
         
+        // Get tile info for chart click handler
+        const tileTitle = tileElement.querySelector('.tile-title')?.textContent || tileId;
+        const tileData = tileElement._tileData?.tile || null;
+        
+        // Store tile info on chart data for onClick handler
+        chartData._tileOptions = {
+            tileId: tileId,
+            tileTitle: tileTitle,
+            tileData: tileData,
+            isTileChart: true
+        };
+        
         // Assign a consistent point style based on tileId hash for variety
         if (!chartData.pointStyle) {
             const pointStyles = ['circle', 'triangle', 'rect', 'rectRot', 'star', 'cross', 'crossRot', 'dash'];
@@ -14414,7 +14800,7 @@ class ValuationApp {
         
         console.log(`[Chart Render] Creating chart for ${tileId} with ${chartData.data.length} data points`);
         
-        // Create new chart
+        // Create new chart (tile options are stored in chartData._tileOptions)
         const chartInstance = this.createMiniChart(chartCanvas, chartData, tileColor);
         if (chartInstance) {
             chartCanvas.chartInstance = chartInstance;
@@ -14430,6 +14816,8 @@ class ValuationApp {
      * Create a mini Bloomberg-style chart for a tile
      */
     createMiniChart(canvasElement, chartData, tileColor) {
+        // Get tile options from chartData if this is a tile chart
+        const tileOptions = chartData._tileOptions || {};
         if (!canvasElement) {
             console.error('[createMiniChart] No canvas element provided');
             return null;
@@ -14454,20 +14842,7 @@ class ValuationApp {
         // Default to showing axes and interactivity (sparkline only if explicitly requested)
         const isSparkline = chartData.sparkline === true; // Only sparkline if explicitly set to true
         
-        // Ensure data arrays exist and match
-        const labels = chartData.labels || ['2024', '2025', '2026', '2027', '2028'];
-        let data = chartData.data || [];
-        
-        // Ensure data matches labels length
-        while (data.length < labels.length) {
-            const lastValue = data[data.length - 1] || 100;
-            data.push(lastValue * 1.1);
-        }
-        while (data.length > labels.length) {
-            data.pop();
-        }
-        
-        // Convert hex to rgba for background with opacity (helper function)
+        // Convert hex to rgba for background with opacity (helper function) - MUST be defined first
         const hexToRgba = (hex, alpha) => {
             if (!hex || !hex.startsWith('#')) return `rgba(0, 102, 204, ${alpha})`;
             const r = parseInt(hex.slice(1, 3), 16);
@@ -14476,7 +14851,7 @@ class ValuationApp {
             return `rgba(${r}, ${g}, ${b}, ${alpha})`;
         };
         
-        // Normalize tile color - ensure it's a valid hex color
+        // Normalize tile color - ensure it's a valid hex color - MUST be defined before datasets
         let normalizedColor = tileColor || '#0066cc';
         if (normalizedColor && !normalizedColor.startsWith('#')) {
             // Convert CSS color names or rgb() to hex if needed
@@ -14486,7 +14861,129 @@ class ValuationApp {
             normalizedColor = '#0066cc'; // Ensure valid hex
         }
         
-        console.log(`[createMiniChart] Creating ${chartType} chart with ${data.length} data points, color: ${normalizedColor}`);
+        // Ensure data arrays exist and match
+        const labels = chartData.labels || ['2024', '2025', '2026', '2027', '2028'];
+        
+        // Check if we have multiple datasets (for multi-line charts)
+        const hasMultipleDatasets = Array.isArray(chartData.datasets) && chartData.datasets.length > 0;
+        
+        let datasets = [];
+        
+        if (hasMultipleDatasets) {
+            // Handle multiple datasets (multi-line charts)
+            datasets = chartData.datasets.map((dataset, index) => {
+                let data = dataset.data || [];
+                
+                // Ensure data matches labels length
+                while (data.length < labels.length) {
+                    const lastValue = data[data.length - 1] || 100;
+                    data.push(lastValue * 1.1);
+                }
+                while (data.length > labels.length) {
+                    data.pop();
+                }
+                
+                // Get color for this dataset (from dataset.color, or use tileColor, or generate from index)
+                let datasetColor = dataset.color || normalizedColor;
+                if (!datasetColor || !datasetColor.startsWith('#')) {
+                    // Generate a color based on index if no color provided
+                    const colorPalette = [
+                        '#0066cc', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', 
+                        '#ec4899', '#06b6d4', '#84cc16', '#f97316', '#6366f1'
+                    ];
+                    datasetColor = colorPalette[index % colorPalette.length];
+                }
+                if (!datasetColor.match(/^#[0-9A-Fa-f]{6}$/)) {
+                    datasetColor = '#0066cc'; // Ensure valid hex
+                }
+                
+                const datasetConfig = {
+                    label: dataset.label || `Series ${index + 1}`,
+                    data: data,
+                    borderColor: datasetColor,
+                    backgroundColor: chartType === 'bar' 
+                        ? hexToRgba(datasetColor, 0.5) 
+                        : (chartData.fill ? hexToRgba(datasetColor, 0.05) : hexToRgba(datasetColor, 0.02)),
+                    borderWidth: isSparkline ? 1 : (chartType === 'bar' ? 0.5 : 1.5),
+                    fill: chartType === 'bar' ? false : true, // Bar charts don't fill
+                    tension: chartType === 'bar' ? 0 : (chartData.tension !== undefined ? chartData.tension : 0.5),
+                    pointRadius: isSparkline ? 0 : (chartType === 'bar' ? 0 : 2),
+                    pointHoverRadius: isSparkline ? 0 : (chartType === 'bar' ? 0 : 4),
+                    pointHitRadius: isSparkline ? 0 : (chartType === 'bar' ? 0 : 8),
+                    pointBackgroundColor: datasetColor,
+                    pointBorderColor: '#ffffff',
+                    pointBorderWidth: 0.5,
+                    pointHoverBackgroundColor: datasetColor,
+                    pointHoverBorderColor: '#ffffff',
+                    pointHoverBorderWidth: 1.5,
+                    pointStyle: dataset.pointStyle || chartData.pointStyle || 'circle',
+                };
+                
+                // Bar chart specific settings
+                if (chartType === 'bar') {
+                    datasetConfig.borderRadius = 4;
+                    datasetConfig.borderSkipped = false;
+                }
+                
+                return datasetConfig;
+            });
+        } else {
+            // Single dataset (backward compatible)
+            let data = chartData.data || [];
+            
+            // Ensure data matches labels length
+            while (data.length < labels.length) {
+                const lastValue = data[data.length - 1] || 100;
+                data.push(lastValue * 1.1);
+            }
+            while (data.length > labels.length) {
+                data.pop();
+            }
+            
+            datasets = [{
+                label: chartData.label || '',
+                data: data,
+                borderColor: normalizedColor,
+                backgroundColor: chartType === 'bar' 
+                    ? hexToRgba(normalizedColor, 0.5) 
+                    : (chartData.fill ? hexToRgba(normalizedColor, 0.05) : hexToRgba(normalizedColor, 0.02)),
+                borderWidth: isSparkline ? 1 : (chartType === 'bar' ? 0.5 : 1.5),
+                fill: chartType === 'bar' ? false : true,
+                tension: chartType === 'bar' ? 0 : (chartData.tension !== undefined ? chartData.tension : 0.5),
+                pointRadius: isSparkline ? 0 : (chartType === 'bar' ? 0 : 2),
+                pointHoverRadius: isSparkline ? 0 : (chartType === 'bar' ? 0 : 4),
+                pointHitRadius: isSparkline ? 0 : (chartType === 'bar' ? 0 : 8),
+                pointBackgroundColor: normalizedColor,
+                pointBorderColor: '#ffffff',
+                pointBorderWidth: 0.5,
+                pointHoverBackgroundColor: normalizedColor,
+                pointHoverBorderColor: '#ffffff',
+                pointHoverBorderWidth: 1.5,
+                pointStyle: chartData.pointStyle || 'circle',
+                ...(chartType === 'bar' && {
+                    borderRadius: 4,
+                    borderSkipped: false
+                })
+            }];
+        }
+        
+        // Enhance data variation if it's too flat (for single dataset only)
+        if (!hasMultipleDatasets && datasets[0] && datasets[0].data && datasets[0].data.length > 0) {
+            const data = datasets[0].data;
+            const minVal = Math.min(...data);
+            const maxVal = Math.max(...data);
+            const range = maxVal - minVal;
+            const avgVal = data.reduce((a, b) => a + b, 0) / data.length;
+            
+            // If variation is very small (< 5% of average), add subtle smoothing/variation
+            // This helps curves look more interesting without changing the actual values significantly
+            if (range < avgVal * 0.05 && range > 0) {
+                // Data is very flat - this is expected for some metrics, so we'll just ensure good scaling
+                console.log(`[createMiniChart] Data has low variation (${((range/avgVal)*100).toFixed(2)}%), using enhanced scaling`);
+            }
+        }
+        
+        console.log(`[createMiniChart] Creating ${chartType} chart with ${hasMultipleDatasets ? datasets.length + ' datasets' : datasets[0].data.length + ' data points'}, color: ${normalizedColor}`);
         
         // Ensure canvas has explicit dimensions (Chart.js needs this)
         // Wait for container to be fully rendered before measuring
@@ -14527,31 +15024,56 @@ class ValuationApp {
             console.warn(`[createMiniChart] Container not found, using fallback dimensions`);
         }
         
+        // Create gradient fill for visual interest (after canvas dimensions are set)
+        // We'll create this in the chart's afterDraw plugin to ensure canvas is ready
+        const createGradient = (chart) => {
+            const chartCtx = chart.ctx;
+            const chartArea = chart.chartArea;
+            if (!chartCtx || !chartArea) return null;
+            
+            const gradient = chartCtx.createLinearGradient(0, chartArea.top, 0, chartArea.bottom);
+            if (chartData.fill) {
+                gradient.addColorStop(0, hexToRgba(normalizedColor, 0.25));
+                gradient.addColorStop(0.5, hexToRgba(normalizedColor, 0.12));
+                gradient.addColorStop(1, hexToRgba(normalizedColor, 0.03));
+            } else {
+                // Subtle gradient even without explicit fill
+                gradient.addColorStop(0, hexToRgba(normalizedColor, 0.08));
+                gradient.addColorStop(1, 'transparent');
+            }
+            return gradient;
+        };
+        
+        // Register gradient fill plugin for line charts (reduced opacity for less shading)
+        const gradientFillPlugin = {
+            id: 'gradientFill',
+            beforeDraw: (chart) => {
+                // Apply gradient to all datasets that have fill enabled (only for line charts)
+                if (chartType === 'bar') return;
+                chart.data.datasets.forEach((dataset) => {
+                    if (dataset && dataset.fill) {
+                        const chartCtx = chart.ctx;
+                        const chartArea = chart.chartArea;
+                        if (chartCtx && chartArea) {
+                            const datasetColor = dataset.borderColor || normalizedColor;
+                            const gradient = chartCtx.createLinearGradient(0, chartArea.top, 0, chartArea.bottom);
+                            gradient.addColorStop(0, hexToRgba(datasetColor, 0.08));
+                            gradient.addColorStop(0.5, hexToRgba(datasetColor, 0.04));
+                            gradient.addColorStop(1, hexToRgba(datasetColor, 0.01));
+                            dataset.backgroundColor = gradient;
+                        }
+                    }
+                });
+            }
+        };
+        
         const config = {
             type: chartType,
             data: {
                 labels: labels,
-                datasets: [{
-                    label: chartData.label || '',
-                    data: data,
-                    borderColor: normalizedColor,
-                    backgroundColor: chartData.fill ? hexToRgba(normalizedColor, 0.15) : 'transparent',
-                    borderWidth: isSparkline ? 1.5 : 1.5, // Thinner lines
-                    fill: chartData.fill || false,
-                    tension: chartData.tension !== undefined ? chartData.tension : 0.4,
-                    pointRadius: isSparkline ? 0 : 2.5, // Finer marks
-                    pointHoverRadius: isSparkline ? 0 : 4,
-                    pointHitRadius: isSparkline ? 0 : 8,
-                    pointBackgroundColor: normalizedColor,
-                    pointBorderColor: '#ffffff',
-                    pointBorderWidth: 0.5, // Thinner border
-                    pointHoverBackgroundColor: normalizedColor,
-                    pointHoverBorderColor: '#ffffff',
-                    pointHoverBorderWidth: 1,
-                    // Different point styles for variety (assigned in renderTileChart)
-                    pointStyle: chartData.pointStyle || 'circle',
-                }]
+                datasets: datasets
             },
+            plugins: [gradientFillPlugin],
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
@@ -14614,10 +15136,10 @@ class ValuationApp {
                         display: true,
                         grid: {
                             display: true,
-                            color: 'rgba(0, 0, 0, 0.06)', // Subtle grid lines
+                            color: 'rgba(0, 0, 0, 0.15)', // More noticeable grid lines
                             drawBorder: true,
-                            borderColor: 'rgba(0, 0, 0, 0.12)',
-                            lineWidth: 0.5 // Thinner grid lines
+                            borderColor: 'rgba(0, 0, 0, 0.25)',
+                            lineWidth: 1 // Thicker grid lines
                         },
                         ticks: {
                             font: { size: 7, weight: '400' }, // Even smaller font
@@ -14630,10 +15152,10 @@ class ValuationApp {
                         display: true,
                         grid: {
                             display: true,
-                            color: 'rgba(0, 0, 0, 0.06)', // Subtle grid lines
+                            color: 'rgba(0, 0, 0, 0.15)', // More noticeable grid lines
                             drawBorder: true,
-                            borderColor: 'rgba(0, 0, 0, 0.12)',
-                            lineWidth: 0.5 // Thinner grid lines
+                            borderColor: 'rgba(0, 0, 0, 0.25)',
+                            lineWidth: 1 // Thicker grid lines
                         },
                         ticks: {
                             font: { size: 7, weight: '400' }, // Even smaller font
@@ -14647,9 +15169,40 @@ class ValuationApp {
                                 return value.toFixed(0);
                             }
                         },
-                        // Ensure proper scaling to show variation
+                        // Enhanced scaling to emphasize curve variation
                         beginAtZero: false, // Don't force zero, show actual data range
-                        grace: '5%' // Add small padding to show variation better
+                        grace: '15%', // Increased padding to show more variation
+                        // Calculate min/max to emphasize the curve shape (works for single or multiple datasets)
+                        min: function(context) {
+                            // Get all values from all datasets
+                            const allValues = [];
+                            context.chart.data.datasets.forEach(dataset => {
+                                if (Array.isArray(dataset.data)) {
+                                    allValues.push(...dataset.data);
+                                }
+                            });
+                            if (allValues.length === 0) return 0;
+                            const minValue = Math.min(...allValues);
+                            const maxValue = Math.max(...allValues);
+                            const range = maxValue - minValue;
+                            // Set min to show more of the curve (don't start at absolute min)
+                            return minValue - (range * 0.1); // 10% below min for better curve visibility
+                        },
+                        max: function(context) {
+                            // Get all values from all datasets
+                            const allValues = [];
+                            context.chart.data.datasets.forEach(dataset => {
+                                if (Array.isArray(dataset.data)) {
+                                    allValues.push(...dataset.data);
+                                }
+                            });
+                            if (allValues.length === 0) return 100;
+                            const minValue = Math.min(...allValues);
+                            const maxValue = Math.max(...allValues);
+                            const range = maxValue - minValue;
+                            // Set max to show more of the curve (don't end at absolute max)
+                            return maxValue + (range * 0.1); // 10% above max for better curve visibility
+                        }
                     }
                 },
                 animation: {
@@ -14666,14 +15219,126 @@ class ValuationApp {
                     event.native.target.style.cursor = activeElements.length > 0 ? 'pointer' : 'default';
                 },
                 onClick: (event, activeElements) => {
+                    console.log('[Chart onClick] Event fired!', { 
+                        activeElements: activeElements?.length || 0,
+                        tileOptions: tileOptions,
+                        hasTileOptions: !!tileOptions.isTileChart
+                    });
+                    
                     // Handle click events for interactivity
-                    if (activeElements.length > 0) {
+                    if (activeElements && activeElements.length > 0) {
                         const element = activeElements[0];
-                        const datasetIndex = element.datasetIndex;
+                        console.log('[Chart onClick] Element:', element);
+                        
+                        try {
+                            const datasetIndex = element.datasetIndex || 0;
                         const index = element.index;
-                        const value = element.parsed.y;
-                        const label = element.label;
+                            const chart = element.chart || event.chart;
+                            
+                            if (!chart || index === undefined) {
+                                console.warn('[Chart onClick] Missing chart or index:', { chart: !!chart, index });
+                                return;
+                            }
+                            
+                            // Get value directly from chart data (more reliable than parsed)
+                            const dataset = chart.data.datasets?.[datasetIndex];
+                            const value = dataset?.data?.[index];
+                            const label = chart.data.labels?.[index] || `Point ${index}`;
+                            
+                            console.log('[Chart onClick] Data:', { value, label, index, datasetIndex, hasDataset: !!dataset });
+                            
+                            if (value !== null && value !== undefined && label) {
                         console.log(`[Chart Click] ${label}: ${value}`);
+                                
+                                // If this is a tile chart, trigger handleElementSelection
+                                if (tileOptions.isTileChart && tileOptions.tileId) {
+                                    const app = window.app;
+                                    console.log('[Chart onClick] Calling handleElementSelection for tile chart');
+                                    
+                                    if (app && app.handleElementSelection) {
+                                        // Format value for display
+                                        const formatValue = (val) => {
+                                            if (typeof val === 'number') {
+                                                if (val >= 1000) return `$${(val / 1000).toFixed(1)}T`;
+                                                if (val >= 1) return `$${val.toFixed(1)}B`;
+                                                return `${(val * 100).toFixed(1)}%`;
+                                            }
+                                            return String(val);
+                                        };
+                                        
+                                        // Get surrounding datapoints for context
+                                        const allData = dataset.data || [];
+                                        const allLabels = chart.data.labels || [];
+                                        const previousValue = index > 0 ? allData[index - 1] : null;
+                                        const nextValue = index < allData.length - 1 ? allData[index + 1] : null;
+                                        const previousLabel = index > 0 ? allLabels[index - 1] : null;
+                                        const nextLabel = index < allLabels.length - 1 ? allLabels[index + 1] : null;
+                                        
+                                        // Calculate trend
+                                        let trend = 'stable';
+                                        if (previousValue !== null && nextValue !== null) {
+                                            if (value > previousValue && value > nextValue) trend = 'peak';
+                                            else if (value < previousValue && value < nextValue) trend = 'trough';
+                                            else if (value > previousValue) trend = 'increasing';
+                                            else if (value < previousValue) trend = 'decreasing';
+                                        } else if (previousValue !== null) {
+                                            trend = value > previousValue ? 'increasing' : 'decreasing';
+                                        }
+                                        
+                                        // Get chart metadata
+                                        const chartLabel = dataset.label || tileOptions.tileTitle || 'Metric';
+                                        
+                                        console.log(`[Tile Chart Click] ${tileOptions.tileTitle} - ${label}: ${formatValue(value)} (trend: ${trend})`);
+                                        
+                                        app.handleElementSelection({
+                                            type: 'chart',
+                                            chartId: tileOptions.tileId,
+                                            chartName: tileOptions.tileTitle || 'Tile Chart',
+                                            elementType: 'point',
+                                            label: label,
+                                            value: formatValue(value),
+                                            index: index,
+                                            tileId: tileOptions.tileId,
+                                            tileData: tileOptions.tileData,
+                                            // Enhanced datapoint context
+                                            datapointContext: {
+                                                rawValue: value,
+                                                previousValue: previousValue,
+                                                nextValue: nextValue,
+                                                previousLabel: previousLabel,
+                                                nextLabel: nextLabel,
+                                                trend: trend,
+                                                chartLabel: chartLabel,
+                                                allData: allData,
+                                                allLabels: allLabels,
+                                                position: {
+                                                    index: index,
+                                                    total: allData.length,
+                                                    isFirst: index === 0,
+                                                    isLast: index === allData.length - 1
+                                                },
+                                                comparison: {
+                                                    min: Math.min(...allData),
+                                                    max: Math.max(...allData),
+                                                    avg: allData.reduce((a, b) => a + b, 0) / allData.length,
+                                                    percentile: ((index + 1) / allData.length) * 100
+                                                }
+                                            }
+                                        });
+                                    } else {
+                                        console.warn('[Chart onClick] app.handleElementSelection not found!');
+                                    }
+                                } else {
+                                    console.log('[Chart onClick] Not a tile chart or missing tileOptions');
+                                }
+                            } else {
+                                console.warn('[Chart onClick] Missing value or label:', { value, label });
+                            }
+                        } catch (error) {
+                            console.error('[Chart Click] Error handling click:', error, error.stack);
+                        }
+                    } else {
+                        console.log('[Chart onClick] No active elements');
                     }
                 }
             }
@@ -14682,6 +15347,56 @@ class ValuationApp {
         try {
             const chartInstance = new Chart(ctx, config);
             console.log(`[createMiniChart] ✅ Chart instance created successfully`);
+            
+            // Add direct canvas click listener as fallback (for debugging)
+            if (tileOptions.isTileChart) {
+                canvasElement.addEventListener('click', (e) => {
+                    console.log('[Canvas Direct Click] Tile chart clicked!', {
+                        tileId: tileOptions.tileId,
+                        tileTitle: tileOptions.tileTitle,
+                        x: e.offsetX,
+                        y: e.offsetY
+                    });
+                    
+                    // Try to get elements at click position
+                    const elements = chartInstance.getElementsAtEventForMode(e, 'nearest', { intersect: true }, true);
+                    console.log('[Canvas Direct Click] Elements at position:', elements);
+                    
+                    if (elements && elements.length > 0) {
+                        const element = elements[0];
+                        const index = element.index;
+                        const dataset = chartInstance.data.datasets[0];
+                        const value = dataset.data[index];
+                        const label = chartInstance.data.labels[index];
+                        
+                        console.log('[Canvas Direct Click] Found element:', { label, value, index });
+                        
+                        const app = window.app;
+                        if (app && app.handleElementSelection) {
+                            const formatValue = (val) => {
+                                if (typeof val === 'number') {
+                                    if (val >= 1000) return `$${(val / 1000).toFixed(1)}T`;
+                                    if (val >= 1) return `$${val.toFixed(1)}B`;
+                                    return `${(val * 100).toFixed(1)}%`;
+                                }
+                                return String(val);
+                            };
+                            
+                            app.handleElementSelection({
+                                type: 'chart',
+                                chartId: tileOptions.tileId,
+                                chartName: tileOptions.tileTitle || 'Tile Chart',
+                                elementType: 'point',
+                                label: label,
+                                value: formatValue(value),
+                                index: index,
+                                tileId: tileOptions.tileId,
+                                tileData: tileOptions.tileData
+                            });
+                        }
+                    }
+                }, { capture: true });
+            }
             
             // Force chart to update and render
             setTimeout(() => {
@@ -14730,8 +15445,11 @@ class ValuationApp {
         return processed;
     }
 
-    renderSpecialTileContent(tile, aiData) {
-        console.log(`[renderSpecialTileContent] Rendering for tile: ${tile.id}, hasNews: ${!!aiData?.news}, hasXFeeds: ${!!aiData?.xFeeds}, newsCount: ${aiData?.news?.length || 0}, xFeedsCount: ${aiData?.xFeeds?.length || 0}`);
+    renderSpecialTileContent(tile, aiData, contentType = null) {
+        // Use provided contentType or determine from tile
+        const tileContentType = contentType || determineTileContentType(tile, aiData);
+        
+        console.log(`[renderSpecialTileContent] Rendering for tile: ${tile.id}, contentType: ${tileContentType}, hasNews: ${!!aiData?.news}, hasXFeeds: ${!!aiData?.xFeeds}, newsCount: ${aiData?.news?.length || 0}, xFeedsCount: ${aiData?.xFeeds?.length || 0}`);
         
         // Standardized font sizes for special tiles
         const fontSize = '12px';
@@ -14763,14 +15481,18 @@ class ValuationApp {
         
         const itemCount = itemCounts[tile.size] || itemCounts.square;
         
-        if (tile.id === 'x-posts' && aiData.xFeeds && Array.isArray(aiData.xFeeds) && aiData.xFeeds.length > 0) {
+        // Render based on canonical content type
+        if (tileContentType === TILE_CONTENT_TYPES.X_FEEDS && aiData.xFeeds && Array.isArray(aiData.xFeeds) && aiData.xFeeds.length > 0) {
             
             return `
                 <div class="special-content" style="margin-top: 2px; padding-top: 2px; border-top: 1px solid var(--border-color); display: flex; flex-direction: column; gap: 4px; flex: 1; overflow-y: auto; min-height: 0;">
                     ${aiData.xFeeds.slice(0, itemCount).map(post => `
                         <div class="special-item" style="font-size: ${fontSize}; line-height: 1.4; padding: 4px 0; border-bottom: 1px solid rgba(0,0,0,0.05);">
-                            <div class="special-item-title" style="font-weight: 600; color: ${post.isKeyAccount ? tile.color : 'var(--text-secondary)'}; margin-bottom: 2px; font-size: ${accountNameSize};">
+                            <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 2px;">
+                                <div class="special-item-title" style="font-weight: 600; color: ${post.isKeyAccount ? tile.color : 'var(--text-secondary)'}; font-size: ${accountNameSize};">
                                 ${post.accountName || post.account}
+                                </div>
+                                ${post.date ? `<div style="font-size: 9px; color: var(--text-secondary); font-weight: 400; margin-left: 8px; white-space: nowrap;">${post.date}</div>` : ''}
                             </div>
                             <div style="color: var(--text-primary); word-wrap: break-word; line-height: 1.4;">
                                 ${this.processInsightLinks((post.content || '').substring(0, charLimit))}${(post.content || '').length > charLimit ? '...' : ''}
@@ -14779,25 +15501,276 @@ class ValuationApp {
                     `).join('')}
                 </div>
             `;
-        } else if (tile.id === 'news' && aiData.news && Array.isArray(aiData.news) && aiData.news.length > 0) {
+        } else if (tileContentType === TILE_CONTENT_TYPES.NEWS && aiData.news && Array.isArray(aiData.news) && aiData.news.length > 0) {
             console.log(`[renderSpecialTileContent] ✅ Rendering ${aiData.news.length} news items for tile: ${tile.id}`);
             return `
                 <div class="special-content" style="margin-top: 2px; padding-top: 2px; border-top: 1px solid var(--border-color); display: flex; flex-direction: column; gap: 4px; flex: 1; overflow-y: auto; min-height: 0;">
-                    ${aiData.news.slice(0, itemCount).map(item => `
-                        <div class="special-item" style="font-size: ${fontSize}; line-height: 1.4; padding: 4px 0; border-bottom: 1px solid rgba(0,0,0,0.05);">
-                            <div class="special-item-title" style="font-weight: 600; color: ${tile.color}; margin-bottom: 2px; font-size: ${accountNameSize};">
+                    ${aiData.news.slice(0, itemCount).map(item => {
+                        let thumbnailUrl = item.thumbnail || item.image || item.imageUrl || '';
+                        
+                        // Validate URL - must start with http:// or https://
+                        if (thumbnailUrl && !thumbnailUrl.match(/^https?:\/\//i)) {
+                            thumbnailUrl = ''; // Invalid URL, treat as missing
+                        }
+                        
+                        return `
+                        <div class="special-item" style="font-size: ${fontSize}; line-height: 1.4; padding: 4px 0; border-bottom: 1px solid rgba(0,0,0,0.05); display: flex; gap: 6px; align-items: flex-start;">
+                            <div class="news-thumbnail" style="flex-shrink: 0; width: 60px; height: 40px; border-radius: 2px; overflow: hidden; background: var(--surface-secondary); border: 0.5px solid var(--border-color); display: flex; align-items: center; justify-content: center; position: relative;">
+                                ${thumbnailUrl ? `
+                                    <img src="${thumbnailUrl}" alt="${(item.title || 'News thumbnail').replace(/"/g, '&quot;')}" 
+                                         style="width: 100%; height: 100%; object-fit: cover; display: block;" 
+                                         onerror="this.onerror=null; this.style.display='none'; this.nextElementSibling.style.display='flex';" />
+                                    <div style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: var(--surface-secondary); display: none; align-items: center; justify-content: center; font-size: 20px; color: var(--text-secondary);" class="thumbnail-fallback">📰</div>
+                                ` : `
+                                    <div style="width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; background: var(--surface-secondary); color: var(--text-secondary); font-size: 20px;">
+                                        📰
+                                    </div>
+                                `}
+                            </div>
+                            <div style="flex: 1; min-width: 0;">
+                                <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 2px;">
+                                    <div class="special-item-title" style="font-weight: 600; color: ${tile.color}; font-size: ${accountNameSize};">
                                 ${item.title || item.source || 'News'}
+                                    </div>
+                                    ${item.date ? `<div style="font-size: 9px; color: var(--text-secondary); font-weight: 400; margin-left: 8px; white-space: nowrap;">${item.date}</div>` : ''}
                             </div>
                             <div style="color: var(--text-primary); word-wrap: break-word; line-height: 1.4;">
                                 ${this.processInsightLinks((item.summary || item.content || '').substring(0, charLimit))}${(item.summary || item.content || '').length > charLimit ? '...' : ''}
                             </div>
                         </div>
-                    `).join('')}
                 </div>
             `;
-        } else if (tile.id === 'news') {
+                    }).join('')}
+                </div>
+            `;
+        } else if (tileContentType === TILE_CONTENT_TYPES.NEWS) {
             console.warn(`[renderSpecialTileContent] ⚠️ News tile has no news data. aiData:`, aiData);
+        } else if (tileContentType === TILE_CONTENT_TYPES.IMAGE_COMMENTS && aiData.imageComments) {
+            const imageComments = aiData.imageComments;
+            const imageUrl = imageComments.image || '';
+            const commentary = imageComments.commentary || '';
+            
+            console.log(`[renderSpecialTileContent] Image-comments data:`, {
+                hasImageUrl: !!imageUrl,
+                imageUrl: imageUrl?.substring(0, 100),
+                hasCommentary: !!commentary,
+                commentaryLength: commentary?.length
+            });
+            
+            if (!imageUrl || !commentary) {
+                console.warn(`[renderSpecialTileContent] ⚠️ Image-comments tile missing image or commentary. Image: ${imageUrl ? 'present' : 'missing'}, Commentary: ${commentary ? 'present' : 'missing'}`);
+                return '';
+            }
+            
+            // Validate image URL
+            let validImageUrl = imageUrl;
+            if (!imageUrl.match(/^https?:\/\//i)) {
+                console.warn(`[renderSpecialTileContent] ⚠️ Invalid image URL format: ${imageUrl.substring(0, 100)}`);
+                validImageUrl = ''; // Invalid URL
+            } else {
+                console.log(`[renderSpecialTileContent] ✅ Valid image URL: ${imageUrl.substring(0, 100)}`);
+            }
+            
+            // Generate unique ID for this tile instance
+            const tileId = `image-comments-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+            
+            // Dynamic layout: side-by-side for landscape, stacked for portrait
+            // Start with side-by-side (row) as default, will be changed by onload handler
+            return `
+                <div class="special-content image-comments-container" id="${tileId}" style="margin-top: 2px; padding-top: 2px; border-top: 1px solid var(--border-color); display: flex; flex-direction: row; gap: 8px; flex: 1; overflow: hidden; min-height: 0; height: 100%; align-items: stretch;">
+                    <div class="image-comments-image" style="flex-shrink: 0; width: 40%; min-width: 80px; display: flex; align-items: center; justify-content: center; background: var(--surface-secondary); border: 0.5px solid var(--border-color); border-radius: 2px; overflow: hidden; position: relative;">
+                        ${validImageUrl ? `
+                            <img src="${validImageUrl.replace(/"/g, '&quot;')}" alt="${(imageComments.topic || 'Featured insight image').replace(/"/g, '&quot;')}" 
+                                 class="image-comments-img"
+                                 style="width: 100%; height: 100%; object-fit: contain; object-position: center; display: block; cursor: crosshair;" 
+                                 loading="lazy"
+                                 crossorigin="anonymous"
+                                 data-tile-id="${tileId}"
+                                 data-image-url="${validImageUrl.replace(/"/g, '&quot;')}"
+                                 data-topic="${(imageComments.topic || '').replace(/"/g, '&quot;')}"
+                                 onclick="(function(img, tileId, imageUrl, topic) {
+                                    return function(e) {
+                                        e.stopPropagation();
+                                        e.preventDefault();
+                                        
+                                        // Get image dimensions and position
+                                        const rect = img.getBoundingClientRect();
+                                        const x = e.clientX - rect.left;
+                                        const y = e.clientY - rect.top;
+                                        
+                                        // Calculate relative coordinates (0-1 range)
+                                        const relativeX = x / rect.width;
+                                        const relativeY = y / rect.height;
+                                        
+                                        // Get natural image dimensions
+                                        const naturalWidth = img.naturalWidth;
+                                        const naturalHeight = img.naturalHeight;
+                                        
+                                        // Calculate coordinates in natural image space
+                                        const naturalX = Math.round(relativeX * naturalWidth);
+                                        const naturalY = Math.round(relativeY * naturalHeight);
+                                        
+                                        console.log('[Image Click] Click detected:', {
+                                            tileId: tileId,
+                                            imageUrl: imageUrl,
+                                            topic: topic,
+                                            clickX: x,
+                                            clickY: y,
+                                            relativeX: relativeX.toFixed(3),
+                                            relativeY: relativeY.toFixed(3),
+                                            naturalX: naturalX,
+                                            naturalY: naturalY,
+                                            naturalWidth: naturalWidth,
+                                            naturalHeight: naturalHeight,
+                                            renderedWidth: rect.width,
+                                            renderedHeight: rect.height
+                                        });
+                                        
+                                        // Call app method to handle image click with feature detection
+                                        if (window.app && window.app.handleImageClick) {
+                                            window.app.handleImageClick({
+                                                tileId: tileId,
+                                                imageUrl: imageUrl,
+                                                topic: topic,
+                                                coordinates: {
+                                                    x: x,
+                                                    y: y,
+                                                    relativeX: relativeX,
+                                                    relativeY: relativeY,
+                                                    naturalX: naturalX,
+                                                    naturalY: naturalY,
+                                                    naturalWidth: naturalWidth,
+                                                    naturalHeight: naturalHeight
+                                                },
+                                                clickEvent: e
+                                            });
+                                        } else {
+                                            console.warn('[Image Click] app.handleImageClick not available');
+                                        }
+                                    };
+                                 })(this, '${tileId}', '${validImageUrl.replace(/"/g, '&quot;')}', '${(imageComments.topic || '').replace(/"/g, '&quot;')}')"
+                                 onerror="console.warn('Image failed to load:', this.src); this.onerror=null; this.style.display='none'; const fallback = this.nextElementSibling; if(fallback) fallback.style.display='flex';" 
+                                 onload="(function(img, containerId) {
+                                    try {
+                                        console.log('[Image Layout] Image loaded, starting layout detection...');
+                                        console.log('[Image Layout] Image naturalWidth:', img.naturalWidth, 'naturalHeight:', img.naturalHeight);
+                                        console.log('[Image Layout] Container ID:', containerId);
+                                        
+                                        if (!img.naturalWidth || !img.naturalHeight) {
+                                            console.error('[Image Layout] ❌ Image dimensions not available! naturalWidth:', img.naturalWidth, 'naturalHeight:', img.naturalHeight);
+                                            return;
+                                        }
+                                        
+                                        // Wait for DOM and image to render in container
+                                        setTimeout(function() {
+                                            try {
+                                                const container = document.getElementById(containerId);
+                                                if (!container) {
+                                                    console.error('[Image Layout] ❌ Container not found! ID:', containerId);
+                                                    return;
+                                                }
+                                                console.log('[Image Layout] ✅ Container found');
+                                                
+                                                const imageEl = container.querySelector('.image-comments-image');
+                                                const textEl = container.querySelector('.image-comments-text');
+                                                
+                                                if (!imageEl || !textEl) {
+                                                    console.error('[Image Layout] ❌ Image or text element not found!');
+                                                    return;
+                                                }
+                                                console.log('[Image Layout] ✅ Both image and text elements found');
+                                                
+                                                // Get rendered dimensions - this reflects how image actually appears in container
+                                                const renderedWidth = img.clientWidth || img.offsetWidth || img.naturalWidth;
+                                                const renderedHeight = img.clientHeight || img.offsetHeight || img.naturalHeight;
+                                                const renderedAspectRatio = renderedWidth / renderedHeight;
+                                                
+                                                // Calculate natural aspect ratio for reference
+                                                const naturalAspectRatio = img.naturalWidth / img.naturalHeight;
+                                                
+                                                // Use rendered aspect ratio - this reflects how image actually appears in container
+                                                // If rendered is portrait (< 1.0), use stacked layout
+                                                const isPortrait = renderedAspectRatio < 1.0;
+                                                
+                                                console.log('[Image Layout] ========================================');
+                                                console.log('[Image Layout] Aspect Ratio Calculation (using RENDERED size):');
+                                                console.log('[Image Layout]   Natural Width:', img.naturalWidth, 'px');
+                                                console.log('[Image Layout]   Natural Height:', img.naturalHeight, 'px');
+                                                console.log('[Image Layout]   Natural Ratio (W/H):', naturalAspectRatio.toFixed(3));
+                                                console.log('[Image Layout]   Rendered Width:', renderedWidth, 'px');
+                                                console.log('[Image Layout]   Rendered Height:', renderedHeight, 'px');
+                                                console.log('[Image Layout]   Rendered Ratio (W/H):', renderedAspectRatio.toFixed(3));
+                                                console.log('[Image Layout]   Threshold: < 1.0 = Portrait');
+                                                console.log('[Image Layout]   Is Portrait (< 1.0):', isPortrait);
+                                                console.log('[Image Layout]   Selected Layout:', isPortrait ? 'PORTRAIT (stacked)' : 'LANDSCAPE (side-by-side)');
+                                                console.log('[Image Layout] ========================================');
+                                                
+                                                if (isPortrait) {
+                                                    // Portrait: Stack vertically (image on top)
+                                                    console.log('[Image Layout] Applying PORTRAIT layout...');
+                                                    // Use setProperty with important flag to override hardcoded styles
+                                                    container.style.setProperty('flex-direction', 'column', 'important');
+                                                    imageEl.style.setProperty('width', '100%', 'important');
+                                                    imageEl.style.setProperty('height', '45%', 'important');
+                                                    imageEl.style.setProperty('min-height', '120px', 'important');
+                                                    imageEl.style.setProperty('max-height', '180px', 'important');
+                                                    textEl.style.setProperty('width', '100%', 'important');
+                                                    textEl.style.setProperty('flex', '1', 'important');
+                                                    textEl.style.setProperty('min-height', '0', 'important');
+                                                    // Stretch image to fill container after orientation determined
+                                                    img.style.setProperty('object-fit', 'cover', 'important');
+                                                    img.style.setProperty('width', '100%', 'important');
+                                                    img.style.setProperty('height', '100%', 'important');
+                                                    console.log('[Image Layout] ✅ Switched to PORTRAIT layout (stacked)');
+                                                    console.log('[Image Layout] Container flexDirection:', window.getComputedStyle(container).flexDirection);
+                                                    console.log('[Image Layout] Image width:', window.getComputedStyle(imageEl).width, 'height:', window.getComputedStyle(imageEl).height);
+                                                } else {
+                                                    // Landscape: Side-by-side (image on left)
+                                                    console.log('[Image Layout] Applying LANDSCAPE layout...');
+                                                    // Use setProperty with important flag to override hardcoded styles
+                                                    container.style.setProperty('flex-direction', 'row', 'important');
+                                                    imageEl.style.setProperty('width', '40%', 'important');
+                                                    imageEl.style.setProperty('height', '100%', 'important');
+                                                    imageEl.style.setProperty('min-height', 'auto', 'important');
+                                                    imageEl.style.setProperty('max-height', 'none', 'important');
+                                                    textEl.style.setProperty('width', 'auto', 'important');
+                                                    textEl.style.setProperty('flex', '1', 'important');
+                                                    textEl.style.setProperty('min-height', '0', 'important');
+                                                    // Stretch image to fill container after orientation determined
+                                                    img.style.setProperty('object-fit', 'cover', 'important');
+                                                    img.style.setProperty('width', '100%', 'important');
+                                                    img.style.setProperty('height', '100%', 'important');
+                                                    console.log('[Image Layout] ✅ Using LANDSCAPE layout (side-by-side)');
+                                                    console.log('[Image Layout] Container flexDirection:', window.getComputedStyle(container).flexDirection);
+                                                    console.log('[Image Layout] Image width:', window.getComputedStyle(imageEl).width, 'height:', window.getComputedStyle(imageEl).height);
+                                                }
+                                            } catch (error) {
+                                                console.error('[Image Layout] ❌ Error in setTimeout callback:', error);
+                                                console.error('[Image Layout] Error stack:', error.stack);
+                                            }
+                                        }, 200); // Wait for image to render in container
+                                    } catch (error) {
+                                        console.error('[Image Layout] ❌ Error in onload handler:', error);
+                                        console.error('[Image Layout] Error stack:', error.stack);
+                                    }
+                                 })(this, '${tileId}');" />
+                            <div style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: var(--surface-secondary); display: none; align-items: center; justify-content: center; font-size: 24px; color: var(--text-secondary);" class="image-fallback">🖼️</div>
+                        ` : `
+                            <div style="width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; background: var(--surface-secondary); color: var(--text-secondary); font-size: 24px;">
+                                🖼️
+                            </div>
+                        `}
+                    </div>
+                    <div class="image-comments-text" style="flex: 1; min-width: 0; overflow-y: auto; display: flex; flex-direction: column; justify-content: flex-start; padding: 2px 0;">
+                        <div style="color: var(--text-primary); word-wrap: break-word; line-height: 1.5; font-size: ${fontSize};">
+                            ${this.processInsightLinks(commentary)}
+                        </div>
+                    </div>
+                </div>
+            `;
         }
+        
+        // Future: Add rendering for other content types (table, gauge, etc.)
         return '';
     }
 
@@ -14928,6 +15901,39 @@ class ValuationApp {
             }
             if (window.lucide) window.lucide.createIcons();
         }
+        
+        // Initialize voice mode state
+        const voiceToggleBtn = document.getElementById('agentVoiceToggleBtn');
+        const voiceToggleIcon = document.getElementById('agentVoiceToggleIcon');
+        const voiceRecordBtn = document.getElementById('agentVoiceRecordBtn');
+        const voiceRecordIcon = document.getElementById('agentVoiceRecordIcon');
+        const inputContainer = document.querySelector('.agent-chat-input-container');
+        
+        // Load voice mode preference from localStorage
+        const savedVoiceMode = localStorage.getItem('agentVoiceMode');
+        if (savedVoiceMode === 'true') {
+            this.agentVoiceMode = true;
+            inputContainer?.classList.add('voice-mode');
+            voiceToggleBtn?.classList.add('active');
+            if (voiceToggleIcon) {
+                voiceToggleIcon.setAttribute('data-lucide', 'keyboard');
+            }
+            // Load voices for TTS
+            this.loadSpeechVoices();
+        } else {
+            this.agentVoiceMode = false;
+            inputContainer?.classList.remove('voice-mode');
+            voiceToggleBtn?.classList.remove('active');
+            if (voiceToggleIcon) {
+                voiceToggleIcon.setAttribute('data-lucide', 'mic');
+            }
+        }
+        
+        if (voiceRecordIcon) {
+            voiceRecordIcon.setAttribute('data-lucide', 'mic');
+        }
+        
+        if (window.lucide) window.lucide.createIcons();
         
         // Initialize context tracking when agent window opens
         if (!this.previousContext) {
@@ -15139,6 +16145,18 @@ class ValuationApp {
         const agentWindow = document.getElementById('aiAgentWindow');
         if (agentWindow) {
             agentWindow.style.display = 'none';
+            
+            // Stop any active recording
+            if (this.isRecording) {
+                this.stopVoiceRecording();
+            }
+            
+            // Stop any active speech
+            if (this.isSpeaking && 'speechSynthesis' in window) {
+                window.speechSynthesis.cancel();
+                this.isSpeaking = false;
+            }
+            
             console.log('✅ Desktop Agent window closed');
         }
     }
@@ -15184,7 +16202,7 @@ class ValuationApp {
 
     getDefaultAgentSystemPrompts() {
         return {
-            level1: 'You are an AI assistant specialized in analyzing SpaceX valuation models and financial data.',
+            level1: 'You are an AI assistant specialized in analyzing SpaceX valuation models and financial data. You are assisting Vlad Saigau (@VladSaigau) and Aaron Burnett (@aaronburnett), who built and are using this tool at Mach33. Cathie Wood (@CathieDWood) is a partner. Keep responses concise (2-3 sentences max). End each response with "Learn more: [topic1], [topic2], [topic3]" for deeper dives.',
             level2: 'You have deep expertise in space industry economics, satellite communications, launch services, and Mars colonization economics.',
             level3: 'You understand valuation methodologies including DCF, real options theory, and Monte Carlo simulations.',
             level4: 'You can analyze financial metrics, cash flows, revenue projections, and risk factors.',
@@ -15192,7 +16210,7 @@ class ValuationApp {
             level6: 'You consider both near-term Earth operations (Starlink, Launch Services) and long-term Mars optionality.',
             level7: 'You understand the relationship between technical milestones, market dynamics, and valuation outcomes.',
             level8: 'You can compare scenarios, identify key value drivers, and assess risk factors.',
-            level9: 'You provide context-aware responses based on the current model, inputs, and valuation results.',
+            level9: 'You provide context-aware responses based on the current model, inputs, and valuation results. Remember that Vlad Saigau (@VladSaigau) and Aaron Burnett (@aaronburnett) are the primary users and builders of this tool. Cathie Wood (@CathieDWood) is a partner. IMPORTANT: Dashboard tiles have different content types: "chart-comments" (chart with commentary), "image-comments" (image with commentary - NOT a chart), "news" (news articles), "x-feeds" (X/Twitter posts), "comments" (text only), etc. The "Featured Insight" tile (tileId: featured-insight) is an "image-comments" tile - it shows an image with model-focused commentary, NOT a chart. Do NOT describe image-comments tiles as charts.',
             level10: 'You maintain a professional, analytical tone while being accessible and helpful.'
         };
     }
@@ -15366,14 +16384,567 @@ class ValuationApp {
 
             if (result.success) {
                 this.addAgentMessage(result.response, 'assistant');
+                
+                // If in voice mode, speak the response
+                if (this.agentVoiceMode) {
+                    this.speakAgentResponse(result.response);
+                }
             } else {
-                this.addAgentMessage('Sorry, I encountered an error: ' + (result.error || 'Unknown error'), 'assistant');
+                const errorMsg = 'Sorry, I encountered an error: ' + (result.error || 'Unknown error');
+                this.addAgentMessage(errorMsg, 'assistant');
+                
+                // Speak error in voice mode too
+                if (this.agentVoiceMode) {
+                    this.speakAgentResponse(errorMsg);
+                }
             }
         } catch (error) {
             console.error('Agent chat error:', error);
             this.removeAgentMessage(loadingId);
             this.addAgentMessage('Sorry, I encountered an error. Please check your connection and try again.', 'assistant');
         }
+    }
+
+    toggleAgentVoiceMode() {
+        this.agentVoiceMode = !this.agentVoiceMode;
+        const inputContainer = document.querySelector('.agent-chat-input-container');
+        const toggleBtn = document.getElementById('agentVoiceToggleBtn');
+        const toggleIcon = document.getElementById('agentVoiceToggleIcon');
+        const recordBtn = document.getElementById('agentVoiceRecordBtn');
+        
+        // Save preference to localStorage
+        localStorage.setItem('agentVoiceMode', this.agentVoiceMode.toString());
+        
+        if (this.agentVoiceMode) {
+            // Switch to voice mode
+            inputContainer?.classList.add('voice-mode');
+            toggleBtn?.classList.add('active');
+            if (toggleIcon) {
+                toggleIcon.setAttribute('data-lucide', 'keyboard');
+                if (window.lucide) window.lucide.createIcons();
+            }
+            
+            // Load voices if not already loaded
+            this.loadSpeechVoices();
+            
+            // Initialize Web Speech API if available
+            this.initializeVoiceRecognition();
+        } else {
+            // Switch to text mode
+            inputContainer?.classList.remove('voice-mode');
+            toggleBtn?.classList.remove('active');
+            if (toggleIcon) {
+                toggleIcon.setAttribute('data-lucide', 'mic');
+                if (window.lucide) window.lucide.createIcons();
+            }
+            
+            // Stop any active recording
+            if (this.isRecording) {
+                this.stopVoiceRecording();
+            }
+            
+            // Stop any active speech
+            if (this.isSpeaking) {
+                window.speechSynthesis.cancel();
+                this.isSpeaking = false;
+            }
+        }
+    }
+
+    loadSpeechVoices() {
+        // Load voices (required for some browsers)
+        if ('speechSynthesis' in window) {
+            // Some browsers need voices to be loaded
+            const voices = window.speechSynthesis.getVoices();
+            if (voices.length === 0) {
+                // Wait for voices to load
+                window.speechSynthesis.onvoiceschanged = () => {
+                    console.log('✅ Speech voices loaded:', window.speechSynthesis.getVoices().length);
+                    window.speechSynthesis.onvoiceschanged = null; // Remove listener
+                };
+            } else {
+                console.log('✅ Speech voices available:', voices.length);
+            }
+        }
+    }
+
+    initializeVoiceRecognition() {
+        // Check if Web Speech API is available
+        if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+            this.addAgentMessage('Voice recognition is not supported in your browser. Please use text mode.', 'system');
+            this.agentVoiceMode = false;
+            const inputContainer = document.querySelector('.agent-chat-input-container');
+            const toggleBtn = document.getElementById('agentVoiceToggleBtn');
+            inputContainer?.classList.remove('voice-mode');
+            toggleBtn?.classList.remove('active');
+            return;
+        }
+
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        this.agentRecognition = new SpeechRecognition();
+        this.agentRecognition.continuous = true;
+        this.agentRecognition.interimResults = true;
+        this.agentRecognition.lang = 'en-US';
+
+        this.agentRecognition.onresult = (event) => {
+            let interimTranscript = '';
+            let finalTranscript = '';
+
+            for (let i = event.resultIndex; i < event.results.length; i++) {
+                const transcript = event.results[i][0].transcript;
+                if (event.results[i].isFinal) {
+                    finalTranscript += transcript + ' ';
+                } else {
+                    interimTranscript += transcript;
+                }
+            }
+
+            // Show interim results in a temporary message
+            if (interimTranscript) {
+                // Could show interim transcript in UI if needed
+            }
+
+            // Send final transcript when user stops speaking
+            if (finalTranscript.trim()) {
+                this.sendAgentMessage(finalTranscript.trim());
+            }
+        };
+
+        this.agentRecognition.onerror = (event) => {
+            console.error('Speech recognition error:', event.error);
+            if (event.error === 'no-speech') {
+                // User stopped speaking, this is normal
+                return;
+            }
+            this.addAgentMessage('Voice recognition error: ' + event.error, 'system');
+            this.stopVoiceRecording();
+        };
+
+        this.agentRecognition.onend = () => {
+            // Restart recognition if still in voice mode and recording
+            if (this.agentVoiceMode && this.isRecording) {
+                try {
+                    this.agentRecognition.start();
+                } catch (error) {
+                    console.error('Failed to restart recognition:', error);
+                }
+            }
+        };
+    }
+
+    toggleVoiceRecording() {
+        if (this.isRecording) {
+            this.stopVoiceRecording();
+        } else {
+            this.startVoiceRecording();
+        }
+    }
+
+    startVoiceRecording() {
+        if (!this.agentRecognition) {
+            this.initializeVoiceRecognition();
+        }
+
+        if (!this.agentRecognition) {
+            return;
+        }
+
+        try {
+            this.agentRecognition.start();
+            this.isRecording = true;
+            
+            const recordBtn = document.getElementById('agentVoiceRecordBtn');
+            const recordIcon = document.getElementById('agentVoiceRecordIcon');
+            recordBtn?.classList.add('recording');
+            if (recordIcon) {
+                recordIcon.setAttribute('data-lucide', 'square');
+                if (window.lucide) window.lucide.createIcons();
+            }
+            
+            this.addAgentMessage('🎤 Listening...', 'system');
+        } catch (error) {
+            console.error('Failed to start recording:', error);
+            this.addAgentMessage('Failed to start voice recording. Please try again.', 'system');
+        }
+    }
+
+    stopVoiceRecording() {
+        if (this.agentRecognition && this.isRecording) {
+            try {
+                this.agentRecognition.stop();
+            } catch (error) {
+                console.error('Error stopping recognition:', error);
+            }
+        }
+
+        this.isRecording = false;
+        
+        const recordBtn = document.getElementById('agentVoiceRecordBtn');
+        const recordIcon = document.getElementById('agentVoiceRecordIcon');
+        recordBtn?.classList.remove('recording');
+        if (recordIcon) {
+            recordIcon.setAttribute('data-lucide', 'mic');
+            if (window.lucide) window.lucide.createIcons();
+        }
+    }
+
+    stopVoiceAudio() {
+        console.log('🛑 Stopping voice audio...');
+        
+        // Stop browser TTS if playing
+        if ('speechSynthesis' in window) {
+            window.speechSynthesis.cancel();
+        }
+        
+        // Stop Grok Voice audio if playing
+        if (this.grokVoiceService) {
+            this.grokVoiceService.stopAudio();
+        }
+        
+        this.isSpeaking = false;
+        
+        // Update UI
+        const stopBtn = document.getElementById('agentVoiceStopBtn');
+        const inputContainer = document.querySelector('.agent-chat-input-container');
+        inputContainer?.classList.remove('speaking');
+        if (stopBtn) {
+            stopBtn.style.display = 'none';
+        }
+        
+        // Refresh icons
+        if (window.lucide) window.lucide.createIcons();
+        
+        console.log('✅ Voice audio stopped');
+    }
+
+    async speakAgentResponse(text) {
+        if (!text || !text.trim()) return;
+        
+        // Clean up text (remove markdown, HTML tags, etc.)
+        const cleanText = text
+            .replace(/[#*_`]/g, '') // Remove markdown formatting
+            .replace(/<[^>]*>/g, '') // Remove HTML tags
+            .replace(/\n+/g, '. ') // Replace newlines with periods
+            .trim();
+
+        if (!cleanText) return;
+
+        // ONLY use Grok Voice API with Ara's voice - NO FALLBACKS
+        if (this.agentVoiceMode) {
+            try {
+                await this.speakWithGrokVoice(cleanText);
+            } catch (error) {
+                console.error('❌ Grok Voice TTS error:', error);
+                this.addAgentMessage('❌ ERROR: Failed to use Ara voice. ' + (error.message || 'Grok Voice API error'), 'system');
+                // NO FALLBACK - show error only
+                return;
+            }
+        } else {
+            // Not in voice mode - no audio output
+            return;
+        }
+    }
+
+    async speakWithGrokVoice(text) {
+        console.log('🔊 Using Grok Voice (Ara) to speak:', text.substring(0, 50) + '...');
+        
+        try {
+            // Initialize Grok Voice service if needed
+            if (!this.grokVoiceService) {
+                this.grokVoiceService = new GrokVoiceService();
+                // Create audio context for playback (no microphone needed for TTS)
+                try {
+                    this.grokVoiceService.audioContext = new AudioContext({ sampleRate: 24000 });
+                } catch (error) {
+                    console.warn('Could not create AudioContext at 24kHz, using default:', error);
+                    this.grokVoiceService.audioContext = new AudioContext();
+                }
+                
+                // Resume audio context if suspended
+                if (this.grokVoiceService.audioContext.state === 'suspended') {
+                    await this.grokVoiceService.audioContext.resume();
+                }
+            }
+
+            // Ensure audio context is running
+            if (this.grokVoiceService.audioContext.state === 'suspended') {
+                await this.grokVoiceService.audioContext.resume();
+            }
+
+            // Connect WebSocket if not connected
+            if (!this.grokVoiceService.ws || this.grokVoiceService.ws.readyState !== WebSocket.OPEN) {
+                await this.grokVoiceService.connectWebSocket();
+                await new Promise(resolve => setTimeout(resolve, 1000)); // Wait for session to be ready
+            }
+
+            // ALWAYS re-send session config to ensure Ara voice is active
+            // This is critical - Grok Voice may reset voice settings between messages
+            console.log('📤 Ensuring Ara voice is active - sending session config...');
+            
+            try {
+                // sendSessionConfig now returns a promise that resolves when session.updated is received
+                await this.grokVoiceService.sendSessionConfig();
+                console.log('✅ Session updated received - Ara voice config accepted (voice: "ara" sent)');
+            } catch (error) {
+                console.error('❌ Session configuration failed:', error);
+                throw new Error('Ara voice configuration failed: ' + error.message);
+            }
+
+            // CRITICAL: Stop any audio recording before sending text (TTS doesn't need microphone)
+            if (this.grokVoiceService.isRecording) {
+                console.log('🛑 Stopping audio recording before TTS (TTS doesn\'t need microphone)');
+                this.grokVoiceService.isRecording = false;
+                if (this.grokVoiceService.processor) {
+                    this.grokVoiceService.processor.disconnect();
+                    this.grokVoiceService.processor = null;
+                }
+            }
+            
+            // Clear any existing audio queue
+            this.grokVoiceService.audioQueue = [];
+            this.grokVoiceService.isPlayingQueue = false;
+            this.grokVoiceService.nextPlayTime = 0;
+
+            // Set up callback to track when audio playback is done
+            const originalCallback = this.grokVoiceService.onTranscriptCallback;
+            let audioStarted = false;
+            
+            this.grokVoiceService.onTranscriptCallback = (transcript) => {
+                if (transcript.isFinal && !audioStarted) {
+                    audioStarted = true;
+                    this.isSpeaking = true;
+                    console.log('🔊 Grok Voice (Ara) started speaking');
+                    
+                    // Show stop button when speaking starts
+                    const stopBtn = document.getElementById('agentVoiceStopBtn');
+                    const inputContainer = document.querySelector('.agent-chat-input-container');
+                    if (stopBtn && inputContainer) {
+                        inputContainer.classList.add('speaking');
+                        stopBtn.style.display = 'flex';
+                        if (window.lucide) window.lucide.createIcons();
+                    }
+                }
+                
+                if (originalCallback) originalCallback(transcript);
+            };
+
+            // Track audio completion
+            const checkAudioComplete = () => {
+                setTimeout(() => {
+                    if (!this.grokVoiceService.isSpeaking && 
+                        this.grokVoiceService.audioQueue.length === 0 && 
+                        !this.grokVoiceService.isPlayingQueue) {
+                        this.isSpeaking = false;
+                        console.log('✅ Grok Voice (Ara) finished speaking');
+                    }
+                }, 500);
+            };
+
+            // Override message handler to track audio.done
+            const originalMessageHandler = this.grokVoiceService.handleWebSocketMessage.bind(this.grokVoiceService);
+            this.grokVoiceService.handleWebSocketMessage = (event) => {
+                originalMessageHandler(event);
+                
+                // Check if it's an audio.done message
+                if (typeof event.data === 'string') {
+                    try {
+                        const message = JSON.parse(event.data);
+                        if (message.type === 'response.audio.done') {
+                            checkAudioComplete();
+                            // Hide stop button when audio is done
+                            const stopBtn = document.getElementById('agentVoiceStopBtn');
+                            const inputContainer = document.querySelector('.agent-chat-input-container');
+                            if (stopBtn && inputContainer) {
+                                inputContainer.classList.remove('speaking');
+                                stopBtn.style.display = 'none';
+                                if (window.lucide) window.lucide.createIcons();
+                            }
+                        }
+                        
+                        // Show stop button when audio starts
+                        if (message.type === 'response.output_audio.delta' || message.type === 'response.audio.delta') {
+                            const stopBtn = document.getElementById('agentVoiceStopBtn');
+                            const inputContainer = document.querySelector('.agent-chat-input-container');
+                            if (stopBtn && inputContainer && !inputContainer.classList.contains('speaking')) {
+                                inputContainer.classList.add('speaking');
+                                stopBtn.style.display = 'flex';
+                                if (window.lucide) window.lucide.createIcons();
+                            }
+                        }
+                    } catch (e) {
+                        // Not JSON, ignore
+                    }
+                }
+            };
+
+            // Grok Voice API: Send text as a conversation item
+            // Step 1: Create conversation item with text
+            const conversationMessage = {
+                type: 'conversation.item.create',
+                item: {
+                    type: 'message',
+                    role: 'user',
+                    content: [
+                        {
+                            type: 'input_text',
+                            text: text
+                        }
+                    ]
+                }
+            };
+
+            // CRITICAL: Verify WebSocket is open before sending
+            if (!this.grokVoiceService.ws || this.grokVoiceService.ws.readyState !== WebSocket.OPEN) {
+                console.error('❌ WebSocket not open! State:', this.grokVoiceService.ws?.readyState);
+                throw new Error('WebSocket not connected. Cannot send text to Grok Voice.');
+            }
+            
+            console.log('📤 Sending conversation.item.create to Grok Voice API:', text.substring(0, 50) + '...');
+            console.log('📤 WebSocket state:', this.grokVoiceService.ws.readyState, '(should be 1=OPEN)');
+            console.log('📤 Full conversation.item.create message:', JSON.stringify(conversationMessage, null, 2));
+            
+            try {
+                this.grokVoiceService.ws.send(JSON.stringify(conversationMessage));
+                console.log('✅ conversation.item.create sent successfully');
+            } catch (error) {
+                console.error('❌ Error sending conversation.item.create:', error);
+                throw error;
+            }
+            
+            // Step 2: Send response.create to trigger audio response (required!)
+            // Wait 500ms after conversation.item.create (as per debugging guide)
+            setTimeout(() => {
+                // Verify WebSocket is still open
+                if (!this.grokVoiceService.ws || this.grokVoiceService.ws.readyState !== WebSocket.OPEN) {
+                    console.error('❌ WebSocket closed before sending response.create!');
+                    return;
+                }
+                
+                const responseMessage = {
+                    type: 'response.create',
+                    response: {
+                        modalities: ['audio', 'text']
+                    }
+                };
+                
+                console.log('📤 Sending response.create to trigger Grok Voice audio response');
+                console.log('📤 WebSocket state:', this.grokVoiceService.ws.readyState);
+                console.log('📋 response.create message:', JSON.stringify(responseMessage, null, 2));
+                
+                try {
+                    this.grokVoiceService.ws.send(JSON.stringify(responseMessage));
+                    console.log('✅ response.create sent successfully');
+                } catch (error) {
+                    console.error('❌ Error sending response.create:', error);
+                }
+                
+                // Log that we're waiting for audio
+                console.log('⏳ Waiting for response.output_audio.delta or response.audio.delta messages from Grok...');
+            }, 500);
+            
+            this.isSpeaking = true;
+            
+            // Return true to indicate Ara voice is verified
+            return true;
+            
+        } catch (error) {
+            console.error('❌ Error in speakWithGrokVoice:', error);
+            this.isSpeaking = false;
+            // Re-throw error - NO FALLBACK
+            throw error;
+        }
+    }
+
+    speakWithBrowserTTS(text) {
+        console.log('🔊 speakWithBrowserTTS called with text:', text.substring(0, 50) + '...');
+        
+        // Check if Speech Synthesis is available
+        if (!('speechSynthesis' in window)) {
+            console.warn('Speech Synthesis not supported in this browser');
+            return;
+        }
+
+        // Stop any current speech (including Grok Voice audio if playing)
+        if (this.isSpeaking) {
+            window.speechSynthesis.cancel();
+            // Also stop any Grok Voice audio
+            if (this.grokVoiceService && this.grokVoiceService.audioContext) {
+                // Clear audio queue
+                this.grokVoiceService.audioQueue = [];
+                this.grokVoiceService.isPlayingQueue = false;
+            }
+        }
+
+        // Wait a moment for cancellation to complete
+        setTimeout(() => {
+            // Create utterance
+            const utterance = new SpeechSynthesisUtterance(text);
+        
+        // Try to find a good voice (prefer female voices for "Ara")
+        const voices = window.speechSynthesis.getVoices();
+        let selectedVoice = null;
+        
+        // Prefer voices that sound like "Ara" (female, warm)
+        const preferredVoices = [
+            'Samantha', // macOS - female, clear
+            'Karen', // macOS - female, Australian
+            'Victoria', // macOS - female, US
+            'Google UK English Female', // Chrome
+            'Microsoft Zira - English (United States)', // Windows
+            'Microsoft Hazel - English (Great Britain)', // Windows
+        ];
+        
+        // Try to find preferred voice
+        for (const preferred of preferredVoices) {
+            selectedVoice = voices.find(v => v.name.includes(preferred));
+            if (selectedVoice) break;
+        }
+        
+        // Fallback to any female voice
+        if (!selectedVoice) {
+            selectedVoice = voices.find(v => v.gender === 'female' || v.name.toLowerCase().includes('female'));
+        }
+        
+        // Fallback to default
+        if (!selectedVoice) {
+            selectedVoice = voices.find(v => v.default) || voices[0];
+        }
+        
+        if (selectedVoice) {
+            utterance.voice = selectedVoice;
+            console.log('Using browser voice:', selectedVoice.name);
+        }
+        
+        // Configure speech settings
+        utterance.rate = 1.0; // Normal speed
+        utterance.pitch = 1.0; // Normal pitch
+        utterance.volume = 1.0; // Full volume
+        utterance.lang = 'en-US';
+        
+        // Event handlers
+        utterance.onstart = () => {
+            this.isSpeaking = true;
+            console.log('🔊 Started speaking:', text.substring(0, 50) + '...');
+        };
+        
+        utterance.onend = () => {
+            this.isSpeaking = false;
+            console.log('✅ Finished speaking');
+        };
+        
+        utterance.onerror = (event) => {
+            console.error('Speech synthesis error:', event.error);
+            this.isSpeaking = false;
+        };
+        
+            // Speak
+            try {
+                window.speechSynthesis.speak(utterance);
+                console.log('✅ Browser TTS started speaking');
+            } catch (error) {
+                console.error('Error starting browser TTS:', error);
+            }
+        }, 100);
     }
 
     getCurrentTabInfo() {
@@ -15534,6 +17105,521 @@ class ValuationApp {
     /**
      * Generate agent commentary on context changes
      */
+    /**
+     * Attach click handler to a tile for agent commentary
+     */
+    attachTileClickHandler(tileElement, tile, insightData) {
+        if (!tileElement || !tile) return;
+        
+        // Store tile data on element for handler access
+        tileElement._tileData = { tile, insightData };
+        
+        // Remove existing handler if any
+        const existingHandler = tileElement._clickHandler;
+        if (existingHandler) {
+            tileElement.removeEventListener('click', existingHandler);
+        }
+        
+        // Create handler function bound to this instance
+        const clickHandler = async (e) => {
+            // Don't trigger if clicking on links or buttons
+            if (e.target.closest('a') || e.target.closest('button') || e.target.closest('.tile-mini-chart')) {
+                return;
+            }
+            
+            // Don't trigger tile click if clicking directly on the image (image has its own click handler)
+            if (e.target.classList.contains('image-comments-img') || e.target.closest('.image-comments-img')) {
+                return; // Image click handler will process this
+            }
+            
+            // Allow clicks on image-comments containers (text areas, but not image itself)
+            // These should trigger tile commentary
+            const isImageCommentsClick = e.target.closest('.image-comments-container') || 
+                                         e.target.closest('.image-comments-text');
+            
+            e.stopPropagation();
+            const { tile, insightData } = tileElement._tileData || {};
+            if (tile) {
+                console.log('[Tile Click] Generating commentary for tile:', tile.id, 'isImageComments:', !!isImageCommentsClick);
+                await this.generateTileCommentary(tile, insightData);
+            }
+        };
+        
+        // Store handler reference
+        tileElement._clickHandler = clickHandler;
+        
+        // Attach handler
+        tileElement.addEventListener('click', clickHandler);
+        tileElement.style.cursor = 'pointer';
+    }
+
+    /**
+     * Generate agent commentary when a tile is selected
+     */
+    async generateTileCommentary(tile, insightData) {
+        if (!this.agentCommentaryEnabled) return;
+        
+        // Ensure agent window is open
+        const agentWindow = document.getElementById('aiAgentWindow');
+        if (agentWindow) {
+            const isHidden = agentWindow.style.display === 'none' || 
+                           !agentWindow.style.display || 
+                           agentWindow.classList.contains('hidden');
+            if (isHidden) {
+                agentWindow.style.display = 'flex';
+                agentWindow.classList.remove('hidden');
+            }
+        }
+        
+        // Show loading spinner
+        const loadingId = this.addAgentLoadingMessage();
+        
+        try {
+            // Get current context
+            const currentContext = {
+                view: this.currentView,
+                tab: this.getCurrentTabInfo().tab,
+                subTab: this.getCurrentTabInfo().subTab,
+                modelName: this.currentModelName,
+                data: this.currentData
+            };
+            
+            // Debug: Log what data we're receiving
+            console.log('[Tile Commentary] Tile:', tile.id, 'Has news:', !!insightData?.news, 'Has XFeeds:', !!insightData?.xFeeds);
+            if (insightData?.news) {
+                console.log('[Tile Commentary] News items:', insightData.news.map(n => ({ title: n.title, date: n.date, url: n.url })));
+            }
+            if (insightData?.xFeeds) {
+                console.log('[Tile Commentary] X Feeds:', insightData.xFeeds.map(x => ({ account: x.account, date: x.date, url: x.url })));
+            }
+            
+            // Determine tile content type
+            const tileContentType = determineTileContentType(tile, insightData);
+            const isImageCommentsTile = tileContentType === TILE_CONTENT_TYPES.IMAGE_COMMENTS;
+            
+            // Build tile information
+            const tileInfo = {
+                id: tile.id,
+                title: tile.title,
+                value: tile.value,
+                subtitle: tile.subtitle || '',
+                color: tile.color,
+                size: tile.size,
+                insightType: tile.insightType,
+                contentType: tileContentType,
+                hasChart: insightData?.chart ? true : false,
+                hasImage: insightData?.image ? true : false,
+                hasImageComments: isImageCommentsTile,
+                hasNews: insightData?.news ? insightData.news.length : 0,
+                hasXFeeds: insightData?.xFeeds ? insightData.xFeeds.length : 0,
+                insightText: insightData?.insight || '',
+                chartData: insightData?.chart ? {
+                    type: insightData.chart.type,
+                    label: insightData.chart.label,
+                    dataPoints: insightData.chart.data?.length || 0,
+                    labels: insightData.chart.labels || []
+                } : null,
+                imageComments: insightData?.imageComments || null,
+                newsItems: insightData?.news || [],
+                xFeeds: insightData?.xFeeds || []
+            };
+            
+            // Build prompt for agent commentary
+            let prompt = `You are an AI assistant observing user interactions in a SpaceX valuation application.
+
+CURRENT CONTEXT:
+- View: ${currentContext.view}
+- Tab: ${currentContext.tab || 'N/A'}
+- Sub-Tab: ${currentContext.subTab || 'N/A'}
+- Model: ${currentContext.modelName || 'No model loaded'}
+${currentContext.data ? `
+CURRENT VALUATION:
+- Total: $${(currentContext.data.total?.value / 1000).toFixed(2)}T
+- Earth: $${(currentContext.data.earth?.adjustedValue / 1000).toFixed(2)}T
+- Mars: $${(currentContext.data.mars?.adjustedValue / 1000).toFixed(2)}T
+` : ''}
+
+TILE SELECTED:
+- Title: "${tileInfo.title}"
+- Value: ${tileInfo.value}
+${tileInfo.subtitle ? `- Subtitle: ${tileInfo.subtitle}` : ''}
+- Type: ${tileInfo.insightType}
+- Content Type: ${tileInfo.contentType}
+- Size: ${tileInfo.size}
+${tileInfo.hasChart ? `- Chart: ${tileInfo.chartData.type} chart with ${tileInfo.chartData.dataPoints} data points (${tileInfo.chartData.label})` : ''}
+${tileInfo.hasImage ? '- Contains image visualization' : ''}
+${tileInfo.hasImageComments ? '- This is an IMAGE-COMMENTS tile (image with model-focused commentary)' : ''}
+${tileInfo.hasNews > 0 ? `- Contains ${tileInfo.hasNews} news items` : ''}
+${tileInfo.hasXFeeds > 0 ? `- Contains ${tileInfo.hasXFeeds} X (Twitter) posts` : ''}
+${tileInfo.insightText ? `- Insight: ${tileInfo.insightText.substring(0, 300)}${tileInfo.insightText.length > 300 ? '...' : ''}` : ''}
+
+${tileInfo.hasImageComments && tileInfo.imageComments ? `
+IMAGE-COMMENTS TILE CONTENT:
+- Topic: "${tileInfo.imageComments.topic || 'Featured Insight'}"
+- Image URL: ${tileInfo.imageComments.image || 'N/A'}
+- Article URL: ${tileInfo.imageComments.articleUrl || 'N/A'}
+- Commentary: "${tileInfo.imageComments.commentary || ''}"
+
+This tile displays a relevant image related to SpaceX/Starlink topics along with model-focused commentary. The commentary provides insights about how the topic relates to the current valuation model. The image is sourced from a relevant news article but the commentary is entirely model-focused analysis.
+` : ''}
+
+${tileInfo.newsItems.length > 0 ? `
+NEWS ARTICLES IN THIS TILE:
+${tileInfo.newsItems.map((item, idx) => {
+    const date = item.date ? ` (${item.date})` : '';
+    const url = item.url || item.link || '';
+    const source = item.source || 'Unknown Source';
+    return `${idx + 1}. "${item.title}"${date} - ${source}${url ? ` [Read article|url:${url}]` : ''}`;
+}).join('\n')}
+` : ''}
+
+${tileInfo.xFeeds.length > 0 ? `
+X (TWITTER) POSTS IN THIS TILE:
+${tileInfo.xFeeds.map((feed, idx) => {
+    const account = feed.account || feed.accountName || 'Unknown';
+    const date = feed.date || feed.timestamp ? ` (${feed.date || feed.timestamp})` : '';
+    const url = feed.url || feed.link || (feed.account ? `https://twitter.com/${feed.account.replace('@', '')}` : '');
+    const content = feed.content ? feed.content.substring(0, 100) + (feed.content.length > 100 ? '...' : '') : '';
+    return `${idx + 1}. ${account}${date}: "${content}"${url ? ` [View tweet|url:${url}]` : ''}`;
+}).join('\n')}
+` : ''}
+
+TASK: Provide a brief, insightful comment (1-2 sentences max) about this tile that:
+1. Acknowledges what tile the user selected
+2. Highlights key insights or interesting aspects of the tile's content
+3. Provides context about what this metric/tile means for SpaceX valuation
+4. Be conversational and helpful
+${tileInfo.hasImageComments ? `
+5. IMPORTANT: This is an IMAGE-COMMENTS tile. The user clicked on a tile showing:
+   - An image related to: "${tileInfo.imageComments?.topic || 'Featured Insight'}"
+   - Model-focused commentary: "${tileInfo.imageComments?.commentary?.substring(0, 200) || ''}"
+   - Reference article: ${tileInfo.imageComments?.articleUrl || 'N/A'}
+   
+   Your response should:
+   - Acknowledge they're viewing the Featured Insight tile with an image and commentary
+   - Discuss the topic shown in the image and how the commentary relates to the valuation model
+   - Reference the model-focused insights in the commentary
+   - If an article URL is available, include it: [Read source article|url:${tileInfo.imageComments?.articleUrl}]
+   - Do NOT describe this as a chart - it's an image with commentary tile
+` : `
+5. IMPORTANT: If this tile contains news articles or X (Twitter) posts, ALWAYS include links to them with dates:
+   - For news articles: Use format [Article Title (Date)|url:article-url]
+   - For X posts: Use format [View @account tweet (Date)|url:tweet-url]
+   - Include dates in the link text: e.g., [SpaceX Starship Test Flight (Jan 10, 2026)|url:https://...]
+6. Include other clickable links where helpful:
+   - For internal navigation: Use format [link text|view:viewName] or [link text|view:viewName:subTab]
+   - For external articles/news: Use format [link text|url:https://example.com]
+   - You can include 2-4 links per comment (prioritize news/X feed links if available)
+`}
+
+EXAMPLES:
+- "You're looking at the Total Enterprise Value tile showing $1.8T. This represents the combined value of Earth and Mars operations. Explore [Earth Operations|view:earth] or [Mars Operations|view:mars] for details."
+- "The Starlink Penetration tile shows 15% market penetration. This is a key driver of Earth operations value. Check out [Starlink metrics|view:earth:starlink] for more analysis."
+- "This news tile contains recent SpaceX updates. Read [SpaceX Starship Test Flight (Jan 10, 2026)|url:https://example.com/article] and [Starlink Global Expansion (Jan 8, 2026)|url:https://example.com/article2]. Also check [strategic insights|view:insights]."
+- "This X Posts tile shows recent tweets from key SpaceX accounts. View [@elonmusk tweet (Jan 12, 2026)|url:https://twitter.com/elonmusk/status/123] and [@CathieDWood tweet (Jan 11, 2026)|url:https://twitter.com/CathieDWood/status/456]."
+
+Format your response as plain text. Use the link format exactly as shown above.`;
+
+            // Call AI API to generate commentary
+            const systemPrompts = this.agentSystemPrompts || this.getDefaultAgentSystemPrompts();
+            const systemPromptText = Object.values(systemPrompts)
+                .filter(p => p && p.trim())
+                .join('\n\n');
+            
+            const response = await fetch('/api/agent/chat', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-AI-Model': document.getElementById('agentAIModelSelect')?.value || this.aiModel || 'grok:grok-3'
+                },
+                body: JSON.stringify({
+                    message: prompt,
+                    systemPrompt: systemPromptText,
+                    context: currentContext,
+                    history: [] // Don't include full history for tile commentary
+                })
+            });
+
+            const result = await response.json();
+            
+            // Remove loading message
+            this.removeAgentMessage(loadingId);
+            
+            if (result.success && result.response) {
+                // Debug: Log the response
+                console.log('[Tile Commentary] Agent response:', result.response.substring(0, 200));
+                
+                // Parse links and add message
+                const commentaryWithLinks = this.parseCommentaryLinks(result.response);
+                this.addAgentMessage(`📊 ${commentaryWithLinks}`, 'system');
+            } else {
+                // Show error if API call failed
+                console.error('[Tile Commentary] API error:', result.error);
+                this.addAgentMessage('Sorry, I encountered an error generating commentary for this tile.', 'assistant');
+            }
+        } catch (error) {
+            console.error('Error generating tile commentary:', error);
+            // Remove loading message on error
+            this.removeAgentMessage(loadingId);
+            // Show error to user
+            this.addAgentMessage('Sorry, I encountered an error generating commentary for this tile.', 'assistant');
+        }
+    }
+
+    /**
+     * Handle image click - detect what feature/region was clicked
+     */
+    async handleImageClick(clickInfo) {
+        if (!this.agentCommentaryEnabled) return;
+        
+        const { tileId, imageUrl, topic, coordinates } = clickInfo;
+        
+        console.log('[Image Click Handler] Processing click:', clickInfo);
+        
+        // Ensure agent window is open
+        const agentWindow = document.getElementById('aiAgentWindow');
+        if (agentWindow) {
+            const isHidden = agentWindow.style.display === 'none' || 
+                           !agentWindow.style.display || 
+                           agentWindow.classList.contains('hidden');
+            if (isHidden) {
+                agentWindow.style.display = 'flex';
+                agentWindow.classList.remove('hidden');
+            }
+        }
+        
+        // Show loading spinner
+        const loadingId = this.addAgentLoadingMessage();
+        
+        try {
+            // Get tile data from cached insights
+            const tileInsight = this.cachedTerminalInsights?.[this.currentModelId]?.[tileId];
+            const imageComments = tileInsight?.imageComments || {};
+            
+            const currentTabInfo = this.getCurrentTabInfo();
+            const inputs = this.getInputs();
+            
+            // Build prompt for feature detection
+            let prompt = `You are analyzing a user's click on an image in a SpaceX valuation dashboard.
+
+IMAGE CONTEXT:
+- Image URL: ${imageUrl}
+- Image Topic: "${topic || 'Featured Insight'}"
+- Image Dimensions: ${coordinates.naturalWidth} x ${coordinates.naturalHeight} pixels
+
+CLICK COORDINATES:
+- Click Position: (${coordinates.naturalX}, ${coordinates.naturalY}) pixels
+- Relative Position: (${(coordinates.relativeX * 100).toFixed(1)}%, ${(coordinates.relativeY * 100).toFixed(1)}%)
+- X: ${coordinates.relativeX.toFixed(3)} (0.0 = left edge, 1.0 = right edge)
+- Y: ${coordinates.relativeY.toFixed(3)} (0.0 = top edge, 1.0 = bottom edge)
+
+IMAGE COMMENTARY:
+"${imageComments.commentary || ''}"
+
+TASK: Based on the click coordinates and image context, identify what feature or region the user clicked on.
+
+Common features in SpaceX/Starlink images:
+- Starlink satellite bus (the main body of the satellite)
+- Individual Starlink satellites
+- Earth (planet surface or globe)
+- Starlink constellation (multiple satellites)
+- Rocket/Starship
+- Launch pad or ground infrastructure
+- Solar panels
+- Antennas or communication equipment
+- Space/background
+- Text or labels
+
+Consider:
+1. The relative position (top/bottom/left/right/center)
+2. The image topic and commentary context
+3. Typical layouts of SpaceX/Starlink imagery
+
+Respond with ONLY a JSON object in this exact format:
+{
+  "detectedFeature": "description of what was clicked (e.g., 'Starlink satellite bus', 'Earth', 'Individual satellite', 'Starlink constellation')",
+  "region": "general region (e.g., 'center', 'top-left', 'bottom-right', 'left side')",
+  "confidence": "high/medium/low",
+  "reasoning": "brief explanation of why this feature was detected"
+}
+
+Example response:
+{"detectedFeature": "Starlink satellite bus", "region": "center", "confidence": "high", "reasoning": "Click is in the center region where satellite buses are typically positioned in Starlink imagery"}`;
+
+            // Call AI API to detect feature
+            const systemPrompts = this.agentSystemPrompts || this.getDefaultAgentSystemPrompts();
+            const systemPromptText = Object.values(systemPrompts)
+                .filter(p => p && p.trim())
+                .join('\n\n');
+            
+            const response = await fetch('/api/agent/chat', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-AI-Model': document.getElementById('agentAIModelSelect')?.value || this.aiModel || 'grok:grok-3'
+                },
+                body: JSON.stringify({
+                    message: prompt,
+                    systemPrompt: systemPromptText + '\n\nIMPORTANT: Respond with ONLY valid JSON, no additional text.',
+                    context: {
+                        currentView: this.currentView,
+                        currentTab: currentTabInfo.tab,
+                        currentSubTab: currentTabInfo.subTab,
+                        currentModel: {
+                            id: this.currentModelId,
+                            name: this.currentModelName,
+                            inputs: inputs,
+                            valuationData: this.currentData
+                        }
+                    },
+                    history: []
+                })
+            });
+
+            const result = await response.json();
+            this.removeAgentMessage(loadingId);
+            
+            if (result.success && result.response) {
+                // Parse JSON response
+                let featureDetection = null;
+                try {
+                    // Try to extract JSON from response (might have extra text)
+                    const jsonMatch = result.response.match(/\{[\s\S]*\}/);
+                    if (jsonMatch) {
+                        featureDetection = JSON.parse(jsonMatch[0]);
+                    } else {
+                        featureDetection = JSON.parse(result.response);
+                    }
+                } catch (e) {
+                    console.warn('[Image Click] Failed to parse feature detection JSON:', result.response);
+                    featureDetection = {
+                        detectedFeature: 'Unknown region',
+                        region: `${(coordinates.relativeX * 100).toFixed(0)}%, ${(coordinates.relativeY * 100).toFixed(0)}%`,
+                        confidence: 'low',
+                        reasoning: 'Could not parse AI response'
+                    };
+                }
+                
+                // Now send this information to the agent with full context
+                await this.generateImageClickCommentary({
+                    tileId,
+                    imageUrl,
+                    topic,
+                    coordinates,
+                    featureDetection,
+                    imageComments
+                });
+            } else {
+                this.removeAgentMessage(loadingId);
+                this.addAgentMessage('Error detecting image feature. Please try again.', 'system');
+            }
+        } catch (error) {
+            console.error('Error handling image click:', error);
+            this.removeAgentMessage(loadingId);
+            this.addAgentMessage('Error processing image click. Please try again.', 'system');
+        }
+    }
+
+    /**
+     * Generate agent commentary for image click with detected feature
+     */
+    async generateImageClickCommentary(clickData) {
+        const { tileId, imageUrl, topic, coordinates, featureDetection, imageComments } = clickData;
+        
+        // Show loading spinner
+        const loadingId = this.addAgentLoadingMessage();
+        
+        try {
+            const currentTabInfo = this.getCurrentTabInfo();
+            const inputs = this.getInputs();
+            
+            let prompt = `You are an AI assistant observing a user interaction in a SpaceX valuation application.
+
+CURRENT CONTEXT:
+- View: ${this.currentView}
+- Tab: ${currentTabInfo.tab || 'N/A'}
+- Sub-Tab: ${currentTabInfo.subTab || 'N/A'}
+- Model: ${this.currentModelName || 'No model loaded'}
+${this.currentData ? `
+CURRENT VALUATION:
+- Total: $${((this.currentData.total?.value || 0) / 1000).toFixed(2)}T
+- Earth: $${((this.currentData.earth?.adjustedValue || 0) / 1000).toFixed(2)}T
+- Mars: $${((this.currentData.mars?.adjustedValue || 0) / 1000).toFixed(2)}T
+` : ''}
+
+USER CLICKED ON IMAGE:
+- Tile: "Featured Insight" (image-comments tile)
+- Image Topic: "${topic || 'Featured Insight'}"
+- Image URL: ${imageUrl}
+- Click Coordinates: (${coordinates.naturalX}, ${coordinates.naturalY}) pixels
+- Relative Position: ${(coordinates.relativeX * 100).toFixed(1)}% from left, ${(coordinates.relativeY * 100).toFixed(1)}% from top
+
+DETECTED FEATURE:
+- Feature: "${featureDetection.detectedFeature}"
+- Region: "${featureDetection.region}"
+- Confidence: ${featureDetection.confidence}
+- Reasoning: "${featureDetection.reasoning}"
+
+IMAGE COMMENTARY CONTEXT:
+"${imageComments.commentary || ''}"
+
+TASK: Provide a brief, insightful comment (2-3 sentences) about what the user clicked on:
+1. Acknowledge that they clicked on the "${featureDetection.detectedFeature}" in the Featured Insight image
+2. Explain what this feature represents in the context of SpaceX/Starlink
+3. Relate it to the valuation model or operations if relevant
+4. Be specific about the clicked feature (e.g., if it's a Starlink bus, explain its role; if it's Earth, explain coverage/operations)
+5. Use link format: [link text|view:viewName] or [link text|view:viewName:subTab] or [link text|url:https://...]
+
+Be conversational and helpful. Focus on what this specific feature tells us about SpaceX operations or the valuation model.
+
+Format your response as plain text (2-3 sentences). Use the link format exactly as shown above.`;
+
+            const systemPrompts = this.agentSystemPrompts || this.getDefaultAgentSystemPrompts();
+            const systemPromptText = Object.values(systemPrompts)
+                .filter(p => p && p.trim())
+                .join('\n\n');
+            
+            const response = await fetch('/api/agent/chat', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-AI-Model': document.getElementById('agentAIModelSelect')?.value || this.aiModel || 'grok:grok-3'
+                },
+                body: JSON.stringify({
+                    message: prompt,
+                    systemPrompt: systemPromptText,
+                    context: {
+                        currentView: this.currentView,
+                        currentTab: currentTabInfo.tab,
+                        currentSubTab: currentTabInfo.subTab,
+                        currentModel: {
+                            id: this.currentModelId,
+                            name: this.currentModelName,
+                            inputs: inputs,
+                            valuationData: this.currentData
+                        }
+                    },
+                    history: []
+                })
+            });
+
+            const result = await response.json();
+            this.removeAgentMessage(loadingId);
+            
+            if (result.success && result.response) {
+                this.addAgentMessage(result.response, 'assistant');
+                this.processAgentLinks(result.response);
+            } else {
+                this.removeAgentMessage(loadingId);
+                this.addAgentMessage('Error generating image click commentary. Please try again.', 'system');
+            }
+        } catch (error) {
+            console.error('Error generating image click commentary:', error);
+            this.removeAgentMessage(loadingId);
+            this.addAgentMessage('Error generating image click commentary. Please try again.', 'system');
+        }
+    }
+
     async generateContextChangeCommentary(changeInfo, currentContext, thinkingMessageId = null) {
         try {
             // Get navigation history summary (last 10 entries)
@@ -16005,13 +18091,73 @@ CURRENT VALUATION:
 USER SELECTED:
 `;
 
+            // Check if this is a tile selection and determine its content type
+            let tileContentType = null;
+            if (selectionInfo.tileId) {
+                // Get tile content type from cached insights
+                const tileId = selectionInfo.tileId;
+                if (this.cachedTerminalInsights && this.cachedTerminalInsights[this.currentModelId]) {
+                    const tileInsight = this.cachedTerminalInsights[this.currentModelId][tileId];
+                    if (tileInsight) {
+                        // Determine content type from tile insight data
+                        if (tileInsight.imageComments) {
+                            tileContentType = TILE_CONTENT_TYPES.IMAGE_COMMENTS;
+                        } else if (tileInsight.news) {
+                            tileContentType = TILE_CONTENT_TYPES.NEWS;
+                        } else if (tileInsight.xFeeds) {
+                            tileContentType = TILE_CONTENT_TYPES.X_FEEDS;
+                        } else if (tileInsight.chart) {
+                            tileContentType = tileInsight.insight ? TILE_CONTENT_TYPES.CHART_COMMENTS : TILE_CONTENT_TYPES.CHART;
+                        }
+                    }
+                }
+                
+                // Fallback: check tileId directly
+                if (!tileContentType) {
+                    if (tileId === 'featured-insight') {
+                        tileContentType = TILE_CONTENT_TYPES.IMAGE_COMMENTS;
+                    } else if (tileId === 'x-posts') {
+                        tileContentType = TILE_CONTENT_TYPES.X_FEEDS;
+                    } else if (tileId === 'news') {
+                        tileContentType = TILE_CONTENT_TYPES.NEWS;
+                    }
+                }
+            }
+
             if (selectionInfo.type === 'chart') {
+                // Check if this is actually an image-comments tile being incorrectly identified as a chart
+                if (tileContentType === TILE_CONTENT_TYPES.IMAGE_COMMENTS) {
+                    prompt += `Tile Selection (Image + Commentary):
+- Tile: ${selectionInfo.chartName || 'Featured Insight'}
+- Tile ID: ${selectionInfo.tileId}
+- Content Type: Image with Commentary
+- This tile displays a relevant image with model-focused commentary about SpaceX/Starlink topics
+- The image and commentary are selected to be highly relevant to the current valuation model
+`;
+                } else {
                 prompt += `Chart Element Selection:
 - Chart: ${selectionInfo.chartName}
 - Element: ${selectionInfo.label}
 - Value: ${selectionInfo.value}
 - Chart ID: ${selectionInfo.chartId}
+${tileContentType ? `- Tile Content Type: ${tileContentType}` : ''}
 `;
+                    
+                    // Add rich datapoint context if available
+                    if (selectionInfo.datapointContext) {
+                        const ctx = selectionInfo.datapointContext;
+                        prompt += `
+DATAPOINT CONTEXT:
+- Raw Value: ${ctx.rawValue}
+- Chart Metric: ${ctx.chartLabel}
+- Position: ${ctx.position.index + 1} of ${ctx.position.total}${ctx.position.isFirst ? ' (First)' : ctx.position.isLast ? ' (Last)' : ''}
+- Trend: ${ctx.trend}${ctx.previousValue !== null ? ` (from ${ctx.previousLabel}: ${ctx.previousValue})` : ''}${ctx.nextValue !== null ? ` (to ${ctx.nextLabel}: ${ctx.nextValue})` : ''}
+- Comparison: Min=${ctx.comparison.min}, Max=${ctx.comparison.max.toFixed(2)}, Avg=${ctx.comparison.avg.toFixed(2)}
+- Percentile: ${ctx.comparison.percentile.toFixed(1)}% (higher than ${ctx.comparison.percentile.toFixed(1)}% of datapoints)
+- All Values: ${ctx.allLabels.map((l, i) => `${l}: ${ctx.allData[i]}`).join(', ')}
+`;
+                    }
+                }
             } else if (selectionInfo.type === 'text') {
                 prompt += `Text Selection:
 - Selected Text: "${selectionInfo.text}"
@@ -16021,17 +18167,49 @@ ${selectionInfo.context ? `
 `;
             }
 
+            // Adjust task description based on tile content type
+            const isImageCommentsTile = tileContentType === TILE_CONTENT_TYPES.IMAGE_COMMENTS;
+            const isChartSelection = selectionInfo.type === 'chart' && selectionInfo.datapointContext && !isImageCommentsTile;
+
             prompt += `
 
-TASK: Provide a brief, helpful comment (1-2 sentences max) about what the user selected:
-1. Acknowledge what they selected
-2. Provide context or insight about that element
-3. Suggest related areas they might want to explore (with links if helpful)
-4. Use link format: [link text|view:viewName] or [link text|view:viewName:subTab] or [link text|url:https://...]
+TASK: Provide insightful analysis about this selection:
+${isImageCommentsTile ? `
+1. Acknowledge that the user selected the "${selectionInfo.chartName || 'Featured Insight'}" tile
+2. This tile displays an image with commentary - NOT a chart. The image is selected from relevant news articles and the commentary is model-focused analysis.
+3. Explain what this tile represents:
+   - The image shows a relevant visual related to SpaceX/Starlink topics
+   - The commentary provides model-focused insights about the topic shown in the image
+   - The tile is designed to highlight key insights relevant to the current valuation model
+4. Provide context about why this insight might be relevant to the current model
+5. Suggest related areas they might want to explore (with links if helpful)
+` : isChartSelection ? `
+1. Acknowledge what datapoint was clicked (chart point)
+2. Analyze what this datapoint means in context:
+   - What does this value represent for ${selectionInfo.chartName}?
+   - Why is this datapoint significant? (consider its trend, position, and comparison to other values)
+   - What does the ${selectionInfo.datapointContext.trend} trend indicate?
+   - How does this compare to the average/min/max?
+   - What might explain this value or trend?
+3. Provide actionable insights or observations
+4. Suggest related areas they might want to explore (with links if helpful)
+` : `
+1. Acknowledge what was selected (${selectionInfo.type === 'text' ? 'text selection' : 'element'})
+2. Analyze what this selection means:
+   - What does this selection mean?
+   - Why might the user be interested in this?
+3. Provide actionable insights or observations
+4. Suggest related areas they might want to explore (with links if helpful)
+`}
+5. Use link format: [link text|view:viewName] or [link text|view:viewName:subTab] or [link text|url:https://...]
+
+Be specific and analytical - focus on what this selection tells us about the valuation model or SpaceX operations.
+
+${isImageCommentsTile ? 'IMPORTANT: Do NOT describe this as a chart or line chart. It is an image with commentary tile.' : ''}
 
 Only respond with "SKIP" if the selection is completely trivial or uninteresting.
 
-Format your response as plain text. Use the link format exactly as shown above.`;
+Format your response as plain text (2-4 sentences). Use the link format exactly as shown above.`;
 
             const systemPrompts = this.agentSystemPrompts || this.getDefaultAgentSystemPrompts();
             const systemPromptText = Object.values(systemPrompts)
