@@ -3441,3 +3441,42 @@ textarea:focus {
 .agent-chat-messages::-webkit-scrollbar-thumb:hover {
     background-color: rgba(0, 0, 0, 0.25);
 }
+
+/* Subtle scrollbars for all scrollable content */
+.scrollable-content,
+.special-content,
+.tile-prose,
+.image-comments-text {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(0, 0, 0, 0.1) transparent;
+}
+
+.scrollable-content::-webkit-scrollbar,
+.special-content::-webkit-scrollbar,
+.tile-prose::-webkit-scrollbar,
+.image-comments-text::-webkit-scrollbar {
+    width: 4px;
+}
+
+.scrollable-content::-webkit-scrollbar-track,
+.special-content::-webkit-scrollbar-track,
+.tile-prose::-webkit-scrollbar-track,
+.image-comments-text::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.scrollable-content::-webkit-scrollbar-thumb,
+.special-content::-webkit-scrollbar-thumb,
+.tile-prose::-webkit-scrollbar-thumb,
+.image-comments-text::-webkit-scrollbar-thumb {
+    background-color: rgba(0, 0, 0, 0.1);
+    border-radius: 2px;
+    transition: background-color 0.2s;
+}
+
+.scrollable-content::-webkit-scrollbar-thumb:hover,
+.special-content::-webkit-scrollbar-thumb:hover,
+.tile-prose::-webkit-scrollbar-thumb:hover,
+.image-comments-text::-webkit-scrollbar-thumb:hover {
+    background-color: rgba(0, 0, 0, 0.2);
+}

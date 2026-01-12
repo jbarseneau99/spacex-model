@@ -126,6 +126,7 @@ class ValuationApp {
         this.autoRunningAttribution = false; // Flag to track Attribution auto-runs
         this.attributionDebounceTimer = null; // Debounce timer for Attribution input changes
         this.currentComparablesData = null; // Store current comparables data for charts
+        this.combinedCompetitorsData = null; // Store combined space + telecom competitors for tile
         this.aiModel = localStorage.getItem('aiModel') || 'claude-opus-4-1-20250805'; // Default AI model
         this.financialApiProvider = localStorage.getItem('financialApiProvider') || 'yahoo-finance'; // Default financial API
         this.cachedAIInsights = {}; // Cache AI insights by model ID
@@ -231,7 +232,11 @@ class ValuationApp {
         // Use setTimeout to ensure DOM is ready
         setTimeout(() => {
             console.log('🚀 Initializing comparables data on startup...');
-            this.loadComparables()
+            // Load both single sector (for ratios view) and combined (for competitors tile)
+            Promise.all([
+                this.loadComparables(),
+                this.loadCombinedCompetitors()
+            ])
                 .then(() => {
                     console.log('✅ Comparables initialized successfully on startup');
                 })
@@ -240,7 +245,10 @@ class ValuationApp {
                     // Try again after a delay
                     setTimeout(() => {
                         console.log('🔄 Retrying comparables load...');
-                        this.loadComparables().catch(retryErr => {
+                        Promise.all([
+                            this.loadComparables(),
+                            this.loadCombinedCompetitors()
+                        ]).catch(retryErr => {
                             console.error('❌ Retry failed:', retryErr);
                         });
                     }, 2000);
@@ -304,6 +312,7 @@ class ValuationApp {
                 if (tileId.includes('valuation') || tileId.includes('overview')) insightType = 'valuation-summary';
                 else if (tileId.includes('earth') || tileId.includes('starlink')) insightType = 'starlink-earth';
                 else if (tileId.includes('mars')) insightType = 'mars-optionality';
+                else if (tileId.includes('competitors') || tileId.includes('competitor')) insightType = 'competitors';
                 else if (tileId.includes('x') || tileId.includes('posts')) insightType = 'x-feeds';
                 else if (tileId.includes('news')) insightType = 'news';
                 else if (tileId.includes('financial') || tileId.includes('revenue') || tileId.includes('margin') || tileId.includes('capex')) insightType = 'financial';
@@ -9117,6 +9126,70 @@ class ValuationApp {
         console.log('✅ loadComparables completed. Data stored:', !!this.currentComparablesData, 'Count:', this.currentComparablesData?.length || 0);
     }
     
+    async loadCombinedCompetitors(forceRefresh = false) {
+        // Load competitors from both space (launch) and telecom (communication) sectors
+        console.log('📊 Loading combined competitors (space + telecom)...');
+        
+        try {
+            // Reload API keys from localStorage
+            this.alphaVantageApiKey = localStorage.getItem('alphaVantageApiKey') || '';
+            this.financialModelingPrepApiKey = localStorage.getItem('financialModelingPrepApiKey') || '';
+            this.financialApiProvider = localStorage.getItem('financialApiProvider') || 'yahoo-finance';
+            
+            const params = new URLSearchParams({
+                apiProvider: this.financialApiProvider || 'yahoo-finance',
+                alphaVantageKey: this.alphaVantageApiKey || '',
+                fmpKey: this.financialModelingPrepApiKey || '',
+                forceRefresh: forceRefresh ? 'true' : 'false'
+            });
+            
+            // Load both sectors in parallel
+            const [spaceResponse, telecomResponse] = await Promise.all([
+                fetch(`/api/comparables?${params.toString()}&sector=space`),
+                fetch(`/api/comparables?${params.toString()}&sector=telecom`)
+            ]);
+            
+            const spaceResult = spaceResponse.ok ? await spaceResponse.json() : { success: false, data: [] };
+            const telecomResult = telecomResponse.ok ? await telecomResponse.json() : { success: false, data: [] };
+            
+            // Combine the data, removing duplicates by ticker
+            const combined = [];
+            const seenTickers = new Set();
+            
+            // Add space companies first
+            if (spaceResult.success && spaceResult.data) {
+                spaceResult.data.forEach(company => {
+                    if (company.ticker && !seenTickers.has(company.ticker)) {
+                        seenTickers.add(company.ticker);
+                        combined.push(company);
+                    }
+                });
+            }
+            
+            // Add telecom companies
+            if (telecomResult.success && telecomResult.data) {
+                telecomResult.data.forEach(company => {
+                    if (company.ticker && !seenTickers.has(company.ticker)) {
+                        seenTickers.add(company.ticker);
+                        combined.push(company);
+                    }
+                });
+            }
+            
+            // Sort by market cap (descending)
+            combined.sort((a, b) => (b.marketCap || 0) - (a.marketCap || 0));
+            
+            this.combinedCompetitorsData = combined;
+            console.log(`✅ Loaded ${combined.length} combined competitors (${spaceResult.data?.length || 0} space + ${telecomResult.data?.length || 0} telecom)`);
+            
+            return combined;
+        } catch (error) {
+            console.error('❌ Error loading combined competitors:', error);
+            this.combinedCompetitorsData = [];
+            return [];
+        }
+    }
+    
     formatCurrency(value) {
         if (!value && value !== 0) return '--';
         if (value >= 1e12) return `$${(value / 1e12).toFixed(2)}T`;
@@ -13700,7 +13773,7 @@ class ValuationApp {
             { id: 'total-valuation', icon: 'zap', title: 'Total Enterprise Value', value: formatBillion(totalValue), color: '#0066cc', size: 'horizontal', insightType: 'valuation', data: { totalValue, earthValue, marsValue } },
             { id: 'comprehensive-overview', icon: 'layout-dashboard', title: 'Comprehensive Overview', value: 'Summary', color: '#0066cc', size: '2x2', insightType: 'valuation-summary', data: { totalValue, earthValue, marsValue } },
             { id: 'earth-operations', icon: 'globe', title: 'Earth Operations', value: `${earthPercent.toFixed(1)}%`, subtitle: formatBillion(earthValue), color: '#10b981', size: 'square', insightType: 'starlink-earth', data: { earthValue, earthPercent } },
-            { id: 'mars-operations', icon: 'rocket', title: 'Mars Operations', value: `${marsPercent.toFixed(1)}%`, subtitle: formatBillion(marsValue), color: '#f59e0b', size: 'square', insightType: 'mars-optionality', data: { marsValue, marsPercent } },
+            { id: 'competitors-list', icon: 'users', title: 'Market Competitors', value: 'Launch & Comm', subtitle: '', color: '#f59e0b', size: 'square', contentType: TILE_CONTENT_TYPES.LIST, insightType: 'competitors', data: { sectors: ['space', 'telecom'] } },
             { id: 'starlink-penetration', icon: 'trending-up', title: 'Starlink Penetration', value: `${((inputs?.earth?.starlinkPenetration || 0) * 100).toFixed(1)}%`, color: '#10b981', size: 'square', insightType: 'starlink-earth', data: { penetration: inputs?.earth?.starlinkPenetration || 0 } },
             { id: 'launch-volume', icon: 'rocket', title: 'Launch Volume', value: `${inputs?.earth?.launchVolume || 0}/year`, color: '#0066cc', size: 'square', insightType: 'launch', data: { launchVolume: inputs?.earth?.launchVolume || 0 } },
             { id: 'mars-timeline', icon: 'calendar', title: 'Mars Timeline', value: `${inputs?.mars?.firstColonyYear || 2030}`, color: '#f59e0b', size: 'square', insightType: 'mars', data: { firstColonyYear: inputs?.mars?.firstColonyYear || 2030 } },
@@ -13787,7 +13860,11 @@ class ValuationApp {
         const modelCache = this.currentModelId && this.cachedTerminalInsights[this.currentModelId] ? this.cachedTerminalInsights[this.currentModelId] : {};
         
         // Check if we have cached insights for all tiles
-        const tilesNeedingInsights = tiles.filter(tile => tile.insightType && data);
+        // Exclude LIST tiles from insights - they only show data lists
+        const tilesNeedingInsights = tiles.filter(tile => {
+            const tileContentType = determineTileContentType(tile);
+            return tile.insightType && data && tileContentType !== TILE_CONTENT_TYPES.LIST;
+        });
         const cachedCount = tilesNeedingInsights.filter(tile => {
             const cacheKey = `${tile.id}-${tile.insightType}`;
             return modelCache[cacheKey];
@@ -13804,8 +13881,12 @@ class ValuationApp {
             const cacheKey = `${tile.id}-${tile.insightType}`;
             let cachedInsight = modelCache[cacheKey] || null;
             
-            // Coordinate cached insights - add charts if missing
-            if (cachedInsight && (!cachedInsight.chart && !cachedInsight.image)) {
+            // Check if this is a LIST tile - don't process insights for LIST tiles
+            const tileContentTypeCheck = determineTileContentType(tile, cachedInsight);
+            const isListTile = tileContentTypeCheck === TILE_CONTENT_TYPES.LIST;
+            
+            // Coordinate cached insights - add charts if missing (but skip LIST tiles)
+            if (!isListTile && cachedInsight && (!cachedInsight.chart && !cachedInsight.image)) {
                 const isNewsOrPost = tile.title.toLowerCase().includes('news') || 
                                    tile.title.toLowerCase().includes('post') ||
                                    tile.title.toLowerCase().includes('x post');
@@ -13834,7 +13915,9 @@ class ValuationApp {
                 }
             }
             
-            const tileHTML = this.renderDashboardTile(tile, cachedInsight, !cachedInsight);
+            // Don't pass insights to LIST tiles - they only show data lists
+            const insightForTile = isListTile ? null : cachedInsight;
+            const tileHTML = this.renderDashboardTile(tile, insightForTile, !insightForTile);
             const tempDiv = document.createElement('div');
             tempDiv.innerHTML = tileHTML.trim();
             const tileElement = tempDiv.firstElementChild;
@@ -13844,12 +13927,23 @@ class ValuationApp {
                 // Attach click handler for agent commentary
                 this.attachTileClickHandler(tileElement, tile, cachedInsight);
                 
-                // Render chart if present (for cached insights with charts)
-                // Skip chart rendering for special content tiles (X-feeds, News, Image-Comments)
+                // Attach image click handler for image-comments tiles
                 const tileContentType = determineTileContentType(tile, cachedInsight);
+                if (tileContentType === TILE_CONTENT_TYPES.IMAGE_COMMENTS && cachedInsight?.imageComments) {
+                    // Wait for image to be in DOM, then attach click handler
+                    requestAnimationFrame(() => {
+                        setTimeout(() => {
+                            this.attachImageClickHandler(tileElement, tile, cachedInsight);
+                        }, 200);
+                    });
+                }
+                
+                // Render chart if present (for cached insights with charts)
+                // Skip chart rendering for special content tiles (X-feeds, News, Image-Comments, List)
                 const isSpecialContent = tileContentType === TILE_CONTENT_TYPES.X_FEEDS || 
                                          tileContentType === TILE_CONTENT_TYPES.NEWS || 
-                                         tileContentType === TILE_CONTENT_TYPES.IMAGE_COMMENTS;
+                                         tileContentType === TILE_CONTENT_TYPES.IMAGE_COMMENTS ||
+                                         tileContentType === TILE_CONTENT_TYPES.LIST;
                 
                 if (cachedInsight && cachedInsight.chart && !isSpecialContent) {
                     requestAnimationFrame(() => {
@@ -14144,11 +14238,12 @@ class ValuationApp {
                                 tileElement.replaceWith(updatedElement);
                                 
                                 // Render chart if present (after DOM update)
-                                // Skip chart rendering for special content tiles (X-feeds, News, Image-Comments)
+                                // Skip chart rendering for special content tiles (X-feeds, News, Image-Comments, List)
                                 const tileContentType = determineTileContentType(tile, insightData);
                                 const isSpecialContent = tileContentType === TILE_CONTENT_TYPES.X_FEEDS || 
                                                          tileContentType === TILE_CONTENT_TYPES.NEWS || 
-                                                         tileContentType === TILE_CONTENT_TYPES.IMAGE_COMMENTS;
+                                                         tileContentType === TILE_CONTENT_TYPES.IMAGE_COMMENTS ||
+                                                         tileContentType === TILE_CONTENT_TYPES.LIST;
                                 
                                 if (insightData && insightData.chart && !isSpecialContent) {
                                     console.log(`[Tile Update] ${tileId}: Rendering chart with data:`, insightData.chart);
@@ -14179,6 +14274,17 @@ class ValuationApp {
                             
                             // Attach click handler for agent commentary
                             this.attachTileClickHandler(updatedElement, tile, insightData);
+                            
+                            // Attach image click handler for image-comments tiles
+                            const tileContentType = determineTileContentType(tile, insightData);
+                            if (tileContentType === TILE_CONTENT_TYPES.IMAGE_COMMENTS && insightData?.imageComments) {
+                                // Wait for image to be in DOM, then attach click handler
+                                requestAnimationFrame(() => {
+                                    setTimeout(() => {
+                                        this.attachImageClickHandler(updatedElement, tile, insightData);
+                                    }, 200);
+                                });
+                            }
                         }
                 };
 
@@ -14517,11 +14623,15 @@ class ValuationApp {
         const contentType = determineTileContentType(tile, aiData);
         tile.contentType = contentType; // Store for future reference
         
-        // Check if this is a special content type (X-feeds, News, or Image-Comments)
+        // Check if this is a special content type (X-feeds, News, Image-Comments, or List)
+        // LIST tiles are single-panel (no header), NEWS/X_FEEDS have headers but single content panel
         const isSpecialContent = contentType === TILE_CONTENT_TYPES.X_FEEDS || 
                                  contentType === TILE_CONTENT_TYPES.NEWS || 
-                                 contentType === TILE_CONTENT_TYPES.IMAGE_COMMENTS;
-        const specialContent = isSpecialContent && aiData ? this.renderSpecialTileContent(tile, aiData, contentType) : '';
+                                 contentType === TILE_CONTENT_TYPES.IMAGE_COMMENTS ||
+                                 contentType === TILE_CONTENT_TYPES.LIST;
+        // LIST tiles are truly single-panel (no separate header area)
+        const isSinglePanelTile = contentType === TILE_CONTENT_TYPES.LIST;
+        const specialContent = isSpecialContent ? this.renderSpecialTileContent(tile, aiData, contentType) : '';
         
         // For special content tiles, ignore visualizations - only render special content
         // Check for visualizations (chart or image) - but skip for special content tiles
@@ -14533,6 +14643,7 @@ class ValuationApp {
         
         // Determine layout: prose + visualization (Bloomberg style)
         const useDualLayout = !isSpecialContent && hasAI && hasVisualization;
+        const isListTile = contentType === TILE_CONTENT_TYPES.LIST;
         
         return `
             <div class="dashboard-tile" data-tile-id="${tile.id}" style="
@@ -14541,26 +14652,28 @@ class ValuationApp {
                 background: var(--surface);
                 border: 1px solid var(--border-color);
                 border-radius: var(--radius);
-                padding: ${isLarge ? '4px' : (isVertical ? '3px' : '2px')};
+                padding: ${isSinglePanelTile ? '0' : (isLarge ? '4px' : (isVertical ? '3px' : '2px'))};
                 display: flex;
                 flex-direction: column;
+                align-items: ${isSinglePanelTile ? 'stretch' : 'flex-start'};
                 transition: all 0.2s;
                 cursor: pointer;
                 min-height: 0;
                 position: relative;
-                justify-content: flex-start;
+                justify-content: ${isSinglePanelTile ? 'stretch' : 'flex-start'};
                 gap: 0;
                 overflow: hidden;
                 height: 100%;
-            " onmouseover="this.style.boxShadow='0 4px 12px rgba(0,0,0,0.1)'; this.style.borderColor='${tile.color}'; this.style.transform='translateY(-2px)'" onmouseout="this.style.boxShadow='none'; this.style.borderColor='var(--border-color)'; this.style.transform='none'">
-                <div class="tile-header" style="display: flex; align-items: start; gap: 2px; margin-bottom: ${hasAI && !isSpecialContent ? '1px' : '2px'}; flex-shrink: 0; min-height: fit-content;">
+            " onmouseover="this.style.boxShadow='0 4px 12px rgba(0,0,0,0.1)'; this.style.borderColor='${tile.color}'; this.style.transform='translateY(-2px)'" onmouseout="this.style.boxShadow='none'; this.style.borderColor='var(--border-color)'; this.style.transform='none'" onclick="${contentType === TILE_CONTENT_TYPES.LIST ? 'app.switchView(\'ratios\')' : ''}">
+                ${!isSinglePanelTile ? `
+                <div class="tile-header" style="display: flex; align-items: center; gap: 4px; margin-bottom: ${hasAI && !isSpecialContent ? '1px' : '2px'}; flex-shrink: 0; min-height: fit-content;">
                     <div class="tile-icon-container" style="
-                        width: ${iconContainerSize};
-                        height: ${iconContainerSize};
-                        min-width: ${iconContainerSize};
-                        min-height: ${iconContainerSize};
-                        max-width: ${iconContainerSize};
-                        max-height: ${iconContainerSize};
+                        width: ${valueSize};
+                        height: ${valueSize};
+                        min-width: ${valueSize};
+                        min-height: ${valueSize};
+                        max-width: ${valueSize};
+                        max-height: ${valueSize};
                         border-radius: 2px;
                         background: ${tile.color}08;
                         display: flex;
@@ -14568,28 +14681,26 @@ class ValuationApp {
                         justify-content: center;
                         flex-shrink: 0;
                     ">
-                        <i data-lucide="${tile.icon || 'circle'}" class="tile-icon" style="width: ${iconSize}; height: ${iconSize}; max-width: ${iconSize}; max-height: ${iconSize}; color: ${tile.color || '#0066cc'};"></i>
+                        <i data-lucide="${tile.icon || 'circle'}" class="tile-icon" style="width: ${valueSize}; height: ${valueSize}; max-width: ${valueSize}; max-height: ${valueSize}; color: ${tile.color || '#0066cc'};"></i>
                     </div>
-                    <div style="flex: 1; min-width: 0; overflow: hidden; max-width: calc(100% - ${iconContainerSize} - 4px);">
-                        <div class="tile-title" style="font-size: ${titleSize}; color: var(--text-secondary); margin-bottom: 0px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.2px; line-height: 1.0;">${tile.title}</div>
-                        <div class="tile-value" style="font-size: ${valueSize}; font-weight: 700; color: var(--text-primary); line-height: 1.0;">
-                            ${tile.value}
-                            ${tile.subtitle ? `<div class="tile-subtitle" style="font-size: ${subtitleSize}; font-weight: 500; color: var(--text-secondary); margin-top: 0px;">${tile.subtitle}</div>` : ''}
-                        </div>
+                    <div class="tile-title" style="font-size: ${valueSize}; color: var(--text-secondary); font-weight: 300; text-transform: uppercase; letter-spacing: 0.2px; line-height: 1.0; white-space: nowrap; flex-shrink: 0;">${tile.title}</div>
+                    <div class="tile-value" style="font-size: ${valueSize}; font-weight: 700; color: var(--text-primary); line-height: 1.0; white-space: nowrap; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;">
+                        ${tile.value}
+                        ${tile.subtitle ? `<span class="tile-subtitle" style="font-size: ${subtitleSize}; font-weight: 500; color: var(--text-secondary); margin-left: 4px;">${tile.subtitle}</span>` : ''}
                     </div>
                 </div>
+                ` : ''}
                 ${isSpecialContent ? specialContent : (isLoading ? `
-                    <!-- Loading state with spinner -->
+                    <!-- Loading state with spinner - centered in entire tile -->
                     <div class="tile-loading" style="
-                        margin-top: 2px;
-                        padding-top: 2px;
-                        border-top: 1px solid var(--border-color);
-                        flex: 1 1 auto;
-                        min-height: 0;
+                        position: absolute;
+                        top: 0;
+                        left: 0;
+                        right: 0;
+                        bottom: 0;
                         display: flex;
                         align-items: center;
                         justify-content: center;
-                        height: 100%;
                         flex-direction: column;
                         gap: 8px;
                     ">
@@ -15482,7 +15593,7 @@ class ValuationApp {
         const itemCount = itemCounts[tile.size] || itemCounts.square;
         
         // Render based on canonical content type
-        if (tileContentType === TILE_CONTENT_TYPES.X_FEEDS && aiData.xFeeds && Array.isArray(aiData.xFeeds) && aiData.xFeeds.length > 0) {
+        if (tileContentType === TILE_CONTENT_TYPES.X_FEEDS && aiData && aiData.xFeeds && Array.isArray(aiData.xFeeds) && aiData.xFeeds.length > 0) {
             
             return `
                 <div class="special-content" style="margin-top: 2px; padding-top: 2px; border-top: 1px solid var(--border-color); display: flex; flex-direction: column; gap: 4px; flex: 1; overflow-y: auto; min-height: 0;">
@@ -15501,7 +15612,7 @@ class ValuationApp {
                     `).join('')}
                 </div>
             `;
-        } else if (tileContentType === TILE_CONTENT_TYPES.NEWS && aiData.news && Array.isArray(aiData.news) && aiData.news.length > 0) {
+        } else if (tileContentType === TILE_CONTENT_TYPES.NEWS && aiData && aiData.news && Array.isArray(aiData.news) && aiData.news.length > 0) {
             console.log(`[renderSpecialTileContent] ✅ Rendering ${aiData.news.length} news items for tile: ${tile.id}`);
             return `
                 <div class="special-content" style="margin-top: 2px; padding-top: 2px; border-top: 1px solid var(--border-color); display: flex; flex-direction: column; gap: 4px; flex: 1; overflow-y: auto; min-height: 0;">
@@ -15543,9 +15654,28 @@ class ValuationApp {
                     }).join('')}
                 </div>
             `;
+        } else if (tileContentType === TILE_CONTENT_TYPES.X_FEEDS) {
+            // X-feeds tile but no data - show empty/loading state
+            return `
+                <div class="special-content" style="display: flex; flex-direction: column; gap: 8px; flex: 1 1 0%; align-items: center; justify-content: center; padding: 0; width: 100%;">
+                    ${!aiData ? `<i data-lucide="loader" class="spinning" style="width: 20px; height: 20px; color: ${tile.color};"></i>` : ''}
+                    <div style="font-size: 9px; color: var(--text-secondary); text-align: center;">
+                        ${!aiData ? 'Loading X posts...' : 'No X posts available'}
+                    </div>
+                </div>
+            `;
         } else if (tileContentType === TILE_CONTENT_TYPES.NEWS) {
+            // News tile but no data - show empty/loading state
             console.warn(`[renderSpecialTileContent] ⚠️ News tile has no news data. aiData:`, aiData);
-        } else if (tileContentType === TILE_CONTENT_TYPES.IMAGE_COMMENTS && aiData.imageComments) {
+            return `
+                <div class="special-content" style="display: flex; flex-direction: column; gap: 8px; flex: 1 1 0%; min-height: 0; align-items: center; justify-content: center; padding: 0;">
+                    ${!aiData ? `<i data-lucide="loader" class="spinning" style="width: 20px; height: 20px; color: ${tile.color};"></i>` : ''}
+                    <div style="font-size: 9px; color: var(--text-secondary); text-align: center;">
+                        ${!aiData ? 'Loading news...' : 'No news available'}
+                    </div>
+                </div>
+            `;
+        } else if (tileContentType === TILE_CONTENT_TYPES.IMAGE_COMMENTS && aiData && aiData.imageComments) {
             const imageComments = aiData.imageComments;
             const imageUrl = imageComments.image || '';
             const commentary = imageComments.commentary || '';
@@ -15588,67 +15718,7 @@ class ValuationApp {
                                  data-tile-id="${tileId}"
                                  data-image-url="${validImageUrl.replace(/"/g, '&quot;')}"
                                  data-topic="${(imageComments.topic || '').replace(/"/g, '&quot;')}"
-                                 onclick="(function(img, tileId, imageUrl, topic) {
-                                    return function(e) {
-                                        e.stopPropagation();
-                                        e.preventDefault();
-                                        
-                                        // Get image dimensions and position
-                                        const rect = img.getBoundingClientRect();
-                                        const x = e.clientX - rect.left;
-                                        const y = e.clientY - rect.top;
-                                        
-                                        // Calculate relative coordinates (0-1 range)
-                                        const relativeX = x / rect.width;
-                                        const relativeY = y / rect.height;
-                                        
-                                        // Get natural image dimensions
-                                        const naturalWidth = img.naturalWidth;
-                                        const naturalHeight = img.naturalHeight;
-                                        
-                                        // Calculate coordinates in natural image space
-                                        const naturalX = Math.round(relativeX * naturalWidth);
-                                        const naturalY = Math.round(relativeY * naturalHeight);
-                                        
-                                        console.log('[Image Click] Click detected:', {
-                                            tileId: tileId,
-                                            imageUrl: imageUrl,
-                                            topic: topic,
-                                            clickX: x,
-                                            clickY: y,
-                                            relativeX: relativeX.toFixed(3),
-                                            relativeY: relativeY.toFixed(3),
-                                            naturalX: naturalX,
-                                            naturalY: naturalY,
-                                            naturalWidth: naturalWidth,
-                                            naturalHeight: naturalHeight,
-                                            renderedWidth: rect.width,
-                                            renderedHeight: rect.height
-                                        });
-                                        
-                                        // Call app method to handle image click with feature detection
-                                        if (window.app && window.app.handleImageClick) {
-                                            window.app.handleImageClick({
-                                                tileId: tileId,
-                                                imageUrl: imageUrl,
-                                                topic: topic,
-                                                coordinates: {
-                                                    x: x,
-                                                    y: y,
-                                                    relativeX: relativeX,
-                                                    relativeY: relativeY,
-                                                    naturalX: naturalX,
-                                                    naturalY: naturalY,
-                                                    naturalWidth: naturalWidth,
-                                                    naturalHeight: naturalHeight
-                                                },
-                                                clickEvent: e
-                                            });
-                                        } else {
-                                            console.warn('[Image Click] app.handleImageClick not available');
-                                        }
-                                    };
-                                 })(this, '${tileId}', '${validImageUrl.replace(/"/g, '&quot;')}', '${(imageComments.topic || '').replace(/"/g, '&quot;')}')"
+                                 data-image-loaded="false"
                                  onerror="console.warn('Image failed to load:', this.src); this.onerror=null; this.style.display='none'; const fallback = this.nextElementSibling; if(fallback) fallback.style.display='flex';" 
                                  onload="(function(img, containerId) {
                                     try {
@@ -15766,6 +15836,157 @@ class ValuationApp {
                             ${this.processInsightLinks(commentary)}
                         </div>
                     </div>
+                </div>
+            `;
+        } else if (tileContentType === TILE_CONTENT_TYPES.LIST) {
+            // Render competitors list tile - use combined competitors (space + telecom) if available
+            const comparables = this.combinedCompetitorsData || this.currentComparablesData || [];
+            const maxItems = tile.size === 'square' ? 5 : (tile.size === 'vertical' || tile.size === '1x2' ? 6 : 4);
+            const displayItems = comparables.slice(0, maxItems);
+            
+            // Load combined competitors if not already loaded
+            if (!this.combinedCompetitorsData && comparables.length === 0) {
+                this.loadCombinedCompetitors().catch(err => {
+                    console.error('Error loading combined competitors:', err);
+                });
+            }
+            
+            if (displayItems.length === 0) {
+                // No data available - show loading/empty state
+                return `
+                    <div class="special-content list-content" style="margin-top: 2px; padding-top: 2px; border-top: 1px solid var(--border-color); display: flex; flex-direction: column; gap: 4px; flex: 1; overflow-y: auto; min-height: 0; align-items: center; justify-content: center; padding: 8px;">
+                        <div style="font-size: 9px; color: var(--text-secondary); text-align: center;">
+                            ${comparables.length === 0 ? 'Loading competitors...' : 'No competitors data'}
+                        </div>
+                        ${comparables.length === 0 ? `
+                            <i data-lucide="loader" class="spinning" style="width: 16px; height: 16px; color: ${tile.color}; margin-top: 4px;"></i>
+                        ` : `
+                            <button onclick="app.loadComparables(); app.switchView('ratios');" style="
+                                margin-top: 8px;
+                                padding: 4px 8px;
+                                font-size: 9px;
+                                background: ${tile.color};
+                                color: white;
+                                border: none;
+                                border-radius: 2px;
+                                cursor: pointer;
+                            ">Load Data</button>
+                        `}
+                    </div>
+                `;
+            }
+            
+            // Format currency helper
+            const formatCurrency = (value) => {
+                if (!value && value !== 0) return '--';
+                if (value >= 1e12) return `$${(value / 1e12).toFixed(2)}T`;
+                if (value >= 1e9) return `$${(value / 1e9).toFixed(2)}B`;
+                if (value >= 1e6) return `$${(value / 1e6).toFixed(2)}M`;
+                if (value >= 1e3) return `$${(value / 1e3).toFixed(2)}K`;
+                return `$${value.toFixed(2)}`;
+            };
+            
+            // Format helper for growth percentage
+            const formatGrowth = (value) => {
+                if (!value && value !== 0) return '--';
+                return (value * 100).toFixed(0) + '%';
+            };
+            
+            // Get standard sizes to match other tiles
+            const valueSize = '14px';
+            const subtitleSize = '9px';
+            
+            return `
+                <div class="special-content list-content" style="display: flex; flex-direction: column; flex: 1 1 0%; min-height: 0; overflow: hidden; padding: 2px; width: 100%; align-self: stretch;">
+                    <!-- Title header matching standard tile header -->
+                    <div class="tile-header" style="display: flex; align-items: center; gap: 4px; margin-bottom: 2px; flex-shrink: 0; min-height: fit-content;">
+                        <div class="tile-icon-container" style="
+                            width: ${valueSize};
+                            height: ${valueSize};
+                            min-width: ${valueSize};
+                            min-height: ${valueSize};
+                            max-width: ${valueSize};
+                            max-height: ${valueSize};
+                            border-radius: 2px;
+                            background: ${tile.color}08;
+                            display: flex;
+                            align-items: center;
+                            justify-content: center;
+                            flex-shrink: 0;
+                        ">
+                            <i data-lucide="${tile.icon || 'users'}" class="tile-icon" style="width: ${valueSize}; height: ${valueSize}; max-width: ${valueSize}; max-height: ${valueSize}; color: ${tile.color || '#0066cc'};"></i>
+                        </div>
+                        <div class="tile-title" style="font-size: ${valueSize}; color: var(--text-secondary); font-weight: 300; text-transform: uppercase; letter-spacing: 0.2px; line-height: 1.0; white-space: nowrap; flex-shrink: 0;">${tile.title}</div>
+                        <div class="tile-value" style="font-size: ${valueSize}; font-weight: 700; color: var(--text-primary); line-height: 1.0; white-space: nowrap; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;">
+                            ${tile.value || ''}
+                            ${tile.subtitle ? `<span class="tile-subtitle" style="font-size: ${subtitleSize}; font-weight: 500; color: var(--text-secondary); margin-left: 4px;">${tile.subtitle}</span>` : ''}
+                        </div>
+                    </div>
+                    <!-- Compact column headers -->
+                    <div style="
+                        font-size: 6px;
+                        font-weight: 600;
+                        color: var(--text-secondary);
+                        text-transform: uppercase;
+                        letter-spacing: 0.5px;
+                        padding: 2px 0 1px 0;
+                        border-bottom: 1px solid var(--border-color);
+                        display: grid;
+                        grid-template-columns: 35px 45px 30px 30px 35px;
+                        gap: 2px;
+                        align-items: center;
+                        flex-shrink: 0;
+                    ">
+                        <div>Ticker</div>
+                        <div>Mkt Cap</div>
+                        <div style="text-align: center;">EV/Rev</div>
+                        <div style="text-align: center;">P/E</div>
+                        <div style="text-align: right;">Growth</div>
+                    </div>
+                    <!-- List items container - fills ALL remaining space to bottom -->
+                    <div class="scrollable-content" style="flex: 1 1 0%; overflow-y: auto; min-height: 0; padding: 0;">
+                        ${displayItems.map(company => `
+                            <div class="list-item" style="
+                                font-size: 7px;
+                                line-height: 1.2;
+                                padding: 2px 0;
+                                border-bottom: 1px solid rgba(0,0,0,0.05);
+                                display: grid;
+                                grid-template-columns: 35px 45px 30px 30px 35px;
+                                gap: 2px;
+                                align-items: center;
+                            ">
+                                <div style="font-weight: 600; color: var(--text-primary); font-size: 7px; overflow: hidden; text-overflow: ellipsis;">
+                                    ${company.ticker || company.name?.substring(0, 5) || '--'}
+                                </div>
+                                <div style="color: var(--text-secondary); font-size: 7px; text-align: left; overflow: hidden; text-overflow: ellipsis;">
+                                    ${formatCurrency(company.marketCap)}
+                                </div>
+                                <div style="color: var(--text-secondary); font-size: 7px; text-align: center;">
+                                    ${company.evRevenue ? company.evRevenue.toFixed(1) + 'x' : '--'}
+                                </div>
+                                <div style="color: var(--text-secondary); font-size: 7px; text-align: center;">
+                                    ${company.peRatio ? company.peRatio.toFixed(1) + 'x' : '--'}
+                                </div>
+                                <div style="color: var(--text-secondary); font-size: 7px; text-align: right;">
+                                    ${company.revenueGrowth ? formatGrowth(company.revenueGrowth) : '--'}
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                    ${comparables.length > maxItems ? `
+                        <div style="
+                            font-size: 7px;
+                            color: ${tile.color};
+                            text-align: center;
+                            padding: 3px 0;
+                            cursor: pointer;
+                            font-weight: 500;
+                            flex-shrink: 0;
+                        " onclick="app.switchView('ratios');">
+                            View All (${comparables.length})
+                        </div>
+                    ` : ''}
                 </div>
             `;
         }
@@ -17106,6 +17327,202 @@ class ValuationApp {
      * Generate agent commentary on context changes
      */
     /**
+     * Attach click handler to image in image-comments tile
+     */
+    attachImageClickHandler(tileElement, tile, insightData) {
+        try {
+            if (!tileElement || !insightData?.imageComments) {
+                console.warn('[Image Click Handler] Missing tileElement or imageComments data');
+                return;
+            }
+            
+            const imageElement = tileElement.querySelector('.image-comments-img');
+            if (!imageElement) {
+                console.warn('[Image Click Handler] Image element not found in tile:', tile.id);
+                return;
+            }
+            
+            const tileId = imageElement.getAttribute('data-tile-id');
+            const imageUrl = imageElement.getAttribute('data-image-url') || insightData.imageComments.image;
+            const topic = imageElement.getAttribute('data-topic') || insightData.imageComments.topic || '';
+            
+            console.log('[Image Click Handler] Setting up click handler for image:', {
+                tileId: tileId,
+                imageUrl: imageUrl?.substring(0, 50),
+                topic: topic,
+                imageElement: !!imageElement
+            });
+            
+            // Remove any existing click handlers
+            const newImageElement = imageElement.cloneNode(true);
+            imageElement.parentNode.replaceChild(newImageElement, imageElement);
+            
+            // Attach click handler using addEventListener (more reliable than inline onclick)
+            newImageElement.addEventListener('click', function(e) {
+                try {
+                    console.log('[Image Click] ✅ Click event fired on image:', tileId);
+                    e.stopPropagation();
+                    e.preventDefault();
+                    
+                    // Get image dimensions and position
+                    const rect = newImageElement.getBoundingClientRect();
+                    const x = e.clientX - rect.left;
+                    const y = e.clientY - rect.top;
+                    
+                    // Validate dimensions
+                    if (!rect.width || !rect.height) {
+                        console.error('[Image Click] ❌ Invalid image dimensions:', rect);
+                        return;
+                    }
+                    
+                    // Calculate relative coordinates (0-1 range) with high precision
+                    const relativeX = x / rect.width;
+                    const relativeY = y / rect.height;
+                    
+                    // Get natural image dimensions
+                    const naturalWidth = newImageElement.naturalWidth;
+                    const naturalHeight = newImageElement.naturalHeight;
+                    
+                    if (!naturalWidth || !naturalHeight) {
+                        console.error('[Image Click] ❌ Natural dimensions not available:', { naturalWidth, naturalHeight });
+                        return;
+                    }
+                    
+                    // Calculate coordinates in natural image space with precision
+                    const naturalX = Math.round(relativeX * naturalWidth);
+                    const naturalY = Math.round(relativeY * naturalHeight);
+                    
+                    // Calculate rendered dimensions
+                    const renderedWidth = rect.width;
+                    const renderedHeight = rect.height;
+                    
+                    console.log('[Image Click] ✅ Click detected with precise coordinates:', {
+                        tileId: tileId,
+                        imageUrl: imageUrl,
+                        topic: topic,
+                        coordinates: {
+                            rendered: { x: x.toFixed(2), y: y.toFixed(2), width: renderedWidth.toFixed(2), height: renderedHeight.toFixed(2) },
+                            relative: { x: relativeX.toFixed(4), y: relativeY.toFixed(4) },
+                            natural: { x: naturalX, y: naturalY, width: naturalWidth, height: naturalHeight },
+                            percentage: { x: (relativeX * 100).toFixed(2) + '%', y: (relativeY * 100).toFixed(2) + '%' }
+                        }
+                    });
+                    
+                    // Call app method to handle image click with feature detection
+                    if (window.app && typeof window.app.handleImageClick === 'function') {
+                        console.log('[Image Click] ✅ Calling handleImageClick...');
+                        window.app.handleImageClick({
+                            tileId: tileId,
+                            imageUrl: imageUrl,
+                            topic: topic,
+                            coordinates: {
+                                x: x,
+                                y: y,
+                                relativeX: relativeX,
+                                relativeY: relativeY,
+                                naturalX: naturalX,
+                                naturalY: naturalY,
+                                naturalWidth: naturalWidth,
+                                naturalHeight: naturalHeight,
+                                renderedWidth: renderedWidth,
+                                renderedHeight: renderedHeight
+                            },
+                            clickEvent: e
+                        }).catch(err => {
+                            console.error('[Image Click] ❌ Error in handleImageClick:', err);
+                            console.error('[Image Click] Error stack:', err.stack);
+                        });
+                    } else {
+                        console.error('[Image Click] ❌ app.handleImageClick not available:', {
+                            hasApp: !!window.app,
+                            hasMethod: !!(window.app && window.app.handleImageClick),
+                            appType: typeof window.app,
+                            methodType: window.app ? typeof window.app.handleImageClick : 'N/A'
+                        });
+                    }
+                } catch (error) {
+                    console.error('[Image Click] ❌ Error in click handler:', error);
+                    console.error('[Image Click] Error stack:', error.stack);
+                }
+            }, true); // Use capture phase to catch before tile handler
+            
+            console.log('[Image Click Handler] ✅ Click handler attached successfully');
+        } catch (error) {
+            console.error('[Image Click Handler] ❌ Error setting up click handler:', error);
+            console.error('[Image Click Handler] Error stack:', error.stack);
+        }
+    }
+
+    /**
+     * Fallback feature detection based on coordinates when AI fails
+     */
+    detectFeatureFromCoordinates(coordinates, topic, quadrant, horizontalRegion, verticalRegion) {
+        const relativeX = coordinates.relativeX;
+        const relativeY = coordinates.relativeY;
+        
+        // Heuristic-based detection
+        let detectedFeature = 'Unknown feature';
+        let region = quadrant.toLowerCase();
+        let confidence = 'medium';
+        let reasoning = '';
+        
+        // Check if it's likely Earth (center-bottom regions)
+        if (relativeY > 0.5 && relativeX > 0.3 && relativeX < 0.7) {
+            // Bottom-center region
+            detectedFeature = 'Earth';
+            region = 'center-bottom';
+            confidence = 'high';
+            reasoning = `Click at ${(relativeX * 100).toFixed(1)}% horizontal, ${(relativeY * 100).toFixed(1)}% vertical is in center-bottom region where Earth typically appears`;
+        } else if (relativeY > 0.6) {
+            // Bottom region
+            detectedFeature = 'Earth or ground infrastructure';
+            region = 'bottom';
+            confidence = 'medium';
+            reasoning = `Click at ${(relativeY * 100).toFixed(1)}% from top is in bottom region, likely Earth or ground features`;
+        } else if (relativeY < 0.3 && relativeX > 0.3 && relativeX < 0.7) {
+            // Top-center region
+            detectedFeature = 'Starlink satellite or constellation';
+            region = 'top-center';
+            confidence = 'medium';
+            reasoning = `Click at ${(relativeX * 100).toFixed(1)}% horizontal, ${(relativeY * 100).toFixed(1)}% vertical is in top-center region where satellites often appear`;
+        } else if (relativeX < 0.2 || relativeX > 0.8) {
+            // Edge regions
+            detectedFeature = 'Space background or edge feature';
+            region = horizontalRegion.toLowerCase();
+            confidence = 'low';
+            reasoning = `Click at ${(relativeX * 100).toFixed(1)}% horizontal is near edge, likely space background`;
+        } else {
+            // Center regions
+            detectedFeature = 'Central feature (Earth or satellite)';
+            region = 'center';
+            confidence = 'medium';
+            reasoning = `Click at ${(relativeX * 100).toFixed(1)}% horizontal, ${(relativeY * 100).toFixed(1)}% vertical is in center region`;
+        }
+        
+        // Refine based on topic
+        if (topic && topic.toLowerCase().includes('earth')) {
+            if (relativeY > 0.4) {
+                detectedFeature = 'Earth';
+                confidence = 'high';
+                reasoning += ' (topic suggests Earth image)';
+            }
+        } else if (topic && (topic.toLowerCase().includes('satellite') || topic.toLowerCase().includes('starlink'))) {
+            if (relativeY < 0.6) {
+                detectedFeature = 'Starlink satellite';
+                confidence = 'high';
+                reasoning += ' (topic suggests satellite image)';
+            }
+        }
+        
+        return {
+            detectedFeature,
+            region,
+            confidence,
+            reasoning
+        };
+    }
+
+    /**
      * Attach click handler to a tile for agent commentary
      */
     attachTileClickHandler(tileElement, tile, insightData) {
@@ -17370,28 +17787,59 @@ Format your response as plain text. Use the link format exactly as shown above.`
      * Handle image click - detect what feature/region was clicked
      */
     async handleImageClick(clickInfo) {
-        if (!this.agentCommentaryEnabled) return;
-        
-        const { tileId, imageUrl, topic, coordinates } = clickInfo;
-        
-        console.log('[Image Click Handler] Processing click:', clickInfo);
-        
-        // Ensure agent window is open
-        const agentWindow = document.getElementById('aiAgentWindow');
-        if (agentWindow) {
-            const isHidden = agentWindow.style.display === 'none' || 
-                           !agentWindow.style.display || 
-                           agentWindow.classList.contains('hidden');
-            if (isHidden) {
-                agentWindow.style.display = 'flex';
-                agentWindow.classList.remove('hidden');
-            }
-        }
-        
-        // Show loading spinner
-        const loadingId = this.addAgentLoadingMessage();
-        
         try {
+            console.log('[Image Click Handler] ✅ Method called with:', {
+                hasClickInfo: !!clickInfo,
+                tileId: clickInfo?.tileId,
+                imageUrl: clickInfo?.imageUrl?.substring(0, 50),
+                hasCoordinates: !!clickInfo?.coordinates,
+                agentCommentaryEnabled: this.agentCommentaryEnabled
+            });
+            
+            if (!this.agentCommentaryEnabled) {
+                console.log('[Image Click Handler] ⏸️ Agent commentary disabled, skipping');
+                return;
+            }
+            
+            if (!clickInfo) {
+                console.error('[Image Click Handler] ❌ No clickInfo provided');
+                return;
+            }
+            
+            const { tileId, imageUrl, topic, coordinates } = clickInfo;
+            
+            if (!tileId || !imageUrl || !coordinates) {
+                console.error('[Image Click Handler] ❌ Missing required data:', {
+                    hasTileId: !!tileId,
+                    hasImageUrl: !!imageUrl,
+                    hasCoordinates: !!coordinates
+                });
+                return;
+            }
+            
+            console.log('[Image Click Handler] ✅ Processing click:', {
+                tileId: tileId,
+                imageUrl: imageUrl.substring(0, 50),
+                topic: topic,
+                coordinates: coordinates
+            });
+            
+            // Ensure agent window is open
+            const agentWindow = document.getElementById('aiAgentWindow');
+            if (agentWindow) {
+                const isHidden = agentWindow.style.display === 'none' || 
+                               !agentWindow.style.display || 
+                               agentWindow.classList.contains('hidden');
+                if (isHidden) {
+                    agentWindow.style.display = 'flex';
+                    agentWindow.classList.remove('hidden');
+                }
+            }
+            
+            // Show loading spinner
+            const loadingId = this.addAgentLoadingMessage();
+            
+            try {
             // Get tile data from cached insights
             const tileInsight = this.cachedTerminalInsights?.[this.currentModelId]?.[tileId];
             const imageComments = tileInsight?.imageComments || {};
@@ -17399,41 +17847,83 @@ Format your response as plain text. Use the link format exactly as shown above.`
             const currentTabInfo = this.getCurrentTabInfo();
             const inputs = this.getInputs();
             
-            // Build prompt for feature detection
-            let prompt = `You are analyzing a user's click on an image in a SpaceX valuation dashboard.
+            // Calculate region strings for use in prompts
+            const horizontalRegion = coordinates.relativeX < 0.33 ? 'LEFT' : coordinates.relativeX > 0.67 ? 'RIGHT' : 'CENTER';
+            const verticalRegion = coordinates.relativeY < 0.33 ? 'TOP' : coordinates.relativeY > 0.67 ? 'BOTTOM' : 'MIDDLE';
+            const quadrant = coordinates.relativeX < 0.5 && coordinates.relativeY < 0.5 ? 'TOP-LEFT' : 
+                           coordinates.relativeX >= 0.5 && coordinates.relativeY < 0.5 ? 'TOP-RIGHT' : 
+                           coordinates.relativeX < 0.5 && coordinates.relativeY >= 0.5 ? 'BOTTOM-LEFT' : 'BOTTOM-RIGHT';
+            
+            // Build prompt for feature detection with vision
+            let prompt = `You are analyzing a user's click on an image in a SpaceX valuation dashboard. 
 
-IMAGE CONTEXT:
-- Image URL: ${imageUrl}
-- Image Topic: "${topic || 'Featured Insight'}"
-- Image Dimensions: ${coordinates.naturalWidth} x ${coordinates.naturalHeight} pixels
+CRITICAL: You are receiving BOTH the image AND the exact click coordinates. You MUST:
+1. LOOK at the image provided
+2. Find the exact pixel location (${coordinates.naturalX}, ${coordinates.naturalY}) in the ${coordinates.naturalWidth}x${coordinates.naturalHeight} pixel image
+3. Identify what visual feature is at that EXACT location
+4. Use BOTH the image content AND the coordinates to determine what was clicked
 
-CLICK COORDINATES:
-- Click Position: (${coordinates.naturalX}, ${coordinates.naturalY}) pixels
-- Relative Position: (${(coordinates.relativeX * 100).toFixed(1)}%, ${(coordinates.relativeY * 100).toFixed(1)}%)
-- X: ${coordinates.relativeX.toFixed(3)} (0.0 = left edge, 1.0 = right edge)
-- Y: ${coordinates.relativeY.toFixed(3)} (0.0 = top edge, 1.0 = bottom edge)
+=== IMAGE INFORMATION ===
+Image URL: ${imageUrl}
+Image Topic: "${topic || 'Featured Insight'}"
+Image Dimensions: ${coordinates.naturalWidth} x ${coordinates.naturalHeight} pixels
+Image Commentary Context: "${imageComments.commentary || ''}"
 
-IMAGE COMMENTARY:
-"${imageComments.commentary || ''}"
+=== EXACT CLICK COORDINATES (YOU MUST FIND THIS LOCATION IN THE IMAGE) ===
+The user clicked at PRECISELY:
+- Pixel Coordinates: (${coordinates.naturalX}, ${coordinates.naturalY}) pixels
+- Image Size: ${coordinates.naturalWidth} x ${coordinates.naturalHeight} pixels
+- X Position: ${coordinates.naturalX}px from left edge (${(coordinates.relativeX * 100).toFixed(1)}% from left)
+- Y Position: ${coordinates.naturalY}px from top edge (${(coordinates.relativeY * 100).toFixed(1)}% from top)
+- Relative Position: (${coordinates.relativeX.toFixed(4)}, ${coordinates.relativeY.toFixed(4)})
+- Horizontal Region: ${horizontalRegion}
+- Vertical Region: ${verticalRegion}
+- Quadrant: ${quadrant}
 
-TASK: Based on the click coordinates and image context, identify what feature or region the user clicked on.
+=== YOUR TASK ===
+1. LOOK at the image - you can see it above
+2. Find the pixel location (${coordinates.naturalX}, ${coordinates.naturalY}) in the image
+3. Identify what visual feature is at that EXACT pixel location:
+   - Is it Earth (large blue/green/brown planet surface)?
+   - Is it a satellite (small white/reflective object)?
+   - Is it a rocket/Starship (vertical object)?
+   - Is it space/background (dark area)?
+   - Is it ground infrastructure (bottom of image)?
+   - Is it text/labels?
+4. Use the coordinates to help locate the exact spot: ${(coordinates.relativeX * 100).toFixed(1)}% from left, ${(coordinates.relativeY * 100).toFixed(1)}% from top
 
-Common features in SpaceX/Starlink images:
-- Starlink satellite bus (the main body of the satellite)
-- Individual Starlink satellites
-- Earth (planet surface or globe)
-- Starlink constellation (multiple satellites)
-- Rocket/Starship
-- Launch pad or ground infrastructure
-- Solar panels
-- Antennas or communication equipment
-- Space/background
-- Text or labels
+IMPORTANT: You can SEE the image. Look at what's actually at coordinates (${coordinates.naturalX}, ${coordinates.naturalY}) and identify it accurately.
 
-Consider:
-1. The relative position (top/bottom/left/right/center)
-2. The image topic and commentary context
-3. Typical layouts of SpaceX/Starlink imagery
+CRITICAL: The user clicked at EXACTLY (${coordinates.naturalX}, ${coordinates.naturalY}) pixels in a ${coordinates.naturalWidth}x${coordinates.naturalHeight} pixel image.
+- This is ${(coordinates.relativeX * 100).toFixed(1)}% from the LEFT edge and ${(coordinates.relativeY * 100).toFixed(1)}% from the TOP edge
+- Position: ${horizontalRegion} horizontally, ${verticalRegion} vertically, in the ${quadrant} quadrant
+
+Common features in SpaceX/Starlink images and their typical locations:
+- Earth (planet surface or globe): Usually in CENTER or BOTTOM regions, often large and prominent
+- Starlink satellite bus (the main body of a single satellite): Usually SMALL objects, often in TOP or CENTER regions
+- Individual Starlink satellites: SMALL objects, often multiple in constellation views
+- Starlink constellation (multiple satellites): Usually shows MANY small objects spread across the image
+- Rocket/Starship: Usually VERTICAL objects, often CENTER or BOTTOM regions
+- Launch pad or ground infrastructure: Usually BOTTOM region
+- Solar panels: Usually attached to satellites, SMALL rectangular shapes
+- Antennas or communication equipment: Usually SMALL objects on satellites
+- Space/background: Usually TOP or edges, dark/empty areas
+- Text or labels: Usually TOP, BOTTOM, or edges
+
+ANALYSIS REQUIRED:
+1. Look at the EXACT coordinates: (${coordinates.naturalX}, ${coordinates.naturalY}) pixels
+2. Consider the image dimensions: ${coordinates.naturalWidth}x${coordinates.naturalHeight} pixels
+3. The click is ${(coordinates.relativeX * 100).toFixed(1)}% from left, ${(coordinates.relativeY * 100).toFixed(1)}% from top
+4. This position is in the ${quadrant} quadrant (${horizontalRegion} horizontally, ${verticalRegion} vertically)
+5. Consider the image topic: "${topic || 'Featured Insight'}"
+6. Consider typical image compositions:
+   - If the image shows Earth prominently, Earth is usually CENTER or BOTTOM-CENTER
+   - If clicking CENTER-BOTTOM on an Earth image, it's likely EARTH, not a satellite
+   - Satellites are usually SMALL objects, Earth is usually LARGE
+   - If clicking on a large blue/green/brown area, it's likely EARTH
+   - If clicking on a small white/reflective object, it's likely a SATELLITE
+
+IMPORTANT: If the coordinates suggest clicking on a LARGE feature (like Earth) based on position and image context, identify it as Earth. Do NOT identify small satellite features when clicking on large Earth regions.
 
 Respond with ONLY a JSON object in this exact format:
 {
@@ -17443,8 +17933,16 @@ Respond with ONLY a JSON object in this exact format:
   "reasoning": "brief explanation of why this feature was detected"
 }
 
-Example response:
-{"detectedFeature": "Starlink satellite bus", "region": "center", "confidence": "high", "reasoning": "Click is in the center region where satellite buses are typically positioned in Starlink imagery"}`;
+CRITICAL INSTRUCTIONS:
+- You MUST respond with ONLY a valid JSON object
+- Do NOT include any text before or after the JSON
+- Do NOT use markdown code blocks
+- The JSON must be parseable
+- Example of CORRECT format:
+{"detectedFeature": "Earth", "region": "center-bottom", "confidence": "high", "reasoning": "Click coordinates (X: 50%, Y: 75%) indicate center-bottom position, which typically contains Earth in SpaceX imagery"}
+
+Example response (copy this exact format):
+{"detectedFeature": "Earth", "region": "center-bottom", "confidence": "high", "reasoning": "Click is in the center-bottom region where Earth is typically positioned in SpaceX imagery"}`;
 
             // Call AI API to detect feature
             const systemPrompts = this.agentSystemPrompts || this.getDefaultAgentSystemPrompts();
@@ -17452,32 +17950,69 @@ Example response:
                 .filter(p => p && p.trim())
                 .join('\n\n');
             
+            const requestBody = {
+                message: prompt,
+                systemPrompt: systemPromptText + '\n\nIMPORTANT: Respond with ONLY valid JSON, no additional text. You MUST analyze the exact coordinates provided to determine what feature was clicked.',
+                imageUrl: imageUrl, // Include image URL in context for reference
+                context: {
+                    currentView: this.currentView,
+                    currentTab: currentTabInfo.tab,
+                    currentSubTab: currentTabInfo.subTab,
+                    currentModel: {
+                        id: this.currentModelId,
+                        name: this.currentModelName,
+                        inputs: inputs,
+                        valuationData: this.currentData
+                    },
+                    imageAnalysis: {
+                        imageUrl: imageUrl,
+                        imageTopic: topic,
+                        clickCoordinates: {
+                            x: coordinates.naturalX,
+                            y: coordinates.naturalY,
+                            relativeX: coordinates.relativeX,
+                            relativeY: coordinates.relativeY,
+                            imageWidth: coordinates.naturalWidth,
+                            imageHeight: coordinates.naturalHeight,
+                            quadrant: quadrant,
+                            horizontalRegion: horizontalRegion,
+                            verticalRegion: verticalRegion
+                        }
+                    }
+                },
+                history: []
+            };
+            
+            console.log('[Image Click Handler] 📤 Sending request to API:', {
+                imageUrl: imageUrl?.substring(0, 80),
+                coordinates: {
+                    x: coordinates.naturalX,
+                    y: coordinates.naturalY,
+                    relativeX: coordinates.relativeX,
+                    relativeY: coordinates.relativeY,
+                    quadrant: quadrant
+                },
+                promptLength: prompt.length
+            });
+            
             const response = await fetch('/api/agent/chat', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                     'X-AI-Model': document.getElementById('agentAIModelSelect')?.value || this.aiModel || 'grok:grok-3'
                 },
-                body: JSON.stringify({
-                    message: prompt,
-                    systemPrompt: systemPromptText + '\n\nIMPORTANT: Respond with ONLY valid JSON, no additional text.',
-                    context: {
-                        currentView: this.currentView,
-                        currentTab: currentTabInfo.tab,
-                        currentSubTab: currentTabInfo.subTab,
-                        currentModel: {
-                            id: this.currentModelId,
-                            name: this.currentModelName,
-                            inputs: inputs,
-                            valuationData: this.currentData
-                        }
-                    },
-                    history: []
-                })
+                body: JSON.stringify(requestBody)
             });
 
             const result = await response.json();
             this.removeAgentMessage(loadingId);
+            
+            console.log('[Image Click Handler] 📥 Received API response:', {
+                success: result.success,
+                hasResponse: !!result.response,
+                responseLength: result.response?.length,
+                responsePreview: result.response?.substring(0, 200)
+            });
             
             if (result.success && result.response) {
                 // Parse JSON response
@@ -17486,37 +18021,94 @@ Example response:
                     // Try to extract JSON from response (might have extra text)
                     const jsonMatch = result.response.match(/\{[\s\S]*\}/);
                     if (jsonMatch) {
+                        console.log('[Image Click Handler] 🔍 Extracted JSON:', jsonMatch[0]);
                         featureDetection = JSON.parse(jsonMatch[0]);
+                        console.log('[Image Click Handler] ✅ Parsed feature detection:', featureDetection);
                     } else {
+                        console.warn('[Image Click Handler] ⚠️ No JSON found in response, trying direct parse');
                         featureDetection = JSON.parse(result.response);
                     }
+                    
+                    // Validate feature detection structure
+                    if (!featureDetection || typeof featureDetection !== 'object') {
+                        throw new Error('Invalid feature detection structure');
+                    }
+                    
+                    if (!featureDetection.detectedFeature) {
+                        console.warn('[Image Click Handler] ⚠️ Missing detectedFeature, using fallback');
+                        featureDetection.detectedFeature = 'Unknown feature';
+                    }
+                    
                 } catch (e) {
-                    console.warn('[Image Click] Failed to parse feature detection JSON:', result.response);
-                    featureDetection = {
-                        detectedFeature: 'Unknown region',
-                        region: `${(coordinates.relativeX * 100).toFixed(0)}%, ${(coordinates.relativeY * 100).toFixed(0)}%`,
-                        confidence: 'low',
-                        reasoning: 'Could not parse AI response'
-                    };
+                    console.error('[Image Click Handler] ❌ Failed to parse feature detection JSON:', e);
+                    console.error('[Image Click Handler] Raw response:', result.response);
+                    
+                    // Fallback: Use coordinate-based heuristics
+                    console.log('[Image Click Handler] 🔄 Using coordinate-based fallback detection');
+                    featureDetection = this.detectFeatureFromCoordinates(coordinates, topic, quadrant, horizontalRegion, verticalRegion);
+                    console.log('[Image Click Handler] ✅ Fallback detection result:', featureDetection);
                 }
                 
-                // Now send this information to the agent with full context
-                await this.generateImageClickCommentary({
-                    tileId,
-                    imageUrl,
-                    topic,
-                    coordinates,
-                    featureDetection,
-                    imageComments
-                });
+                // Validate feature detection before proceeding
+                if (featureDetection && featureDetection.detectedFeature && featureDetection.detectedFeature !== 'Unknown region' && featureDetection.detectedFeature !== 'Unknown feature') {
+                    console.log('[Image Click Handler] ✅ Feature detected successfully:', featureDetection.detectedFeature);
+                    // Now send this information to the agent with full context
+                    await this.generateImageClickCommentary({
+                        tileId,
+                        imageUrl,
+                        topic,
+                        coordinates,
+                        featureDetection,
+                        imageComments
+                    });
+                } else {
+                    console.warn('[Image Click Handler] ⚠️ Invalid or missing feature detection, using coordinate-based fallback');
+                    console.warn('[Image Click Handler] AI response was:', result.response?.substring(0, 300));
+                    
+                    // Use coordinate-based fallback
+                    featureDetection = this.detectFeatureFromCoordinates(coordinates, topic, quadrant, horizontalRegion, verticalRegion);
+                    console.log('[Image Click Handler] ✅ Using fallback detection:', featureDetection);
+                    
+                    // Proceed with fallback detection
+                    await this.generateImageClickCommentary({
+                        tileId,
+                        imageUrl,
+                        topic,
+                        coordinates,
+                        featureDetection,
+                        imageComments
+                    });
+                }
             } else {
+                console.error('[Image Click Handler] ❌ API call failed:', {
+                    success: result.success,
+                    error: result.error,
+                    response: result.response?.substring(0, 200)
+                });
                 this.removeAgentMessage(loadingId);
-                this.addAgentMessage('Error detecting image feature. Please try again.', 'system');
+                this.addAgentMessage(`Error detecting image feature: ${result.error || 'Unknown error'}. Please try again.`, 'system');
+            }
+            } catch (error) {
+                console.error('[Image Click Handler] ❌ Error handling image click:', error);
+                console.error('[Image Click Handler] Error stack:', error.stack);
+                console.error('[Image Click Handler] Error details:', {
+                    message: error.message,
+                    name: error.name,
+                    clickInfo: clickInfo
+                });
+                
+                if (loadingId) {
+                    this.removeAgentMessage(loadingId);
+                }
+                
+                const agentWindow = document.getElementById('aiAgentWindow');
+                if (agentWindow) {
+                    this.addAgentMessage('Error processing image click. Please try again.', 'system');
+                }
             }
         } catch (error) {
-            console.error('Error handling image click:', error);
-            this.removeAgentMessage(loadingId);
-            this.addAgentMessage('Error processing image click. Please try again.', 'system');
+            console.error('[Image Click Handler] ❌ Outer error handler:', error);
+            console.error('[Image Click Handler] Outer error stack:', error.stack);
         }
     }
 
@@ -17532,6 +18124,13 @@ Example response:
         try {
             const currentTabInfo = this.getCurrentTabInfo();
             const inputs = this.getInputs();
+            
+            // Calculate region strings for use in prompts
+            const horizontalRegion = coordinates.relativeX < 0.33 ? 'LEFT' : coordinates.relativeX > 0.67 ? 'RIGHT' : 'CENTER';
+            const verticalRegion = coordinates.relativeY < 0.33 ? 'TOP' : coordinates.relativeY > 0.67 ? 'BOTTOM' : 'MIDDLE';
+            const quadrant = coordinates.relativeX < 0.5 && coordinates.relativeY < 0.5 ? 'TOP-LEFT' : 
+                           coordinates.relativeX >= 0.5 && coordinates.relativeY < 0.5 ? 'TOP-RIGHT' : 
+                           coordinates.relativeX < 0.5 && coordinates.relativeY >= 0.5 ? 'BOTTOM-LEFT' : 'BOTTOM-RIGHT';
             
             let prompt = `You are an AI assistant observing a user interaction in a SpaceX valuation application.
 
@@ -17551,8 +18150,22 @@ USER CLICKED ON IMAGE:
 - Tile: "Featured Insight" (image-comments tile)
 - Image Topic: "${topic || 'Featured Insight'}"
 - Image URL: ${imageUrl}
-- Click Coordinates: (${coordinates.naturalX}, ${coordinates.naturalY}) pixels
-- Relative Position: ${(coordinates.relativeX * 100).toFixed(1)}% from left, ${(coordinates.relativeY * 100).toFixed(1)}% from top
+
+PRECISE CLICK COORDINATES:
+- Natural Image Coordinates: (${coordinates.naturalX}, ${coordinates.naturalY}) pixels
+  * X: ${coordinates.naturalX}px from left edge (0-${coordinates.naturalWidth})
+  * Y: ${coordinates.naturalY}px from top edge (0-${coordinates.naturalHeight})
+- Relative Coordinates: (${coordinates.relativeX.toFixed(4)}, ${coordinates.relativeY.toFixed(4)})
+  * X: ${coordinates.relativeX.toFixed(4)} (0.0000 = left edge, 1.0000 = right edge)
+  * Y: ${coordinates.relativeY.toFixed(4)} (0.0000 = top edge, 1.0000 = bottom edge)
+- Percentage Position: ${(coordinates.relativeX * 100).toFixed(2)}% from left, ${(coordinates.relativeY * 100).toFixed(2)}% from top
+- Rendered Click Position: (${coordinates.x.toFixed(1)}, ${coordinates.y.toFixed(1)}) pixels
+- Image Dimensions: ${coordinates.naturalWidth} x ${coordinates.naturalHeight} pixels
+
+REGION ANALYSIS:
+- Horizontal Position: ${horizontalRegion} (${(coordinates.relativeX * 100).toFixed(1)}%)
+- Vertical Position: ${verticalRegion} (${(coordinates.relativeY * 100).toFixed(1)}%)
+- Quadrant: ${quadrant}
 
 DETECTED FEATURE:
 - Feature: "${featureDetection.detectedFeature}"
@@ -17565,12 +18178,25 @@ IMAGE COMMENTARY CONTEXT:
 
 TASK: Provide a brief, insightful comment (2-3 sentences) about what the user clicked on:
 1. Acknowledge that they clicked on the "${featureDetection.detectedFeature}" in the Featured Insight image
-2. Explain what this feature represents in the context of SpaceX/Starlink
-3. Relate it to the valuation model or operations if relevant
-4. Be specific about the clicked feature (e.g., if it's a Starlink bus, explain its role; if it's Earth, explain coverage/operations)
-5. Use link format: [link text|view:viewName] or [link text|view:viewName:subTab] or [link text|url:https://...]
+2. Reference the precise click location: The user clicked at coordinates (${coordinates.naturalX}, ${coordinates.naturalY}) pixels, which is ${(coordinates.relativeX * 100).toFixed(1)}% from the left and ${(coordinates.relativeY * 100).toFixed(1)}% from the top, in the ${quadrant} quadrant
+3. IMPORTANT: Verify the detected feature makes sense:
+   - If the detected feature is "Earth" or "Earth (planet surface or globe)", acknowledge they clicked on Earth
+   - If the detected feature mentions "satellite" but the coordinates suggest a large Earth region (center-bottom), clarify that they clicked on Earth, not a satellite
+   - Use the coordinates and region (${quadrant}, ${horizontalRegion} horizontally, ${verticalRegion} vertically) to validate the detection
+4. Explain what this feature represents in the context of SpaceX/Starlink:
+   - If Earth: Explain Earth operations, Starlink coverage, global connectivity
+   - If satellite: Explain satellite technology, constellation, communication
+   - If rocket/Starship: Explain launch capabilities, Mars missions
+5. Relate it to the valuation model or operations if relevant
+6. Be specific and accurate - if the user clicked on Earth (large blue/green/brown region in center-bottom), say they clicked on Earth, NOT a satellite
+7. Use link format: [link text|view:viewName] or [link text|view:viewName:subTab] or [link text|url:https://...]
 
-Be conversational and helpful. Focus on what this specific feature tells us about SpaceX operations or the valuation model.
+CRITICAL: The feature detection may not always be accurate. Use your judgment based on the coordinates:
+- Clicking ${(coordinates.relativeX * 100).toFixed(1)}% from left, ${(coordinates.relativeY * 100).toFixed(1)}% from top in the ${quadrant} quadrant
+- If this is CENTER-BOTTOM or BOTTOM-CENTER on an Earth image, it's almost certainly EARTH, not a satellite
+- Satellites are small objects; Earth is large. Use the region to determine which is more likely.
+
+Be conversational and helpful. Focus on what this specific feature at this precise location tells us about SpaceX operations or the valuation model.
 
 Format your response as plain text (2-3 sentences). Use the link format exactly as shown above.`;
 
@@ -17607,8 +18233,9 @@ Format your response as plain text (2-3 sentences). Use the link format exactly 
             this.removeAgentMessage(loadingId);
             
             if (result.success && result.response) {
-                this.addAgentMessage(result.response, 'assistant');
-                this.processAgentLinks(result.response);
+                // Parse links and add message
+                const commentaryWithLinks = this.parseCommentaryLinks(result.response);
+                this.addAgentMessage(commentaryWithLinks, 'assistant');
             } else {
                 this.removeAgentMessage(loadingId);
                 this.addAgentMessage('Error generating image click commentary. Please try again.', 'system');

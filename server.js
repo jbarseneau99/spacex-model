@@ -315,17 +315,18 @@ app.post('/api/insights/dashboard-layout', async (req, res) => {
           data: { earthValue, earthPercent }
         },
         {
-          id: 'mars-operations',
-          icon: 'rocket',
-          title: 'Mars Operations',
-          value: `${marsPercent.toFixed(1)}%`,
-          subtitle: formatBillion(marsValue),
+          id: 'competitors-list',
+          icon: 'users',
+          title: 'Market Competitors',
+          value: 'Launch & Comm',
+          subtitle: '',
           color: '#f59e0b',
           size: 'square',
           gridColumn: '4 / 5',
           gridRow: '1 / 2',
-          insightType: 'mars',
-          data: { marsValue, marsPercent }
+          contentType: 'list',
+          insightType: 'competitors',
+          data: { sectors: ['space', 'telecom'] }
         },
         {
           id: 'featured-insight',
@@ -4188,9 +4189,9 @@ app.get('/api/comparables', async (req, res) => {
     
     // Map of tickers by sector (excluding SpaceX which is private)
     const tickerMap = {
-      space: ['RKLB', 'ASTR', 'SPCE', 'PL'],
+      space: ['RKLB', 'ASTR', 'SPCE', 'PL', 'RDW', 'MNTS', 'BKSY', 'LUNR'], // Launch companies
       tech: ['TSLA', 'AMZN', 'GOOGL', 'MSFT', 'AAPL'],
-      telecom: ['VSAT', 'IRDM', 'TSAT'],
+      telecom: ['VSAT', 'IRDM', 'TSAT', 'SATS', 'ASTS', 'GSAT', 'ORB'], // Communication/satellite companies
       aerospace: ['BA', 'LMT', 'NOC', 'RTX', 'GD']
     };
     
@@ -6843,11 +6844,27 @@ app.get('/', (req, res) => {
 // AI Agent Chat Endpoint
 app.post('/api/agent/chat', async (req, res) => {
   try {
-    const { message, systemPrompt, context, history } = req.body;
-    const requestedModel = req.headers['x-ai-model'] || process.env.DEFAULT_AI_MODEL || 'grok:grok-3';
+    const { message, systemPrompt, context, history, imageUrl } = req.body;
+    let requestedModel = req.headers['x-ai-model'] || process.env.DEFAULT_AI_MODEL || 'grok:grok-3';
     
     if (!message) {
       return res.json({ success: false, error: 'Message is required' });
+    }
+
+    // Check if we need vision capabilities (imageUrl present)
+    const needsVision = !!(imageUrl || (context && context.imageAnalysis && context.imageAnalysis.imageUrl));
+    const actualImageUrl = imageUrl || (context && context.imageAnalysis && context.imageAnalysis.imageUrl);
+    
+    // If vision is needed, use a vision-capable model
+    if (needsVision) {
+      // Prefer Claude 3.5 Sonnet for vision (best vision model)
+      if (!requestedModel.startsWith('openai:') && !requestedModel.startsWith('grok:')) {
+        requestedModel = 'claude-sonnet-3-5-20241022'; // Claude 3.5 Sonnet with vision
+      } else if (requestedModel.startsWith('openai:')) {
+        // Use GPT-4 Vision if OpenAI is requested
+        requestedModel = 'openai:gpt-4o'; // GPT-4o has vision
+      }
+      console.log(`[Agent Chat] 🖼️ Vision required, using model: ${requestedModel}`);
     }
 
     // Build conversation history
@@ -6887,6 +6904,22 @@ app.post('/api/agent/chat', async (req, res) => {
 
     // Build comprehensive context message
     let contextMessage = `User Question: ${message}\n\n`;
+    
+    // Add image analysis context if present
+    if (context && context.imageAnalysis) {
+      const imgAnalysis = context.imageAnalysis;
+      contextMessage += `=== IMAGE CLICK ANALYSIS ===\n`;
+      contextMessage += `Image URL: ${imgAnalysis.imageUrl || actualImageUrl || 'N/A'}\n`;
+      contextMessage += `Image Topic: ${imgAnalysis.imageTopic || 'N/A'}\n`;
+      if (imgAnalysis.clickCoordinates) {
+        const coords = imgAnalysis.clickCoordinates;
+        contextMessage += `Click Coordinates: (${coords.x}, ${coords.y}) pixels\n`;
+        contextMessage += `Image Size: ${coords.imageWidth} x ${coords.imageHeight} pixels\n`;
+        contextMessage += `Relative Position: ${(coords.relativeX * 100).toFixed(1)}% from left, ${(coords.relativeY * 100).toFixed(1)}% from top\n`;
+        contextMessage += `Quadrant: ${coords.quadrant}\n`;
+        contextMessage += `Region: ${coords.horizontalRegion} horizontally, ${coords.verticalRegion} vertically\n\n`;
+      }
+    }
     
     // Add user/builder information
     contextMessage += `=== USER INFORMATION ===\n`;
@@ -6983,9 +7016,32 @@ app.post('/api/agent/chat', async (req, res) => {
       }
     }
     
+    // Build user message - if vision is needed, include image
+    let userMessageContent;
+    if (needsVision) {
+      // Vision mode: build message with image and text
+      // Format depends on provider, but we'll use OpenAI format (works for both with conversion)
+      userMessageContent = [
+        {
+          type: 'image_url',
+          image_url: {
+            url: actualImageUrl
+          }
+        },
+        {
+          type: 'text',
+          text: contextMessage
+        }
+      ];
+    } else {
+      // Text-only mode: use contextMessage
+      userMessageContent = contextMessage;
+    }
+    
+    // Add user message (with image if vision is needed)
     messages.push({
       role: 'user',
-      content: contextMessage
+      content: userMessageContent
     });
 
     // Call AI API with conversation history
@@ -7043,6 +7099,10 @@ app.post('/api/agent/chat', async (req, res) => {
         if (!apiKey) {
           throw new Error('OPENAI_API_KEY not configured');
         }
+        
+        // Use GPT-4o for vision if needed
+        const visionModel = needsVision ? 'gpt-4o' : (actualModel || 'gpt-4o');
+        console.log(`[Agent Chat] 📤 Sending to OpenAI: model=${visionModel}, hasImage=${needsVision}, messageCount=${messages.length}`);
 
         const response = await fetch('https://api.openai.com/v1/chat/completions', {
           method: 'POST',
@@ -7051,7 +7111,7 @@ app.post('/api/agent/chat', async (req, res) => {
             'Authorization': `Bearer ${apiKey}`
           },
           body: JSON.stringify({
-            model: actualModel || 'gpt-4o',
+            model: visionModel,
             messages: messages,
             max_tokens: 2000,
             temperature: 0.7
@@ -7075,12 +7135,26 @@ app.post('/api/agent/chat', async (req, res) => {
         // Convert messages format for Anthropic
         const anthropicMessages = messages
           .filter(m => m.role !== 'system')
-          .map(m => ({
-            role: m.role === 'assistant' ? 'assistant' : 'user',
-            content: m.content
-          }));
+          .map(m => {
+            // If this is the last user message and it has image content, use the structured content
+            if (m.role === 'user' && Array.isArray(m.content) && m === messages.filter(msg => msg.role !== 'system').slice(-1)[0]) {
+              return {
+                role: 'user',
+                content: m.content // Already formatted with image blocks
+              };
+            }
+            return {
+              role: m.role === 'assistant' ? 'assistant' : 'user',
+              content: typeof m.content === 'string' ? m.content : (Array.isArray(m.content) ? m.content : JSON.stringify(m.content))
+            };
+          });
 
         const systemMessage = messages.find(m => m.role === 'system')?.content || '';
+        
+        // Use Claude 3.5 Sonnet for vision, otherwise use requested model
+        const visionModel = needsVision ? 'claude-sonnet-3-5-20241022' : (actualModel || 'claude-opus-4-1-20250805');
+        
+        console.log(`[Agent Chat] 📤 Sending to Anthropic: model=${visionModel}, hasImage=${needsVision}, messageCount=${anthropicMessages.length}`);
 
         const response = await fetch('https://api.anthropic.com/v1/messages', {
           method: 'POST',
@@ -7090,7 +7164,7 @@ app.post('/api/agent/chat', async (req, res) => {
             'anthropic-version': '2023-06-01'
           },
           body: JSON.stringify({
-            model: actualModel || 'claude-opus-4-1-20250805',
+            model: visionModel,
             max_tokens: 2000,
             system: systemMessage,
             messages: anthropicMessages,
