@@ -10,6 +10,7 @@ class ValuationApp {
         this.currentView = 'dashboard';
         this.currentData = null;
         this.currentModelName = null;
+        this.editingModelId = null; // Track which model is being edited
         this.currentGreeksData = null; // Store current Greeks data for micro AI
         this.currentFactorRiskData = null; // Store current factor risk data
         this.combinedRiskChartInstance = null; // Chart.js instance for combined risk
@@ -33,6 +34,7 @@ class ValuationApp {
         this.generatingAIInsights = false;
         this.loadingTerminalInsights = false; // Flag to prevent concurrent terminal insight loading
         this.terminalInsightsLoadPromise = null; // Store promise to prevent duplicate loads
+        this.cachedTerminalInsights = {}; // Cache terminal insights by model ID and tile ID: { [modelId]: { [tileId]: insightData } }
         this.navigationHistory = []; // Track navigation history for context understanding
         this.previousContext = null; // Track previous context for change detection
         this.agentCommentaryEnabled = true; // Enable/disable agent commentary on context changes
@@ -148,10 +150,16 @@ class ValuationApp {
         // This will be called again when model loads, but having it here ensures it runs even if no model auto-loads
         setTimeout(() => {
             if (this.currentData && this.currentModelId) {
-                const gridContainer = document.getElementById('dashboardGrid');
-                if (gridContainer) {
-                    // Get tiles from current layout or generate fallback
-                    this.loadTerminalInsightsAfterModelLoad();
+                // Check if dashboard tab is active and load insights for active sub-tab
+                const dashboardTab = document.querySelector('#insights .insights-tab[data-tab="dashboard"]');
+                if (dashboardTab && dashboardTab.classList.contains('active')) {
+                    const activeSubTab = document.querySelector('#insightsTab-dashboard .sub-tab.active');
+                    const category = activeSubTab ? activeSubTab.dataset.subtab : 'overview';
+                    const gridContainer = document.getElementById(`dashboardGrid-${category}`);
+                    if (gridContainer) {
+                        // Get tiles from current layout or generate fallback
+                        this.loadTerminalInsightsAfterModelLoad();
+                    }
                 }
             }
         }, 2000); // Wait 2 seconds for model to load
@@ -456,8 +464,13 @@ class ValuationApp {
                 const modal = document.getElementById('settingsModal');
                 if (modal) {
                     modal.style.display = 'block';
+                    // Reload API keys from localStorage before showing modal
+                    this.alphaVantageApiKey = localStorage.getItem('alphaVantageApiKey') || '';
+                    this.financialModelingPrepApiKey = localStorage.getItem('financialModelingPrepApiKey') || '';
+                    this.financialApiProvider = localStorage.getItem('financialApiProvider') || 'yahoo-finance';
                     this.updateCurrentModelDisplay();
                     this.loadMach33LibSettings();
+                    this.loadFinancialApiSettings();
                     if (window.lucide) window.lucide.createIcons();
                 }
             });
@@ -479,9 +492,39 @@ class ValuationApp {
         document.getElementById('refreshInsightsBtn')?.addEventListener('click', () => {
             this.generateAIInsights();
         });
-        document.getElementById('refreshDashboardInsightsBtn')?.addEventListener('click', () => {
-            this.refreshDashboardInsights();
-        });
+        const refreshBtn = document.getElementById('refreshInsightsHeaderBtn');
+        const refreshIcon = document.getElementById('refreshInsightsIcon');
+        
+        if (refreshBtn) {
+            refreshBtn.addEventListener('click', () => {
+                // Add spinning animation
+                if (refreshIcon) {
+                    refreshIcon.classList.add('spinning');
+                }
+                refreshBtn.style.opacity = '1';
+                
+                this.refreshAllInsights().finally(() => {
+                    // Remove animation after refresh completes
+                    setTimeout(() => {
+                        if (refreshIcon) {
+                            refreshIcon.classList.remove('spinning');
+                        }
+                        refreshBtn.style.opacity = '0.6';
+                    }, 500);
+                });
+            });
+            
+            // Add hover effect
+            refreshBtn.addEventListener('mouseenter', function() {
+                this.style.opacity = '1';
+            });
+            refreshBtn.addEventListener('mouseleave', function() {
+                if (!refreshIcon || !refreshIcon.classList.contains('spinning')) {
+                    this.style.opacity = '0.6';
+                }
+            });
+        }
+        
 
         // Monte Carlo Progress Modal Close Button
         document.getElementById('closeMonteCarloProgressBtn')?.addEventListener('click', () => {
@@ -896,18 +939,13 @@ class ValuationApp {
                 // Handle Insights view tabs
                 if (viewContainer.closest('#insights')) {
                     if (tabName === 'dashboard' && this.currentData) {
-                        // Terminal tab - generate dashboard layout
+                        // Terminal tab - generate dashboard layout (will use cached insights if available)
                         this.generateDashboardLayout(this.currentData, this.getInputs()).catch(err => {
                             console.error('Error generating dashboard layout:', err);
                         }).then(() => {
-                            // After layout is generated, trigger parallel insights load
-                            setTimeout(() => {
-                                this.loadTerminalInsightsAfterModelLoad();
-                            }, 500);
+                            // Only load insights if not already cached (they're loaded during renderDashboardGrid)
+                            // Don't force reload - let cached insights be used
                         });
-                    } else if (tabName === 'insights' && this.currentData) {
-                        // Key Insights tab - generate key insights
-                        this.generateKeyInsights(this.currentData, this.getInputs());
                     } else if (tabName === 'real-time') {
                         // Real-Time Data tab - load launch data
                         this.loadLaunchData().catch(err => {
@@ -1107,6 +1145,23 @@ class ValuationApp {
         });
         document.getElementById('closeSaveModelBtn')?.addEventListener('click', () => {
             document.getElementById('saveModelModal').classList.remove('active');
+        });
+        
+        // Edit Model Modal
+        document.getElementById('closeEditModelBtn')?.addEventListener('click', () => {
+            document.getElementById('editModelModal').classList.remove('active');
+        });
+        document.getElementById('cancelEditModelBtn')?.addEventListener('click', () => {
+            document.getElementById('editModelModal').classList.remove('active');
+        });
+        document.getElementById('saveEditModelBtn')?.addEventListener('click', () => {
+            this.updateModel();
+        });
+        document.getElementById('deleteModelBtn')?.addEventListener('click', () => {
+            const modelId = this.editingModelId;
+            if (modelId) {
+                this.confirmDeleteModel(modelId);
+            }
         });
 
         // Model list filters
@@ -2969,15 +3024,8 @@ class ValuationApp {
 
     async updateInsightsView(data) {
         if (!data) {
-            const insightsModelEl = document.getElementById('insightsCurrentModel');
-            if (insightsModelEl) insightsModelEl.textContent = 'No model loaded';
             return;
         }
-        
-        // Update model name
-        const modelName = this.currentModelName || 'Current Model';
-        const insightsModelEl = document.getElementById('insightsCurrentModel');
-        if (insightsModelEl) insightsModelEl.textContent = modelName;
         
         // Check if we have cached insights
         const cached = this.currentModelId && this.cachedAIInsights[this.currentModelId];
@@ -2996,9 +3044,21 @@ class ValuationApp {
         }
         
         // Generate text-based insights (no charts) - will use cached data if available
-        this.generateKeyInsights(data, inputs);
         this.generateValueDrivers(data, inputs);
         this.generateRiskAssessment(data, inputs);
+        
+        // Since Terminal is now the default tab, generate dashboard layout if data is available
+        const dashboardTab = document.querySelector('#insights .insights-tab[data-tab="dashboard"]');
+        if (dashboardTab && dashboardTab.classList.contains('active') && data) {
+            this.generateDashboardLayout(data, inputs).catch(err => {
+                console.error('Error generating dashboard layout:', err);
+            }).then(() => {
+                // After layout is generated, trigger parallel insights load
+                setTimeout(() => {
+                    this.loadTerminalInsightsAfterModelLoad();
+                }, 500);
+            });
+        }
     }
 
     async updateChartsView(data) {
@@ -7381,7 +7441,7 @@ class ValuationApp {
                 }
                 
                 // Show completion UI - user must dismiss manually
-                this.showMonteCarloProgressComplete();
+                this.showMonteCarloProgressComplete(false, runs);
             } else {
                 // Show error and allow dismissal
                 if (progressText) {
@@ -7416,7 +7476,7 @@ class ValuationApp {
         }
     }
 
-    showMonteCarloProgressComplete(isError = false) {
+    showMonteCarloProgressComplete(isError = false, numSimulations = null) {
         const progressModal = document.getElementById('monteCarloProgressModal');
         const spinner = document.getElementById('monteCarloProgressSpinner');
         const title = document.getElementById('monteCarloProgressTitle');
@@ -7430,11 +7490,30 @@ class ValuationApp {
             title.textContent = isError ? 'Simulation Failed' : 'Simulation Complete!';
             title.style.color = isError ? 'var(--error-color)' : 'var(--success-color)';
         }
+        
+        // Build description with simulation count and Greeks info
         if (description) {
-            description.textContent = isError 
-                ? 'The simulation encountered an error. Please check the error message above and try again.'
-                : 'The Monte Carlo simulation has completed successfully. Results have been updated.';
+            if (isError) {
+                description.textContent = 'The simulation encountered an error. Please check the error message above and try again.';
+            } else {
+                let descText = 'The Monte Carlo simulation has completed successfully. Results have been updated.';
+                
+                // Add simulation count if available
+                if (numSimulations !== null && numSimulations > 0) {
+                    descText += `\n\n📊 Simulations Run: ${numSimulations.toLocaleString()}`;
+                }
+                
+                // Check if Greeks dashboard is visible - if so, suggest recalculation
+                const greeksDashboard = document.getElementById('greeksDashboard');
+                if (greeksDashboard && greeksDashboard.style.display !== 'none') {
+                    descText += '\n\n⚠️ Note: Greeks may need to be recalculated to reflect the new simulation results.';
+                }
+                
+                description.textContent = descText;
+                description.style.whiteSpace = 'pre-line'; // Allow line breaks
+            }
         }
+        
         if (completeDiv) completeDiv.style.display = 'block';
         if (closeBtn) closeBtn.style.display = 'block';
         
@@ -7478,6 +7557,7 @@ class ValuationApp {
         }
         if (description) {
             description.textContent = 'Monte Carlo is calculating new simulations based on the updated parameters.\nThis may take a few moments...';
+            description.style.whiteSpace = 'pre-line'; // Reset to allow line breaks
         }
         if (completeDiv) completeDiv.style.display = 'none';
         if (closeBtn) closeBtn.style.display = 'none';
@@ -10719,8 +10799,8 @@ class ValuationApp {
                 limit: '12',
                 sortBy: sort[0],
                 sortOrder: sort[1],
-                type: 'model', // Only load models, not scenarios
-                isBaseline: 'true' // Only show baseline model
+                type: 'model' // Only load models, not scenarios
+                // Note: Removed isBaseline filter - we want to show ALL models, not just baseline ones
             });
 
             if (search) params.append('search', search);
@@ -10891,11 +10971,11 @@ class ValuationApp {
                     <button class="btn btn-primary btn-sm" onclick="app.loadModel('${model._id}')">
                         <i data-lucide="folder-open"></i> Load
                     </button>
+                    <button class="btn btn-secondary btn-sm" onclick="app.editModel('${model._id}')">
+                        <i data-lucide="edit"></i> Edit
+                    </button>
                     <button class="btn btn-secondary btn-sm" onclick="app.duplicateModel('${model._id}')">
                         <i data-lucide="copy"></i> Duplicate
-                    </button>
-                    <button class="btn-icon" onclick="app.deleteModel('${model._id}')" title="Delete">
-                        <i data-lucide="trash-2"></i>
                     </button>
                 </div>
             `;
@@ -10932,19 +11012,29 @@ class ValuationApp {
     }
 
     openSaveModelModal(modelType = 'model') {
-        if (!this.currentData) {
-            alert('Please calculate a valuation first');
-            return;
-        }
-
         // Store the model type for when saving
         this.pendingModelType = modelType;
         
-        document.getElementById('saveModelName').value = '';
-        document.getElementById('saveModelDescription').value = '';
-        document.getElementById('saveModelTags').value = '';
-        document.getElementById('saveModelFavorite').checked = false;
-        document.getElementById('saveModelModal').classList.add('active');
+        // Clear form fields
+        const nameField = document.getElementById('saveModelName');
+        const descField = document.getElementById('saveModelDescription');
+        const tagsField = document.getElementById('saveModelTags');
+        const favoriteField = document.getElementById('saveModelFavorite');
+        
+        if (nameField) nameField.value = '';
+        if (descField) descField.value = '';
+        if (tagsField) tagsField.value = '';
+        if (favoriteField) favoriteField.checked = false;
+        
+        // Show modal
+        const modal = document.getElementById('saveModelModal');
+        if (modal) {
+            modal.classList.add('active');
+            if (window.lucide) window.lucide.createIcons();
+        } else {
+            console.error('Save model modal not found in DOM');
+            alert('Error: Save model modal not found. Please refresh the page.');
+        }
     }
 
     async saveModel(updateResults = true) {
@@ -10973,25 +11063,45 @@ class ValuationApp {
         // Clear pending type
         this.pendingModelType = null;
 
+        // Build request body - include results if available
+        const requestBody = {
+            name,
+            description,
+            inputs,
+            tags,
+            favorite: isFavorite, // Note: API expects 'favorite' not 'isFavorite'
+            monteCarloConfig,
+            type: modelType
+        };
+        
+        // Include results if available (valuation has been calculated)
+        if (this.currentData) {
+            requestBody.results = this.currentData;
+        }
+
         try {
             const response = await fetch('/api/models', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    name,
-                    description,
-                    inputs,
-                    tags,
-                    isFavorite,
-                    monteCarloConfig,
-                    type: modelType // Set type based on which button was clicked
-                })
+                body: JSON.stringify(requestBody)
             });
 
             const result = await response.json();
             if (result.success) {
-                document.getElementById('saveModelModal').classList.remove('active');
-                alert(modelType === 'scenario' ? 'Scenario saved successfully!' : 'Model saved successfully!');
+                const modal = document.getElementById('saveModelModal');
+                if (modal) modal.classList.remove('active');
+                
+                // Show success message with context
+                const hasResults = !!this.currentData;
+                const successMsg = modelType === 'scenario' 
+                    ? 'Scenario saved successfully!' 
+                    : hasResults 
+                        ? 'Model saved successfully with current inputs and valuation results!'
+                        : 'Model saved successfully with current inputs! Run a valuation to add results.';
+                
+                alert(successMsg);
+                
+                // Reload models list if in models view
                 if (this.currentView === 'models') {
                     this.loadModels();
                 } else if (this.currentView === 'scenarios') {
@@ -11001,8 +11111,14 @@ class ValuationApp {
                         this.loadScenarios();
                     }
                 }
+                
+                // If we saved a new model and have results, optionally load it
+                if (result.data && result.data._id && hasResults) {
+                    // Optionally auto-load the newly saved model
+                    // Uncomment if desired: await this.loadModel(result.data._id, true);
+                }
             } else {
-                alert('Error: ' + result.error);
+                alert('Error: ' + (result.error || 'Failed to save model'));
             }
         } catch (error) {
             console.error('Save error:', error);
@@ -11081,9 +11197,15 @@ class ValuationApp {
                 if (previousModelId && previousModelId !== id) {
                     console.log('🔄 Switched models - clearing cached AI insights');
                     delete this.cachedAIInsights[previousModelId];
+                    delete this.cachedTerminalInsights[previousModelId];
                 }
                 // Clear insights cache for current model to force regeneration
                 delete this.cachedAIInsights[id];
+                // Clear terminal insights cache for current model
+                delete this.cachedTerminalInsights[id];
+                
+                // Insights will be refreshed when model loads and data is available
+                // This happens in loadTerminalInsightsAfterModelLoad() which is called after Monte Carlo
 
                 // Clear any previous model's simulations when switching models
                 if (previousModelId && previousModelId !== id) {
@@ -11245,11 +11367,119 @@ class ValuationApp {
         }
     }
 
-    async deleteModel(id) {
-        if (!confirm('Are you sure you want to delete this model?')) {
+    async editModel(id) {
+        try {
+            // Fetch model data
+            const response = await fetch(`/api/models/${id}`);
+            const result = await response.json();
+            
+            if (!result.success) {
+                alert('Error loading model: ' + result.error);
+                return;
+            }
+            
+            const model = result.data;
+            this.editingModelId = id;
+            
+            // Populate form fields
+            document.getElementById('editModelName').value = model.name || '';
+            document.getElementById('editModelDescription').value = model.description || '';
+            document.getElementById('editModelTags').value = model.tags && model.tags.length > 0 ? model.tags.join(', ') : '';
+            document.getElementById('editModelFavorite').checked = model.favorite || false;
+            document.getElementById('editModelBaseline').checked = model.isBaseline || false;
+            
+            // Show baseline checkbox only for models (not scenarios)
+            const baselineGroup = document.getElementById('editModelBaselineGroup');
+            if (baselineGroup) {
+                baselineGroup.style.display = model.type === 'model' ? 'block' : 'none';
+            }
+            
+            // Show modal
+            const modal = document.getElementById('editModelModal');
+            if (modal) {
+                modal.classList.add('active');
+                if (window.lucide) window.lucide.createIcons();
+            }
+        } catch (error) {
+            console.error('Error loading model for edit:', error);
+            alert('Failed to load model for editing');
+        }
+    }
+    
+    async updateModel() {
+        const id = this.editingModelId;
+        if (!id) {
+            alert('No model selected for editing');
             return;
         }
-
+        
+        const name = document.getElementById('editModelName').value.trim();
+        if (!name) {
+            alert('Please enter a model name');
+            return;
+        }
+        
+        const description = document.getElementById('editModelDescription').value.trim();
+        const tags = document.getElementById('editModelTags').value.split(',').map(t => t.trim()).filter(t => t);
+        const favorite = document.getElementById('editModelFavorite').checked;
+        const isBaseline = document.getElementById('editModelBaseline').checked;
+        
+        try {
+            const response = await fetch(`/api/models/${id}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    name,
+                    description,
+                    tags,
+                    favorite,
+                    isBaseline
+                })
+            });
+            
+            const result = await response.json();
+            if (result.success) {
+                const modal = document.getElementById('editModelModal');
+                if (modal) modal.classList.remove('active');
+                this.editingModelId = null;
+                
+                // Show success message
+                alert('Model updated successfully!');
+                
+                // Reload models list
+                if (this.currentView === 'models') {
+                    this.loadModels();
+                }
+                
+                // Update current model name if this is the active model
+                if (id === this.currentModelId) {
+                    this.currentModelName = name;
+                }
+            } else {
+                alert('Error: ' + (result.error || 'Failed to update model'));
+            }
+        } catch (error) {
+            console.error('Update error:', error);
+            alert('Failed to update model');
+        }
+    }
+    
+    confirmDeleteModel(id) {
+        const modelName = document.getElementById('editModelName').value || 'this model';
+        if (!confirm(`Are you sure you want to delete "${modelName}"?\n\nThis action cannot be undone.`)) {
+            return;
+        }
+        
+        // Close edit modal first
+        const modal = document.getElementById('editModelModal');
+        if (modal) modal.classList.remove('active');
+        this.editingModelId = null;
+        
+        // Delete the model
+        this.deleteModel(id);
+    }
+    
+    async deleteModel(id) {
         try {
             const response = await fetch(`/api/models/${id}`, {
                 method: 'DELETE'
@@ -11257,7 +11487,16 @@ class ValuationApp {
 
             const result = await response.json();
             if (result.success) {
+                // If we deleted the currently loaded model, clear it
+                if (id === this.currentModelId) {
+                    this.currentModelId = null;
+                    this.currentModelName = null;
+                    this.currentData = null;
+                }
+                
+                // Reload models list
                 this.loadModels();
+                alert('Model deleted successfully');
             } else {
                 alert('Error: ' + result.error);
             }
@@ -12353,6 +12592,7 @@ class ValuationApp {
         const alphaVantageGroup = document.getElementById('alphaVantageApiKeyGroup');
         const fmpGroup = document.getElementById('financialModelingPrepApiKeyGroup');
         const yahooInfoGroup = document.getElementById('yahooFinanceInfoGroup');
+        const alphaVantageFaqGroup = document.getElementById('alphaVantageFaqGroup');
         
         if (!apiSelect) return;
         
@@ -12368,6 +12608,10 @@ class ValuationApp {
         
         if (yahooInfoGroup) {
             yahooInfoGroup.style.display = selectedApi === 'yahoo-finance' ? 'block' : 'none';
+        }
+        
+        if (alphaVantageFaqGroup) {
+            alphaVantageFaqGroup.style.display = selectedApi === 'alpha-vantage' ? 'block' : 'none';
         }
     }
     
@@ -12394,16 +12638,29 @@ class ValuationApp {
         if (apiSelect) {
             this.financialApiProvider = apiSelect.value;
             localStorage.setItem('financialApiProvider', this.financialApiProvider);
+            console.log('✅ Saved API provider:', this.financialApiProvider);
         }
         
         if (alphaVantageKey) {
-            this.alphaVantageApiKey = alphaVantageKey.value;
-            localStorage.setItem('alphaVantageApiKey', this.alphaVantageApiKey);
+            this.alphaVantageApiKey = alphaVantageKey.value.trim();
+            if (this.alphaVantageApiKey) {
+                localStorage.setItem('alphaVantageApiKey', this.alphaVantageApiKey);
+                console.log('✅ Saved Alpha Vantage API key:', this.alphaVantageApiKey.substring(0, 8) + '...');
+            } else {
+                localStorage.removeItem('alphaVantageApiKey');
+                console.log('⚠️ Alpha Vantage API key cleared');
+            }
         }
         
         if (fmpKey) {
-            this.financialModelingPrepApiKey = fmpKey.value;
-            localStorage.setItem('financialModelingPrepApiKey', this.financialModelingPrepApiKey);
+            this.financialModelingPrepApiKey = fmpKey.value.trim();
+            if (this.financialModelingPrepApiKey) {
+                localStorage.setItem('financialModelingPrepApiKey', this.financialModelingPrepApiKey);
+                console.log('✅ Saved Financial Modeling Prep API key:', this.financialModelingPrepApiKey.substring(0, 8) + '...');
+            } else {
+                localStorage.removeItem('financialModelingPrepApiKey');
+                console.log('⚠️ Financial Modeling Prep API key cleared');
+            }
         }
         
         this.updateCurrentFinancialApiDisplay();
@@ -13085,6 +13342,7 @@ class ValuationApp {
             return `$${value.toFixed(1)}B`;
         };
 
+        // Define all tiles (no categories - single view)
         const allTiles = [
             { id: 'total-valuation', icon: 'zap', title: 'Total Enterprise Value', value: formatBillion(totalValue), color: '#0066cc', size: 'horizontal', insightType: 'valuation', data: { totalValue, earthValue, marsValue } },
             { id: 'earth-operations', icon: 'globe', title: 'Earth Operations', value: `${earthPercent.toFixed(1)}%`, subtitle: formatBillion(earthValue), color: '#10b981', size: 'square', insightType: 'starlink-earth', data: { earthValue, earthPercent } },
@@ -13105,15 +13363,30 @@ class ValuationApp {
         gridContainer.innerHTML = '';
         gridContainer.style.display = 'grid';
         gridContainer.style.gridTemplateColumns = 'repeat(4, 1fr)';
-        gridContainer.style.gridAutoRows = 'minmax(150px, auto)';
+        gridContainer.style.gridTemplateRows = 'repeat(4, 1fr)';
         gridContainer.style.gap = 'var(--spacing-sm)';
         gridContainer.style.height = 'fit-content';
         gridContainer.style.maxHeight = '100%';
         gridContainer.style.overflow = 'hidden';
 
-        // Render tiles first with placeholder data
+        // Check for cached insights
+        const modelCache = this.currentModelId && this.cachedTerminalInsights[this.currentModelId] ? this.cachedTerminalInsights[this.currentModelId] : {};
+        
+        // Check if we have cached insights for all tiles
+        const tilesNeedingInsights = tiles.filter(tile => tile.insightType && data);
+        const cachedCount = tilesNeedingInsights.filter(tile => {
+            const cacheKey = `${tile.id}-${tile.insightType}`;
+            return modelCache[cacheKey];
+        }).length;
+        const allTilesCached = tilesNeedingInsights.length > 0 && cachedCount === tilesNeedingInsights.length;
+        
+        console.log(`📋 Rendering dashboard: ${cachedCount}/${tilesNeedingInsights.length} tiles have cached insights (Model: ${this.currentModelId})`);
+        
+        // Render tiles first, using cached insights if available
         for (const tile of tiles) {
-            const tileHTML = this.renderDashboardTile(tile, null);
+            const cacheKey = `${tile.id}-${tile.insightType}`;
+            const cachedInsight = modelCache[cacheKey] || null;
+            const tileHTML = this.renderDashboardTile(tile, cachedInsight);
             const tempDiv = document.createElement('div');
             tempDiv.innerHTML = tileHTML.trim();
             const tileElement = tempDiv.firstElementChild;
@@ -13123,11 +13396,15 @@ class ValuationApp {
         }
         if (window.lucide) window.lucide.createIcons();
 
-        // Load insights in parallel (non-blocking) - only if we have data
-        if (data && inputs) {
+        // Only load insights if not all tiles are cached
+        // If all tiles have cached insights, skip the API call
+        if (data && inputs && !allTilesCached) {
+            console.log(`📊 ${tilesNeedingInsights.length - cachedCount} tiles missing cached insights, loading from API...`);
             this.loadTerminalInsightsInParallel(tiles, data, inputs, gridContainer).catch(err => {
                 console.error('Error loading terminal insights:', err);
             });
+        } else if (allTilesCached) {
+            console.log('✅ All tiles have cached insights, using buffer - no API call needed');
         }
     }
 
@@ -13148,6 +13425,31 @@ class ValuationApp {
             return;
         }
 
+        // Initialize cache for this model if it doesn't exist
+        if (!this.cachedTerminalInsights[this.currentModelId]) {
+            this.cachedTerminalInsights[this.currentModelId] = {};
+        }
+        const modelCache = this.cachedTerminalInsights[this.currentModelId];
+
+        // Filter tiles that need insights
+        const tilesNeedingInsights = tiles.filter(tile => tile.insightType && data);
+
+        if (tilesNeedingInsights.length === 0) {
+            console.log('ℹ️ No tiles need insights');
+            return;
+        }
+
+        // Check if all tiles already have cached insights
+        const allTilesCached = tilesNeedingInsights.every(tile => {
+            const cacheKey = `${tile.id}-${tile.insightType}`;
+            return modelCache[cacheKey];
+        });
+
+        if (allTilesCached) {
+            console.log('✅ All tiles already have cached insights, skipping API call');
+            return;
+        }
+
         // Set loading flag
         this.loadingTerminalInsights = true;
         console.log('🚀 Starting parallel terminal insights load...');
@@ -13155,19 +13457,26 @@ class ValuationApp {
         // Create promise for this load operation
         this.terminalInsightsLoadPromise = (async () => {
             try {
-                // Filter tiles that need insights
-                const tilesNeedingInsights = tiles.filter(tile => tile.insightType && data);
-
-                if (tilesNeedingInsights.length === 0) {
-                    console.log('ℹ️ No tiles need insights');
-                    return;
-                }
-
                 console.log(`📊 Loading insights for ${tilesNeedingInsights.length} tiles in parallel...`);
 
-                // Load all insights in parallel
+                // Load all insights in parallel (check cache first)
                 const insightPromises = tilesNeedingInsights.map(async (tile) => {
+                    // Check cache first
+                    const cacheKey = `${tile.id}-${tile.insightType}`;
+                    if (modelCache[cacheKey]) {
+                        console.log(`✅ Using cached insight for tile ${tile.id}`);
+                        return {
+                            tileId: tile.id,
+                            insightData: modelCache[cacheKey],
+                            error: null,
+                            fromCache: true
+                        };
+                    }
+
                     try {
+                        // Get content limits for this tile size
+                        const contentLimits = this.getTileContentLimits(tile.size);
+                        
                         const response = await fetch('/api/insights/enhanced', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
@@ -13177,6 +13486,8 @@ class ValuationApp {
                                 tileId: tile.id,
                                 tileTitle: tile.title,
                                 tileValue: tile.value,
+                                tileSize: tile.size,
+                                contentLimits: contentLimits,
                                 context: {
                                     metric: tile.title,
                                     value: tile.value,
@@ -13186,17 +13497,27 @@ class ValuationApp {
                             })
                         });
                         const result = await response.json();
+                        const insightData = result.success ? result.data : null;
+                        
+                        // Cache the insight
+                        if (insightData) {
+                            modelCache[cacheKey] = insightData;
+                            console.log(`💾 Cached insight for tile ${tile.id}`);
+                        }
+                        
                         return {
                             tileId: tile.id,
-                            insightData: result.success ? result.data : null,
-                            error: result.success ? null : result.error
+                            insightData: insightData,
+                            error: result.success ? null : result.error,
+                            fromCache: false
                         };
                     } catch (error) {
                         console.error(`Error fetching insight for tile ${tile.id}:`, error);
                         return {
                             tileId: tile.id,
                             insightData: null,
-                            error: error.message
+                            error: error.message,
+                            fromCache: false
                         };
                     }
                 });
@@ -13244,11 +13565,16 @@ class ValuationApp {
     }
 
     packGridTiles(tiles, gridColumns) {
+        const maxRows = 4; // Fixed 4x4 grid
         const occupied = new Set();
         const isAvailable = (col, row, width, height) => {
+            // Check if tile fits within grid bounds (4 columns x 4 rows)
+            if (col + width > gridColumns || row + height > maxRows) {
+                return false;
+            }
             for (let r = row; r < row + height; r++) {
                 for (let c = col; c < col + width; c++) {
-                    if (c >= gridColumns || occupied.has(`${c},${r}`)) {
+                    if (c >= gridColumns || r >= maxRows || occupied.has(`${c},${r}`)) {
                         return false;
                     }
                 }
@@ -13284,8 +13610,13 @@ class ValuationApp {
                 height = 2;
             }
 
-            for (let row = 0; row < 20 && !placed; row++) {
+            // Limit to 4 rows (4x4 grid = 16 cells total)
+            for (let row = 0; row < maxRows && !placed; row++) {
                 for (let col = 0; col <= gridColumns - width && !placed; col++) {
+                    // Check if tile fits within the 4-row limit
+                    if (row + height > maxRows) {
+                        continue; // Skip if tile would exceed row limit
+                    }
                     if (isAvailable(col, row, width, height)) {
                         tile.gridColumn = `${col + 1} / ${col + width + 1}`;
                         tile.gridRow = `${row + 1} / ${row + height + 1}`;
@@ -13297,6 +13628,26 @@ class ValuationApp {
             }
         }
         return placedTiles;
+    }
+
+    // Calculate character and word limits for each tile size
+    getTileContentLimits(tileSize) {
+        // Standardized font: 12px, line-height 1.4
+        // Average character width: ~7px, average word length: ~5 chars
+        // Tile dimensions (approximate): ~300px per grid cell
+        // Header takes ~40px height
+        
+        const limits = {
+            'square': { chars: 500, words: 100 },      // 1x1: ~12 lines × 40 chars
+            'horizontal': { chars: 1000, words: 200 }, // 2x1: ~12 lines × 80 chars
+            '2x1': { chars: 1000, words: 200 },
+            'vertical': { chars: 1100, words: 220 },  // 1x2: ~28 lines × 40 chars
+            '1x2': { chars: 1100, words: 220 },
+            'large': { chars: 2200, words: 440 },      // 2x2: ~28 lines × 80 chars
+            '2x2': { chars: 2200, words: 440 }
+        };
+        
+        return limits[tileSize] || limits.square;
     }
 
     renderDashboardTile(tile, aiData) {
@@ -13316,12 +13667,13 @@ class ValuationApp {
         const isVertical = tile.size === 'vertical' || tile.size === '1x2';
         const isHorizontal = tile.size === 'horizontal' || tile.size === '2x1';
         
-        const titleSize = isLarge ? '8px' : '7px';
-        const valueSize = isLarge ? '20px' : (isVertical ? '16px' : '14px');
-        const subtitleSize = isLarge ? '10px' : '9px';
-        const insightSize = isLarge ? '18px' : (isVertical ? '16px' : (isHorizontal ? '14px' : '12px'));
-        const iconSize = isLarge ? '12px' : (isVertical ? '10px' : '8px');
-        const iconContainerSize = isLarge ? '20px' : (isVertical ? '16px' : '14px');
+        // Standardized font sizes across all tiles
+        const titleSize = '7px';
+        const valueSize = '14px';
+        const subtitleSize = '9px';
+        const insightSize = '12px'; // Standard font size for all insight text
+        const iconSize = '10px';
+        const iconContainerSize = '16px';
 
         const isSpecialTile = tile.isSpecialTile;
         const specialContent = isSpecialTile && aiData ? this.renderSpecialTileContent(tile, aiData) : '';
@@ -13377,23 +13729,16 @@ class ValuationApp {
                         border-top: 1px solid var(--border-color);
                         font-size: ${insightSize};
                         color: var(--text-secondary);
-                        line-height: 1.2;
+                        line-height: 1.4;
                         flex: 1;
-                        overflow: hidden;
+                        overflow-y: auto;
                         display: flex;
                         flex-direction: column;
                         min-height: 0;
+                        word-wrap: break-word;
+                        overflow-wrap: break-word;
                     ">
-                        <div style="
-                            overflow: hidden;
-                            text-overflow: ellipsis;
-                            display: -webkit-box;
-                            -webkit-line-clamp: ${isLarge ? '14' : (isVertical ? '11' : (isHorizontal ? '7' : '6'))};
-                            -webkit-box-orient: vertical;
-                            flex: 1;
-                            word-wrap: break-word;
-                            overflow-wrap: break-word;
-                        ">
+                        <div style="flex: 1;">
                             ${aiData.insight}
                         </div>
                     </div>
@@ -13403,24 +13748,46 @@ class ValuationApp {
     }
 
     renderSpecialTileContent(tile, aiData) {
-        const isLarge = tile.size === 'large' || tile.size === '2x2';
-        const isHorizontal = tile.size === 'horizontal' || tile.size === '2x1';
-        const isVertical = tile.size === 'vertical' || tile.size === '1x2';
+        // Standardized font sizes for special tiles
+        const fontSize = '12px';
+        const accountNameSize = '11px';
+        
+        // Character limits per post/item based on tile size
+        const charLimits = {
+            'square': 120,
+            'horizontal': 200,
+            '2x1': 200,
+            'vertical': 150,
+            '1x2': 150,
+            'large': 300,
+            '2x2': 300
+        };
+        
+        const charLimit = charLimits[tile.size] || charLimits.square;
+        
+        // Item counts based on tile size
+        const itemCounts = {
+            'square': 3,
+            'horizontal': 5,
+            '2x1': 5,
+            'vertical': 4,
+            '1x2': 4,
+            'large': 8,
+            '2x2': 8
+        };
+        
+        const itemCount = itemCounts[tile.size] || itemCounts.square;
         
         if (tile.id === 'x-posts' && aiData.xFeeds && Array.isArray(aiData.xFeeds) && aiData.xFeeds.length > 0) {
-            const postCount = isLarge ? 8 : (isHorizontal ? 5 : (isVertical ? 4 : 3));
-            const fontSize = isLarge ? '14px' : (isHorizontal ? '13px' : '12px');
-            const maxHeight = isLarge ? 'calc(100% - 40px)' : (isHorizontal ? 'calc(100% - 35px)' : 'calc(100% - 30px)');
-            const charLimit = isLarge ? 250 : (isHorizontal ? 200 : 150);
             
             return `
-                <div style="margin-top: 2px; padding-top: 2px; border-top: 1px solid var(--border-color); display: flex; flex-direction: column; gap: 4px; flex: 1; overflow-y: auto; min-height: 0; max-height: ${maxHeight};">
-                    ${aiData.xFeeds.slice(0, postCount).map(post => `
+                <div style="margin-top: 2px; padding-top: 2px; border-top: 1px solid var(--border-color); display: flex; flex-direction: column; gap: 4px; flex: 1; overflow-y: auto; min-height: 0;">
+                    ${aiData.xFeeds.slice(0, itemCount).map(post => `
                         <div style="font-size: ${fontSize}; line-height: 1.4; padding: 4px 0; border-bottom: 1px solid rgba(0,0,0,0.05);">
-                            <div style="font-weight: 600; color: ${post.isKeyAccount ? tile.color : 'var(--text-secondary)'}; margin-bottom: 2px; font-size: ${parseInt(fontSize) - 1}px;">
+                            <div style="font-weight: 600; color: ${post.isKeyAccount ? tile.color : 'var(--text-secondary)'}; margin-bottom: 2px; font-size: ${accountNameSize};">
                                 ${post.accountName || post.account}
                             </div>
-                            <div style="color: var(--text-primary); word-wrap: break-word; line-height: 1.3;">
+                            <div style="color: var(--text-primary); word-wrap: break-word; line-height: 1.4;">
                                 ${(post.content || '').substring(0, charLimit)}${(post.content || '').length > charLimit ? '...' : ''}
                             </div>
                         </div>
@@ -13428,19 +13795,14 @@ class ValuationApp {
                 </div>
             `;
         } else if (tile.id === 'news' && aiData.news && Array.isArray(aiData.news) && aiData.news.length > 0) {
-            const itemCount = isLarge ? 8 : (isHorizontal ? 5 : (isVertical ? 4 : 3));
-            const fontSize = isLarge ? '14px' : (isHorizontal ? '13px' : '12px');
-            const maxHeight = isLarge ? 'calc(100% - 40px)' : (isHorizontal ? 'calc(100% - 35px)' : 'calc(100% - 30px)');
-            const charLimit = isLarge ? 250 : (isHorizontal ? 200 : 150);
-            
             return `
-                <div style="margin-top: 2px; padding-top: 2px; border-top: 1px solid var(--border-color); display: flex; flex-direction: column; gap: 4px; flex: 1; overflow-y: auto; min-height: 0; max-height: ${maxHeight};">
+                <div style="margin-top: 2px; padding-top: 2px; border-top: 1px solid var(--border-color); display: flex; flex-direction: column; gap: 4px; flex: 1; overflow-y: auto; min-height: 0;">
                     ${aiData.news.slice(0, itemCount).map(item => `
                         <div style="font-size: ${fontSize}; line-height: 1.4; padding: 4px 0; border-bottom: 1px solid rgba(0,0,0,0.05);">
-                            <div style="font-weight: 600; color: ${tile.color}; margin-bottom: 2px; font-size: ${parseInt(fontSize) - 1}px;">
+                            <div style="font-weight: 600; color: ${tile.color}; margin-bottom: 2px; font-size: ${accountNameSize};">
                                 ${item.title || item.source || 'News'}
                             </div>
-                            <div style="color: var(--text-primary); word-wrap: break-word; line-height: 1.3;">
+                            <div style="color: var(--text-primary); word-wrap: break-word; line-height: 1.4;">
                                 ${(item.summary || item.content || '').substring(0, charLimit)}${(item.summary || item.content || '').length > charLimit ? '...' : ''}
                             </div>
                         </div>
@@ -13456,14 +13818,54 @@ class ValuationApp {
             alert('Please calculate a valuation first');
             return;
         }
+        
         const gridContainer = document.getElementById('dashboardGrid');
         if (!gridContainer) return;
         
         // Clear cached insights by regenerating layout
-        if (this.currentModelId && this.cachedAIInsights[this.currentModelId]) {
-            delete this.cachedAIInsights[this.currentModelId];
+        if (this.currentModelId) {
+            if (this.cachedAIInsights[this.currentModelId]) {
+                delete this.cachedAIInsights[this.currentModelId];
+            }
+            if (this.cachedTerminalInsights[this.currentModelId]) {
+                delete this.cachedTerminalInsights[this.currentModelId];
+            }
         }
         await this.generateDashboardLayout(this.currentData, this.getInputs());
+    }
+
+    async refreshAllInsights() {
+        if (!this.currentData) {
+            alert('Please calculate a valuation first');
+            return;
+        }
+
+        // Clear all cached insights for current model
+        if (this.currentModelId) {
+            if (this.cachedAIInsights[this.currentModelId]) {
+                delete this.cachedAIInsights[this.currentModelId];
+            }
+            if (this.cachedTerminalInsights[this.currentModelId]) {
+                delete this.cachedTerminalInsights[this.currentModelId];
+            }
+        }
+
+        // Refresh terminal dashboard insights
+        const gridContainer = document.getElementById('dashboardGrid');
+        if (gridContainer) {
+            await this.generateDashboardLayout(this.currentData, this.getInputs());
+        }
+
+        // Refresh other insights views if they're active
+        const activeTab = document.querySelector('#insights .insights-tab.active')?.dataset.tab;
+        if (activeTab === 'dashboard') {
+            // Terminal tab - already handled above
+        } else {
+            // Refresh other tab insights
+            this.updateInsightsView(this.currentData).catch(err => {
+                console.error('Error refreshing insights view:', err);
+            });
+        }
     }
 
     // ==================== DESKTOP AGENT WINDOW ====================
@@ -14805,6 +15207,11 @@ Format your response as plain text. Use the link format exactly as shown above.`
 
 // Initialize app when DOM is ready
 document.addEventListener('DOMContentLoaded', () => {
+    // Configure Alpha Vantage API key
+    const alphaVantageKey = '75RXWZSDFJIGLFBZ';
+    localStorage.setItem('alphaVantageApiKey', alphaVantageKey);
+    console.log('✅ Alpha Vantage API key configured:', alphaVantageKey.substring(0, 8) + '...');
+    
     window.app = new ValuationApp();
 });
 

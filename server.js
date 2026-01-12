@@ -4450,7 +4450,7 @@ app.post('/api/insights/bandwidth-economics', (req, res) => {
 // Enhanced insights endpoint with Grok, web search, and X feed access
 app.post('/api/insights/enhanced', async (req, res) => {
   try {
-    const { data, inputs, insightType, context } = req.body;
+    const { data, inputs, insightType, context, tileSize, contentLimits } = req.body;
     // Use grok-3 as default (grok-beta and grok-2 were deprecated)
     let requestedModel = req.headers['x-ai-model'] || 'grok:grok-3';
     
@@ -4565,7 +4565,12 @@ CRITICAL: Provide insights SPECIFICALLY about "${tileMetric}" (value: ${tileValu
 3. How THIS METRIC'S VALUE affects the overall valuation
 4. Risks/opportunities SPECIFIC to ${tileMetric}
 
-Keep it concise (2-3 sentences max). Make it UNIQUE to this metric.
+CONTENT LENGTH REQUIREMENT:
+- Tile Size: ${tileSize || 'square'}
+- Target Word Count: ${contentLimits?.words || 100} words (approximately ${contentLimits?.chars || 500} characters)
+- Fill the tile with as much relevant content as possible - use the full word count
+- Write in complete sentences, be detailed and comprehensive
+- Make it UNIQUE to this metric
 
 Format your response as JSON with:
 {

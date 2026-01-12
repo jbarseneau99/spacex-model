@@ -1632,20 +1632,15 @@
 
             <!-- Insights View -->
             <div id="insights" class="view">
-                <div class="view-header">
-                    <div>
-                        <h2>Strategic Insights</h2>
-                        <div style="font-size: 14px; color: var(--text-secondary); margin-top: 4px;" id="insightsModelName">
-                            <span id="insightsCurrentModel">No model loaded</span>
-                        </div>
-                    </div>
-                </div>
-
                 <!-- Insights Tabs -->
-                <div class="insights-tabs" style="display: flex; gap: 8px; padding: 0 var(--spacing-lg); margin-bottom: var(--spacing-md); border-bottom: 1px solid var(--border-color);">
-                    <button class="insights-tab active" data-tab="insights">
-                        <i data-lucide="sparkles"></i>
-                        <span>Key Insights</span>
+                <div class="insights-tabs" style="display: flex; gap: 8px; padding: 0 var(--spacing-lg); margin-bottom: var(--spacing-md); border-bottom: 1px solid var(--border-color); align-items: center;">
+                    <span style="display: flex; align-items: center; gap: 8px; font-size: 18px; font-weight: 600; color: var(--text-primary); margin-right: var(--spacing-md);">
+                        <i data-lucide="lightbulb" style="width: 18px; height: 18px;"></i>
+                        <span>Insights</span>
+                    </span>
+                    <button class="insights-tab active" data-tab="dashboard">
+                        <i data-lucide="terminal"></i>
+                        <span>Mach33 Terminal</span>
                     </button>
                     <button class="insights-tab" data-tab="drivers">
                         <i data-lucide="trending-up"></i>
@@ -1659,20 +1654,13 @@
                         <i data-lucide="activity"></i>
                         <span>Real-Time Data</span>
                     </button>
-                    <button class="insights-tab" data-tab="dashboard">
-                        <i data-lucide="terminal"></i>
-                        <span>Terminal</span>
+                    <div style="flex: 1;"></div>
+                    <button class="icon-button" id="refreshInsightsHeaderBtn" title="Refresh AI Insights" style="padding: 4px; opacity: 0.6; transition: opacity 0.2s;">
+                        <i data-lucide="refresh-cw" id="refreshInsightsIcon" style="width: 16px; height: 16px; transition: transform 0.3s;"></i>
                     </button>
                 </div>
 
                 <!-- Tab Content -->
-                <div class="insights-tab-content active" id="insightsTab-insights">
-                    <div class="section" style="margin-bottom: var(--spacing-md);">
-                        <div id="keyInsightsContent" style="display: grid; gap: var(--spacing-md);">
-                            <!-- Will be populated dynamically -->
-                        </div>
-                    </div>
-                </div>
 
                 <div class="insights-tab-content" id="insightsTab-drivers">
                     <div class="section" style="margin-bottom: var(--spacing-md);">
@@ -1722,23 +1710,14 @@
                 </div>
 
                 <!-- Dashboard Tab Content (New Bloomberg Terminal Style) -->
-                <div class="insights-tab-content" id="insightsTab-dashboard" style="display: none;">
-                    <!-- Header with Refresh Button -->
-                    <div class="section" style="margin-bottom: var(--spacing-sm); padding: var(--spacing-sm) var(--spacing-md); display: flex; justify-content: space-between; align-items: center;">
-                        <h3 style="margin: 0; font-size: 16px; font-weight: 600;">
-                            <i data-lucide="grid"></i> Terminal Dashboard
-                        </h3>
-                        <button class="btn btn-secondary btn-sm" id="refreshDashboardInsightsBtn" title="Refresh All AI Insights">
-                            <i data-lucide="refresh-cw"></i> Refresh Insights
-                        </button>
-                    </div>
-                    <!-- Fixed Center Panel with Grid System -->
+                <div class="insights-tab-content active" id="insightsTab-dashboard">
+                    <!-- Dashboard Container -->
                     <div class="section" style="margin-bottom: var(--spacing-md);">
-                        <!-- Grid Container -->
+                        <!-- 4x4 Grid Container -->
                         <div id="dashboardGrid" class="dashboard-grid" style="
                             display: grid;
                             grid-template-columns: repeat(4, 1fr);
-                            grid-auto-rows: minmax(150px, auto);
+                            grid-template-rows: repeat(4, 1fr);
                             gap: var(--spacing-sm);
                             width: 100%;
                             max-width: 1400px;
@@ -3225,6 +3204,98 @@
         </div>
     </div>
 
+    <!-- Save Model Modal -->
+    <div id="saveModelModal" class="modal">
+        <div class="modal-content modal-small">
+            <div class="modal-header">
+                <h2><i data-lucide="save"></i> Save Model</h2>
+                <button class="modal-close" id="closeSaveModelBtn">
+                    <i data-lucide="x"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="saveModelName">Model Name *</label>
+                    <input type="text" id="saveModelName" class="input-full" placeholder="e.g., Base Model - Q4 2024" required>
+                </div>
+                <div class="form-group">
+                    <label for="saveModelDescription">Description</label>
+                    <textarea id="saveModelDescription" class="input-full" rows="3" placeholder="Optional description of this model"></textarea>
+                </div>
+                <div class="form-group">
+                    <label for="saveModelTags">Tags</label>
+                    <input type="text" id="saveModelTags" class="input-full" placeholder="e.g., baseline, q4-2024, conservative (comma-separated)">
+                    <small style="color: var(--text-secondary); font-size: 12px; margin-top: 4px; display: block;">Separate tags with commas</small>
+                </div>
+                <div class="form-group">
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="saveModelFavorite">
+                        <span>Mark as favorite</span>
+                    </label>
+                </div>
+                <div class="actions-bar">
+                    <button class="btn btn-primary" id="confirmSaveModelBtn">
+                        <i data-lucide="save"></i> Save Model
+                    </button>
+                    <button class="btn btn-secondary" id="cancelSaveModelBtn">
+                        Cancel
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Edit/Delete Model Modal -->
+    <div id="editModelModal" class="modal">
+        <div class="modal-content modal-small">
+            <div class="modal-header">
+                <h2><i data-lucide="edit"></i> Edit Model</h2>
+                <button class="modal-close" id="closeEditModelBtn">
+                    <i data-lucide="x"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="editModelName">Model Name *</label>
+                    <input type="text" id="editModelName" class="input-full" placeholder="e.g., Base Model - Q4 2024" required>
+                </div>
+                <div class="form-group">
+                    <label for="editModelDescription">Description</label>
+                    <textarea id="editModelDescription" class="input-full" rows="3" placeholder="Optional description of this model"></textarea>
+                </div>
+                <div class="form-group">
+                    <label for="editModelTags">Tags</label>
+                    <input type="text" id="editModelTags" class="input-full" placeholder="e.g., baseline, q4-2024, conservative (comma-separated)">
+                    <small style="color: var(--text-secondary); font-size: 12px; margin-top: 4px; display: block;">Separate tags with commas</small>
+                </div>
+                <div class="form-group">
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="editModelFavorite">
+                        <span>Mark as favorite</span>
+                    </label>
+                </div>
+                <div class="form-group" id="editModelBaselineGroup" style="display: none;">
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="editModelBaseline">
+                        <span>Mark as baseline model</span>
+                    </label>
+                    <small style="color: var(--text-secondary); font-size: 12px; margin-top: 4px; display: block; margin-left: 24px;">Baseline models are used for reconciliation and comparison</small>
+                </div>
+                <div class="actions-bar" style="margin-top: var(--spacing-lg); border-top: 1px solid var(--border-color); padding-top: var(--spacing-md);">
+                    <button class="btn btn-danger" id="deleteModelBtn" style="margin-right: auto;">
+                        <i data-lucide="trash-2"></i> Delete Model
+                    </button>
+                    <button class="btn btn-secondary" id="cancelEditModelBtn">
+                        Cancel
+                    </button>
+                    <button class="btn btn-primary" id="saveEditModelBtn">
+                        <i data-lucide="save"></i> Save Changes
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Settings Modal -->
     <div id="settingsModal" class="modal">
         <div class="modal-content modal-large">
@@ -3469,8 +3540,8 @@
                                 </div>
                                 <div>
                                     <strong>Alpha Vantage</strong><br>
-                                    Free tier: 5 API calls/min, 500 calls/day<br>
-                                    <em>Best for: Detailed fundamentals</em>
+                                    Free tier: 25 requests/day<br>
+                                    <em>Best for: Detailed fundamentals & 100+ data APIs</em>
                                 </div>
                                 <div>
                                     <strong>Financial Modeling Prep</strong><br>
@@ -3486,6 +3557,19 @@
                             
                             <div style="margin-top: var(--spacing-md); padding: var(--spacing-sm); background: rgba(245, 158, 11, 0.1); border-radius: var(--radius); font-size: 12px; color: var(--text-secondary);">
                                 <strong>Note:</strong> API keys are stored locally in your browser. For production use, configure API keys in environment variables on the server.
+                            </div>
+                        </div>
+                        
+                        <!-- Alpha Vantage FAQ -->
+                        <div id="alphaVantageFaqGroup" style="margin-top: var(--spacing-lg); padding: var(--spacing-md); background: rgba(0, 102, 204, 0.05); border-radius: var(--radius); border-left: 3px solid var(--primary-color); display: none;">
+                            <h4 style="margin-top: 0; margin-bottom: var(--spacing-sm);">
+                                <i data-lucide="help-circle"></i> Alpha Vantage FAQ
+                            </h4>
+                            <div style="font-size: 13px; color: var(--text-secondary); line-height: 1.6;">
+                                <p style="margin-top: 0;"><strong>Usage Limits:</strong> Free tier provides up to 25 requests per day. For higher volume, premium membership is available.</p>
+                                <p><strong>Data Coverage:</strong> Alpha Vantage offers 100+ data API endpoints covering stocks, forex, crypto, commodities, and economic indicators.</p>
+                                <p><strong>Data Adjustments:</strong> Time series data is adjusted for both splits and cash dividends (industry standard). Raw unadjusted data is also available for custom adjustment logic.</p>
+                                <p style="margin-bottom: 0;"><strong>Getting Started:</strong> Check out the <a href="https://www.alphavantage.co/documentation/" target="_blank" style="color: var(--primary-color);">official API documentation</a> for detailed information and sample code.</p>
                             </div>
                         </div>
                         
