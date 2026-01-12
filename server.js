@@ -360,6 +360,20 @@ app.post('/api/insights/dashboard-layout', async (req, res) => {
           insightType: 'risk',
           data: { discountRate: inputs?.financial?.discountRate || 0.12 }
         },
+        // News Tile - Under Discount Rate, 1 column by 1 row
+        {
+          id: 'news',
+          icon: 'newspaper',
+          title: 'Recent News',
+          value: 'Latest',
+          color: '#ef4444',
+          size: 'square',
+          gridColumn: '3 / 4',
+          gridRow: '4 / 5',
+          insightType: 'news',
+          data: {},
+          isSpecialTile: true
+        },
         {
           id: 'mars-timeline',
           icon: 'calendar',
@@ -371,6 +385,20 @@ app.post('/api/insights/dashboard-layout', async (req, res) => {
           gridRow: '2 / 3',
           insightType: 'mars',
           data: { firstColonyYear: inputs?.mars?.firstColonyYear || 2030 }
+        },
+        // X Posts Tile - Under Mars Timeline, 1 column wide, 2 rows high
+        {
+          id: 'x-posts',
+          icon: 'message-square',
+          title: 'Key X Posts',
+          value: 'Recent',
+          color: '#1da1f2',
+          size: 'vertical',
+          gridColumn: '4 / 5',
+          gridRow: '3 / 5',
+          insightType: 'x-feeds',
+          data: {},
+          isSpecialTile: true
         },
         // Add 2x2 large tile for comprehensive overview
         {
@@ -384,34 +412,6 @@ app.post('/api/insights/dashboard-layout', async (req, res) => {
           gridRow: '3 / 5',
           insightType: 'valuation',
           data: { totalValue, earthValue, marsValue }
-        },
-        // X Posts Tile
-        {
-          id: 'x-posts',
-          icon: 'message-square',
-          title: 'Key X Posts',
-          value: 'Recent',
-          color: '#1da1f2',
-          size: 'horizontal',
-          gridColumn: '3 / 5',
-          gridRow: '4 / 5',
-          insightType: 'x-feeds',
-          data: {},
-          isSpecialTile: true
-        },
-        // News Tile
-        {
-          id: 'news',
-          icon: 'newspaper',
-          title: 'Recent News',
-          value: 'Latest',
-          color: '#ef4444',
-          size: 'horizontal',
-          gridColumn: '1 / 3',
-          gridRow: '5 / 6',
-          insightType: 'news',
-          data: {},
-          isSpecialTile: true
         }
       ]
     };
@@ -3222,7 +3222,73 @@ app.get('/api/models/:id/monte-carlo-config', (req, res) => {
   });
 });
 
+// Rate limiting and retry utilities for API calls
+const grokRateLimiter = {
+  requests: [],
+  maxRequestsPerMinute: parseInt(process.env.GROK_MAX_REQUESTS_PER_MINUTE || '30', 10),
+  minDelayBetweenRequests: parseInt(process.env.GROK_MIN_DELAY_MS || '2000', 10), // 2 seconds default
+  
+  async waitIfNeeded() {
+    const now = Date.now();
+    // Remove requests older than 1 minute
+    this.requests = this.requests.filter(time => now - time < 60000);
+    
+    // If we're at the limit, wait until oldest request expires
+    if (this.requests.length >= this.maxRequestsPerMinute) {
+      const oldestRequest = this.requests[0];
+      const waitTime = 60000 - (now - oldestRequest) + 100; // Add 100ms buffer
+      if (waitTime > 0) {
+        console.log(`⏳ Grok rate limit: waiting ${Math.ceil(waitTime / 1000)}s (${this.requests.length}/${this.maxRequestsPerMinute} requests/min)`);
+        await new Promise(resolve => setTimeout(resolve, waitTime));
+      }
+    }
+    
+    // Ensure minimum delay between requests
+    if (this.requests.length > 0) {
+      const lastRequest = this.requests[this.requests.length - 1];
+      const timeSinceLastRequest = now - lastRequest;
+      if (timeSinceLastRequest < this.minDelayBetweenRequests) {
+        const waitTime = this.minDelayBetweenRequests - timeSinceLastRequest;
+        await new Promise(resolve => setTimeout(resolve, waitTime));
+      }
+    }
+    
+    // Record this request
+    this.requests.push(Date.now());
+  }
+};
+
+// Retry helper with exponential backoff
+async function retryWithBackoff(fn, maxRetries = 3, baseDelay = 1000) {
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (error) {
+      const isRateLimit = error.message.includes('429') || 
+                         error.message.includes('exhausted') || 
+                         error.message.includes('spending limit') ||
+                         error.message.includes('rate limit');
+      
+      if (!isRateLimit || attempt === maxRetries) {
+        throw error; // Don't retry non-rate-limit errors or if max retries reached
+      }
+      
+      // Exponential backoff: 1s, 2s, 4s, 8s
+      const delay = baseDelay * Math.pow(2, attempt);
+      console.log(`⏳ Grok rate limited, retrying in ${delay}ms (attempt ${attempt + 1}/${maxRetries + 1})`);
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+  }
+}
+
 // Comparables API endpoint
+// Helper function to sanitize numeric values (convert NaN to null)
+function sanitizeNumber(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const num = typeof value === 'number' ? value : parseFloat(value);
+  return (isNaN(num) || !isFinite(num)) ? null : num;
+}
+
 // Helper function to fetch company data from Alpha Vantage
 async function fetchAlphaVantageData(ticker, apiKey) {
   try {
@@ -3240,12 +3306,12 @@ async function fetchAlphaVantageData(ticker, apiKey) {
       return {
         name: data.Name || ticker,
         ticker: data.Symbol,
-        marketCap: data.MarketCapitalization ? parseFloat(data.MarketCapitalization) : null,
-        evRevenue: data.EVToRevenue ? parseFloat(data.EVToRevenue) : null,
-        evEbitda: data.EVToEBITDA ? parseFloat(data.EVToEBITDA) : null,
-        peRatio: data.PERatio ? parseFloat(data.PERatio) : null,
-        pegRatio: data.PEGRatio ? parseFloat(data.PEGRatio) : null,
-        revenueGrowth: data.RevenueTTM && data.RevenueGrowth ? parseFloat(data.RevenueGrowth) / 100 : null
+        marketCap: sanitizeNumber(data.MarketCapitalization),
+        evRevenue: sanitizeNumber(data.EVToRevenue),
+        evEbitda: sanitizeNumber(data.EVToEBITDA),
+        peRatio: sanitizeNumber(data.PERatio),
+        pegRatio: sanitizeNumber(data.PEGRatio),
+        revenueGrowth: data.RevenueTTM && data.RevenueGrowth ? sanitizeNumber(parseFloat(data.RevenueGrowth) / 100) : null
       };
     }
     return null;
@@ -3298,12 +3364,12 @@ async function fetchYahooFinanceData(ticker) {
       return {
         name: profile.longName || profile.name || ticker,
         ticker: ticker,
-        marketCap: keyStats.marketCap?.raw || null,
-        evRevenue: keyStats.enterpriseToRevenue?.raw || null,
-        evEbitda: keyStats.enterpriseToEbitda?.raw || null,
-        peRatio: keyStats.trailingPE?.raw || keyStats.forwardPE?.raw || null,
-        pegRatio: keyStats.pegRatio?.raw || null,
-        revenueGrowth: financial.revenueGrowth?.raw || null
+        marketCap: sanitizeNumber(keyStats.marketCap?.raw),
+        evRevenue: sanitizeNumber(keyStats.enterpriseToRevenue?.raw),
+        evEbitda: sanitizeNumber(keyStats.enterpriseToEbitda?.raw),
+        peRatio: sanitizeNumber(keyStats.trailingPE?.raw || keyStats.forwardPE?.raw),
+        pegRatio: sanitizeNumber(keyStats.pegRatio?.raw),
+        revenueGrowth: sanitizeNumber(financial.revenueGrowth?.raw)
       };
     }
     
@@ -3346,12 +3412,12 @@ async function fetchFinancialModelingPrepData(ticker, apiKey) {
       return {
         name: company.companyName || ticker,
         ticker: company.symbol,
-        marketCap: company.mktCap ? parseFloat(company.mktCap) : null,
-        evRevenue: ratios.enterpriseValueMultiple ? parseFloat(ratios.enterpriseValueMultiple) : null,
-        evEbitda: ratios.evToEBITDA ? parseFloat(ratios.evToEBITDA) : null,
-        peRatio: company.priceEarnings ? parseFloat(company.priceEarnings) : null,
-        pegRatio: ratios.priceEarningsToGrowthRatio ? parseFloat(ratios.priceEarningsToGrowthRatio) : null,
-        revenueGrowth: company.revenueGrowth ? parseFloat(company.revenueGrowth) / 100 : null
+        marketCap: sanitizeNumber(company.mktCap),
+        evRevenue: sanitizeNumber(ratios.enterpriseValueMultiple),
+        evEbitda: sanitizeNumber(ratios.evToEBITDA),
+        peRatio: sanitizeNumber(company.priceEarnings),
+        pegRatio: sanitizeNumber(ratios.priceEarningsToGrowthRatio),
+        revenueGrowth: company.revenueGrowth ? sanitizeNumber(parseFloat(company.revenueGrowth) / 100) : null
       };
     }
     return null;
@@ -3623,14 +3689,25 @@ app.get('/api/comparables', async (req, res) => {
           apiProvider: workingProvider
         });
         
+        // Sanitize data before saving (ensure no NaN values)
+        const sanitizedCompanies = fetchedCompanies.map(company => ({
+          ...company,
+          marketCap: sanitizeNumber(company.marketCap),
+          evRevenue: sanitizeNumber(company.evRevenue),
+          evEbitda: sanitizeNumber(company.evEbitda),
+          peRatio: sanitizeNumber(company.peRatio),
+          pegRatio: sanitizeNumber(company.pegRatio),
+          revenueGrowth: sanitizeNumber(company.revenueGrowth)
+        }));
+        
         // Save new data
         await ComparablesData.create({
           sector: sector,
           apiProvider: workingProvider,
-          data: fetchedCompanies,
+          data: sanitizedCompanies,
           fetchedAt: fetchedAt,
           expiresAt: expiresAt,
-          fetched: fetchedCompanies.length,
+          fetched: sanitizedCompanies.length,
           total: tickers.length,
           errors: allErrors.length > 0 ? allErrors : []
         });
@@ -3755,8 +3832,211 @@ app.post('/api/ai/scenarios/recommend', (req, res) => {
   });
 });
 
+/**
+ * COORDINATION AGENT: Validates and coordinates multi-modal tile responses
+ * Ensures chart/image data is properly structured and tied to prose content
+ */
+async function coordinateMultiModalResponse(insightData, tileMetric, tileValue, tileSize, contentLimits) {
+  const coordinated = { ...insightData };
+  
+  // Validate and fix chart data
+  if (coordinated.chart) {
+    const chart = coordinated.chart;
+    
+    // Ensure required fields exist
+    if (!chart.type) chart.type = 'line';
+    if (!chart.labels || !Array.isArray(chart.labels)) {
+      // Generate default labels based on metric
+      chart.labels = ['2024', '2025', '2026', '2027', '2028'];
+    }
+    if (!chart.data || !Array.isArray(chart.data)) {
+      // Generate sample data if missing
+      const baseValue = parseFloat(tileValue) || 100;
+      chart.data = [
+        baseValue * 0.8,
+        baseValue * 0.9,
+        baseValue,
+        baseValue * 1.1,
+        baseValue * 1.2
+      ];
+    }
+    if (!chart.label) chart.label = tileMetric;
+    // Default to full chart with axes (sparkline only if explicitly requested)
+    if (chart.sparkline === undefined) chart.sparkline = false;
+    
+    // Ensure data matches labels length
+    while (chart.data.length < chart.labels.length) {
+      const lastValue = chart.data[chart.data.length - 1] || 100;
+      chart.data.push(lastValue * 1.1);
+    }
+    while (chart.data.length > chart.labels.length) {
+      chart.data.pop();
+    }
+    
+    if (process.env.DEBUG_INSIGHTS === 'true') {
+      console.log(`[Coordination] Chart validated: ${chart.type} with ${chart.labels.length} data points`);
+    }
+  }
+  
+  // Validate and fix image data
+  // Check if this is a metric tile (should not have images)
+  const isMetricTile = !tileMetric.toLowerCase().includes('news') && 
+                       !tileMetric.toLowerCase().includes('post') &&
+                       !tileMetric.toLowerCase().includes('x post') &&
+                       !tileMetric.toLowerCase().includes('event');
+  
+  if (coordinated.image) {
+    // If this is a metric tile, silently remove image (AI shouldn't have included it)
+    if (isMetricTile) {
+      if (process.env.DEBUG_INSIGHTS === 'true') {
+        console.log(`[Coordination] Removing image from metric tile "${tileMetric}" (should only have charts)`);
+      }
+      delete coordinated.image;
+    } else {
+      // Handle different image object structures for news/event tiles
+      let imageUrl = null;
+      
+      // Check if image is a string (direct URL)
+      if (typeof coordinated.image === 'string') {
+        imageUrl = coordinated.image;
+        coordinated.image = { url: imageUrl, alt: `${tileMetric} visualization` };
+      }
+      // Check if image has url property
+      else if (coordinated.image.url) {
+        imageUrl = coordinated.image.url;
+      }
+      // Check for other possible properties
+      else if (coordinated.image.src) {
+        imageUrl = coordinated.image.src;
+        coordinated.image.url = imageUrl;
+      }
+      else if (coordinated.image.link) {
+        imageUrl = coordinated.image.link;
+        coordinated.image.url = imageUrl;
+      }
+      
+      // Validate URL
+      if (!imageUrl || typeof imageUrl !== 'string' || imageUrl.trim() === '') {
+        // Log the actual image data to help debug
+        const imageDataStr = JSON.stringify(coordinated.image);
+        console.warn(`[Coordination] Invalid image URL for "${tileMetric}" - removing image`);
+        console.warn(`[Coordination] Image data received:`, imageDataStr.substring(0, 300));
+        delete coordinated.image;
+      } else {
+      // Clean and validate URL
+      imageUrl = imageUrl.trim();
+      
+      // Check if it's a valid HTTP/HTTPS URL
+      const isValidUrl = imageUrl.startsWith('http://') || 
+                        imageUrl.startsWith('https://') ||
+                        imageUrl.startsWith('//'); // Protocol-relative URL
+      
+      if (!isValidUrl) {
+        // Always log invalid URLs to help debug
+        console.warn(`[Coordination] Image URL not HTTP/HTTPS for "${tileMetric}" - removing image`);
+        console.warn(`[Coordination] Invalid URL received: "${imageUrl.substring(0, 150)}"`);
+        delete coordinated.image;
+      } else {
+        // URL is valid, ensure it's set and add alt if missing
+        coordinated.image.url = imageUrl;
+        if (!coordinated.image.alt || coordinated.image.alt.trim() === '') {
+          coordinated.image.alt = `${tileMetric} visualization`;
+        }
+        
+        if (process.env.DEBUG_INSIGHTS === 'true') {
+          console.log(`[Coordination] ✅ Valid image URL for "${tileMetric}": ${imageUrl.substring(0, 80)}...`);
+        }
+      }
+      }
+    }
+  }
+  
+  // Ensure exactly ONE visualization (chart OR image, not both)
+  // Only resolve conflicts if both are valid
+  if (coordinated.chart && coordinated.image) {
+    // Prefer chart for metrics, image for news/events
+    const isNewsOrPost = tileMetric.toLowerCase().includes('news') || 
+                         tileMetric.toLowerCase().includes('post') ||
+                         tileMetric.toLowerCase().includes('x post');
+    
+    if (isNewsOrPost) {
+      // For news/posts, prefer image but only if it's valid
+      if (coordinated.image.url && coordinated.image.url.trim() !== '') {
+        delete coordinated.chart;
+        if (process.env.DEBUG_INSIGHTS === 'true') {
+          console.log('[Coordination] Removed chart, keeping image for news/event tile');
+        }
+      } else {
+        // Image is invalid, keep chart instead
+        delete coordinated.image;
+        if (process.env.DEBUG_INSIGHTS === 'true') {
+          console.log('[Coordination] Image invalid for news/event tile, keeping chart instead');
+        }
+      }
+    } else {
+      // For metrics, prefer chart (image validation already removed invalid images)
+      delete coordinated.image;
+      if (process.env.DEBUG_INSIGHTS === 'true') {
+        console.log('[Coordination] Removed image, keeping chart for metric tile');
+      }
+    }
+  }
+  
+  // If NO visualization exists, generate a chart for metrics (not news/posts)
+  if (!coordinated.chart && !coordinated.image) {
+    const isNewsOrPost = tileMetric.toLowerCase().includes('news') || 
+                         tileMetric.toLowerCase().includes('post') ||
+                         tileMetric.toLowerCase().includes('x post');
+    
+    if (!isNewsOrPost) {
+      // Generate a default chart for metrics
+      const baseValue = parseFloat(tileValue.replace(/[^0-9.]/g, '')) || 100;
+      coordinated.chart = {
+        type: 'line',
+        labels: ['2024', '2025', '2026', '2027', '2028'],
+        data: [
+          baseValue * 0.8,
+          baseValue * 0.9,
+          baseValue,
+          baseValue * 1.1,
+          baseValue * 1.2
+        ],
+        label: tileMetric,
+        sparkline: false, // Show axes and interactivity
+        fill: false
+      };
+      console.log(`[Coordination] ✅ Generated default chart for "${tileMetric}" with base value ${baseValue}, data: [${coordinated.chart.data.join(', ')}]`);
+    } else {
+      // For news/posts, we could generate an image placeholder, but for now skip
+      console.log(`[Coordination] ⏭️ Skipping visualization for news/post tile: ${tileMetric}`);
+    }
+  } else {
+    if (process.env.DEBUG_INSIGHTS === 'true') {
+      console.log(`[Coordination] ✅ Visualization already present: ${coordinated.chart ? 'Chart' : 'Image'}`);
+    }
+  }
+  
+  // Ensure insight text exists and has proper length
+  if (!coordinated.insight || coordinated.insight.length < 50) {
+    console.warn('[Coordination] Insight text too short or missing');
+    if (!coordinated.insight) {
+      coordinated.insight = `Analysis of ${tileMetric} (${tileValue}): This metric represents a key component of SpaceX's valuation framework.`;
+    }
+  }
+  
+  // Validate links are present
+  if (coordinated.insight) {
+    const linkMatches = coordinated.insight.match(/\[([^\]]+)\|(view|url):([^\]]+)\]/g);
+    if (!linkMatches || linkMatches.length < 2) {
+      console.warn(`[Coordination] Only ${linkMatches?.length || 0} links found, expected 2-3`);
+    }
+  }
+  
+  return coordinated;
+}
+
 // Helper function to call AI API based on model provider
-async function callAIAPI(model, prompt, maxTokens = 300) {
+async function callAIAPI(model, prompt, maxTokens = 300, systemPrompt = null) {
   // Determine provider from model string
   let provider = 'anthropic';
   let actualModel = model;
@@ -3769,10 +4049,35 @@ async function callAIAPI(model, prompt, maxTokens = 300) {
     actualModel = model.replace('grok:', '');
   }
   
+  // Build messages array with optional system prompt
+  const messages = [];
+  if (systemPrompt) {
+    messages.push({
+      role: 'system',
+      content: systemPrompt
+    });
+  }
+  messages.push({
+    role: 'user',
+    content: prompt
+  });
+  
   if (provider === 'anthropic') {
     const apiKey = process.env.ANTHROPIC_API_KEY;
     if (!apiKey) {
       throw new Error('ANTHROPIC_API_KEY not configured');
+    }
+    
+    // Anthropic API requires system message as separate parameter, not in messages array
+    const requestBody = {
+      model: actualModel,
+      max_tokens: maxTokens,
+      messages: messages.filter(m => m.role !== 'system') // Remove system from messages
+    };
+    
+    // Add system message as separate parameter if present
+    if (systemPrompt) {
+      requestBody.system = systemPrompt;
     }
     
     const response = await fetch('https://api.anthropic.com/v1/messages', {
@@ -3782,14 +4087,7 @@ async function callAIAPI(model, prompt, maxTokens = 300) {
         'x-api-key': apiKey,
         'anthropic-version': '2023-06-01'
       },
-      body: JSON.stringify({
-        model: actualModel,
-        max_tokens: maxTokens,
-        messages: [{
-          role: 'user',
-          content: prompt
-        }]
-      })
+      body: JSON.stringify(requestBody)
     });
     
     if (!response.ok) {
@@ -3814,10 +4112,7 @@ async function callAIAPI(model, prompt, maxTokens = 300) {
       body: JSON.stringify({
         model: actualModel,
         max_tokens: maxTokens,
-        messages: [{
-          role: 'user',
-          content: prompt
-        }]
+        messages: messages
       })
     });
     
@@ -3834,29 +4129,34 @@ async function callAIAPI(model, prompt, maxTokens = 300) {
       throw new Error('XAI_API_KEY or GROK_API_KEY not configured');
     }
     
-    const response = await fetch('https://api.x.ai/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`
-      },
-      body: JSON.stringify({
-        model: actualModel,
-        max_tokens: maxTokens,
-        messages: [{
-          role: 'user',
-          content: prompt
-        }]
-      })
-    });
+    // Apply rate limiting
+    await grokRateLimiter.waitIfNeeded();
     
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`Grok API error: ${response.status} ${errorText}`);
-    }
-    
-    const data = await response.json();
-    return data.choices && data.choices[0] ? data.choices[0].message.content : 'Analysis complete.';
+    // Retry with exponential backoff on rate limit errors
+    return await retryWithBackoff(async () => {
+      const response = await fetch('https://api.x.ai/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`
+        },
+        body: JSON.stringify({
+          model: actualModel,
+          max_tokens: maxTokens,
+          messages: messages
+        })
+      });
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        const error = new Error(`Grok API error: ${response.status} ${errorText}`);
+        error.status = response.status;
+        throw error;
+      }
+      
+      const data = await response.json();
+      return data.choices && data.choices[0] ? data.choices[0].message.content : 'Analysis complete.';
+    }, 3, 2000); // Max 3 retries, starting with 2s delay
   }
   
   throw new Error(`Unknown AI provider for model: ${model}`);
@@ -4450,9 +4750,10 @@ app.post('/api/insights/bandwidth-economics', (req, res) => {
 // Enhanced insights endpoint with Grok, web search, and X feed access
 app.post('/api/insights/enhanced', async (req, res) => {
   try {
-    const { data, inputs, insightType, context, tileSize, contentLimits } = req.body;
-    // Use grok-3 as default (grok-beta and grok-2 were deprecated)
-    let requestedModel = req.headers['x-ai-model'] || 'grok:grok-3';
+    const { data, inputs, insightType, context, tileSize, contentLimits, tileId: bodyTileId } = req.body;
+    // Use environment variable for default model, fallback to grok-3
+    // Set DEFAULT_AI_MODEL env var to 'claude-opus-4-1-20250805' to avoid Grok rate limits
+    let requestedModel = req.headers['x-ai-model'] || process.env.DEFAULT_AI_MODEL || 'grok:grok-3';
     
     // Map deprecated models to grok-3
     if (requestedModel === 'grok:grok-2' || requestedModel === 'grok:grok-beta') {
@@ -4470,10 +4771,24 @@ app.post('/api/insights/enhanced', async (req, res) => {
     const tileContext = context || {};
     const tileMetric = tileContext.metric || 'General Valuation';
     const tileValue = tileContext.value || 'N/A';
-    const tileId = data?.tileId || '';
+    const tileId = bodyTileId || data?.tileId || '';
+    
+    // Extract insightType from multiple possible sources
+    let actualInsightType = insightType || tileContext.tileType || '';
+    
+    // Fallback: determine from tileId if not provided
+    if (!actualInsightType && tileId) {
+      if (tileId.includes('news')) actualInsightType = 'news';
+      else if (tileId.includes('x-post') || tileId.includes('x-posts')) actualInsightType = 'x-feeds';
+    }
+    
+    // Log content limits for debugging (only if DEBUG_INSIGHTS is enabled)
+    if (process.env.DEBUG_INSIGHTS === 'true') {
+      console.log(`[Enhanced Insights] Tile: ${tileId || '(none)'}, Size: ${tileSize}, InsightType: ${actualInsightType}, Limits:`, contentLimits);
+    }
     
     // Special handling for X Posts tile
-    if (insightType === 'x-feeds') {
+    if (actualInsightType === 'x-feeds') {
       const prompt = `You have access to X (Twitter) feeds. Provide the 3-5 most relevant recent posts about SpaceX, Starlink, or related topics.
 
 PRIORITIZE posts from key accounts:
@@ -4509,72 +4824,125 @@ Return ONLY a JSON object with this exact format:
     }
     
     // Special handling for News tile
-    if (insightType === 'news') {
-      const prompt = `Provide 3-5 recent news articles about SpaceX, Starlink, or related topics. Return ONLY a JSON object:
+    if (actualInsightType === 'news') {
+      const prompt = `You are a financial news analyst. Provide 3-5 recent, real news articles about SpaceX, Starlink, Mars missions, or related space industry topics. 
+
+CRITICAL: Return ONLY valid JSON. Include real, specific news items with titles and summaries. If you don't have recent news, provide relevant general SpaceX/Starlink news items.
+
+Return ONLY a JSON object:
 {
   "news": [
     {
-      "title": "Article Title",
-      "summary": "Brief summary of the article",
+      "title": "Specific Article Title",
+      "summary": "Detailed summary of the article (at least 50 characters)",
       "source": "Source Name"
     }
   ]
 }`;
       
       try {
-        const aiResponse = await callAIAPI(requestedModel, prompt, 1000);
+        const aiResponse = await callAIAPI(requestedModel, prompt, 1500);
         const jsonMatch = aiResponse.match(/\{[\s\S]*\}/);
         if (jsonMatch) {
           const result = JSON.parse(jsonMatch[0]);
-          return res.json({ success: true, data: { news: result.news || [] } });
+          const newsItems = result.news || [];
+          
+          // Validate news items have content
+          const validNews = newsItems.filter(item => 
+            item && 
+            (item.title || item.summary) && 
+            (item.title || '').trim().length > 0 &&
+            (item.summary || item.content || '').trim().length > 10
+          );
+          
+          if (validNews.length > 0) {
+            return res.json({ success: true, data: { news: validNews } });
+          } else {
+            console.warn('[Enhanced Insights] News API returned invalid/empty news items');
+          }
         }
       } catch (error) {
         console.error('[Enhanced Insights] Error fetching news:', error);
       }
-      return res.json({ success: true, data: { news: [] } });
+      
+      // Fallback: Return sample news if API fails
+      return res.json({ 
+        success: true, 
+        data: { 
+          news: [
+            {
+              title: "SpaceX Starship Test Flight",
+              summary: "SpaceX continues testing Starship for future Mars missions. Recent test flights show progress toward reusability goals.",
+              source: "SpaceX Updates"
+            },
+            {
+              title: "Starlink Global Expansion",
+              summary: "Starlink expands coverage to new regions, increasing global internet access. Subscriber growth continues to accelerate.",
+              source: "Industry News"
+            },
+            {
+              title: "Mars Mission Timeline",
+              summary: "SpaceX maintains target for first crewed Mars mission by 2030. Starship development critical to timeline.",
+              source: "Space News"
+            }
+          ]
+        } 
+      });
     }
     
     // Build context for RAG from documentation
     const ragContext = await getRAGContext(insightType, data, inputs);
     
-    // Create prompt for Grok with X feed access - TILE SPECIFIC
-    const prompt = `You are analyzing SpaceX valuation data for a SPECIFIC METRIC tile in a Bloomberg Terminal-style dashboard.
+    // Create SYSTEM PROMPT for critical instructions (more reliable than user prompt)
+    const systemPrompt = `You are a financial analyst creating insights for a Bloomberg Terminal-style dashboard tile.
 
-FOCUS ON THIS SPECIFIC METRIC ONLY:
-- Metric Name: "${tileMetric}"
-- Metric Value: "${tileValue}"
-- Tile ID: "${tileId}"
+CRITICAL REQUIREMENTS - YOU MUST FOLLOW THESE:
+1. ALWAYS include 2-3 clickable links in EVERY insight using format [link text|view:dashboard] for internal navigation or [link text|url:https://example.com] for external URLs
+2. Links are REQUIRED - do not skip them
+3. Example formats: [View Dashboard|view:dashboard], [SpaceX Website|url:https://spacex.com], [Mars Analysis|view:mars]
+4. Your insight text MUST be approximately ${contentLimits?.chars || 500} characters long (between ${Math.floor((contentLimits?.chars || 500) * 0.9)} and ${Math.floor((contentLimits?.chars || 500) * 1.1)} characters)
+5. Count your characters before responding
+6. Fill the tile completely with detailed, comprehensive analysis
+7. Write in complete sentences, be detailed and specific
+8. REQUIRED: Include a "chart" OR "image" visualization (choose ONE based on tile type):
+   - For METRIC tiles (revenue, valuation, growth, etc.): ALWAYS use "chart" ONLY - never include "image"
+   - For NEWS/EVENT tiles (X posts, news, events): ALWAYS use "image" ONLY - never include "chart"
+   - NEVER include both chart AND image - choose ONE based on tile type
+   - Chart format: {"type": "line", "labels": ["2024","2025","2026"], "data": [100,150,200], "label": "Revenue", "sparkline": false}
+   - Image format: {"url": "https://example.com/image.jpg", "alt": "Description"}
+   - If tile is a metric (not news/event), ONLY include chart, do NOT include image`;
 
-Background Context (for reference only):
-- Total Enterprise Value: $${(totalValue / 1000).toFixed(1)}T
-- Earth Operations Value: $${(earthValue / 1000).toFixed(1)}T (${earthPercent.toFixed(1)}%)
-- Mars Operations Value: $${(marsValue / 1000).toFixed(1)}T (${marsPercent.toFixed(1)}%)
-- Starlink Penetration: ${((inputs?.earth?.starlinkPenetration || 0) * 100).toFixed(1)}%
-- Launch Volume: ${inputs?.earth?.launchVolume || 0}/year
-- Discount Rate: ${((inputs?.financial?.discountRate || 0.12) * 100).toFixed(1)}%
-- First Colony Year: ${inputs?.mars?.firstColonyYear || 2030}
+    // Create concise user prompt - shorter prompts = faster responses
+    // Only include essential context to reduce token usage
+    const prompt = `Analyze "${tileMetric}" (${tileValue}) for SpaceX valuation.
 
-Relevant Context from Documentation:
-${ragContext}
+Key Context:
+- Total Value: $${(totalValue / 1000).toFixed(1)}T | Earth: $${(earthValue / 1000).toFixed(1)}T (${earthPercent.toFixed(1)}%) | Mars: $${(marsValue / 1000).toFixed(1)}T (${marsPercent.toFixed(1)}%)
+- Starlink: ${((inputs?.earth?.starlinkPenetration || 0) * 100).toFixed(1)}% | Launches: ${inputs?.earth?.launchVolume || 0}/yr | Discount: ${((inputs?.financial?.discountRate || 0.12) * 100).toFixed(1)}%
 
-CRITICAL: Provide insights SPECIFICALLY about "${tileMetric}" (value: ${tileValue}). Do NOT repeat generic valuation information. Focus ONLY on:
-1. What THIS SPECIFIC METRIC means and why THIS VALUE matters
-2. Recent X posts SPECIFICALLY about ${tileMetric} (not general SpaceX posts)
-   - PRIORITIZE posts from: @elonmusk, @CathieDWood, Arron Burnet (Mach33), Vlad
-   - Only include posts RELEVANT to ${tileMetric}
-3. How THIS METRIC'S VALUE affects the overall valuation
-4. Risks/opportunities SPECIFIC to ${tileMetric}
+${ragContext ? `Docs: ${ragContext.substring(0, 500)}` : ''}
 
-CONTENT LENGTH REQUIREMENT:
-- Tile Size: ${tileSize || 'square'}
-- Target Word Count: ${contentLimits?.words || 100} words (approximately ${contentLimits?.chars || 500} characters)
-- Fill the tile with as much relevant content as possible - use the full word count
-- Write in complete sentences, be detailed and comprehensive
-- Make it UNIQUE to this metric
+Focus: What "${tileMetric}" means, why ${tileValue} matters, valuation impact, risks/opportunities. Include 2-3 links: [text|view:path] or [text|url:https://...].
 
-Format your response as JSON with:
+Visualization (REQUIRED - choose ONE):
+- METRIC tiles: chart ONLY: {"type":"line","labels":["2024","2025","2026","2027","2028"],"data":[100,150,200,250,300],"label":"${tileMetric}","sparkline":false}
+- NEWS/EVENT tiles: image ONLY: {"url":"https://...","alt":"Description"}
+
+Format your response as JSON:
 {
-  "insight": "main insight text",
+  "insight": "Your detailed analysis here (${contentLimits?.chars || 500} characters) with links like [View Dashboard|view:dashboard] and [SpaceX|url:https://spacex.com]",
+  "chart": {
+    "type": "line",
+    "labels": ["2024", "2025", "2026", "2027", "2028"],
+    "data": [100, 150, 200, 250, 300],
+    "label": "Metric Name",
+    "sparkline": false,
+    "fill": false
+  },
+  "image": {
+    "url": "https://example.com/image.jpg",
+    "alt": "Description"
+  },
   "xFeeds": [
     {
       "account": "@elonmusk",
@@ -4616,17 +4984,54 @@ Format your response as JSON with:
     let aiResponse;
     let insightData;
     
+    // Only log detailed info if DEBUG_INSIGHTS is enabled
+    if (process.env.DEBUG_INSIGHTS === 'true') {
+      console.log(`[Enhanced Insights] Calling AI API with model: ${requestedModel}, tile: ${tileId || '(none)'}, charLimit: ${contentLimits?.chars || 500}`);
+      console.log(`[Enhanced Insights] System prompt length: ${systemPrompt?.length || 0} chars`);
+      console.log(`[Enhanced Insights] User prompt length: ${prompt?.length || 0} chars`);
+    }
+    
     try {
-      aiResponse = await callAIAPI(requestedModel, prompt, 1000);
+      // Optimize maxTokens based on tile size - smaller tiles need less tokens
+      // This speeds up API calls significantly
+      const charLimit = contentLimits?.chars || 500;
+      let maxTokens;
+      if (charLimit <= 200) {
+        maxTokens = 800; // Small tiles (square) - faster
+      } else if (charLimit <= 500) {
+        maxTokens = 1200; // Medium tiles (vertical/horizontal) - moderate
+      } else {
+        maxTokens = Math.min(2000, charLimit * 2); // Large tiles (2x2) - full
+      }
+      
+      if (process.env.DEBUG_INSIGHTS === 'true') {
+        console.log(`[Enhanced Insights] Max tokens: ${maxTokens} (charLimit: ${charLimit})`);
+      }
+      aiResponse = await callAIAPI(requestedModel, prompt, maxTokens, systemPrompt);
+      if (process.env.DEBUG_INSIGHTS === 'true') {
+        console.log(`[Enhanced Insights] AI response received, length: ${aiResponse?.length || 0} chars`);
+      }
     } catch (grokError) {
-      console.warn('Grok API failed, falling back to Claude:', grokError.message);
+      // Handle Grok API errors more gracefully
+      const isRateLimit = grokError.message.includes('429') || grokError.message.includes('exhausted') || grokError.message.includes('spending limit');
+      if (isRateLimit) {
+        console.warn(`⚠️ Grok API rate limit/spending limit reached, falling back to Claude`);
+      } else {
+        console.warn(`⚠️ Grok API failed (${grokError.message.substring(0, 100)}), falling back to Claude`);
+      }
       // Fallback to Claude if Grok fails
       const fallbackModel = process.env.ANTHROPIC_DEFAULT_MODEL || 'claude-opus-4-1-20250805';
       try {
-        aiResponse = await callAIAPI(fallbackModel, prompt, 1000);
+        // Use optimized maxTokens for fallback too
+        const charLimit = contentLimits?.chars || 500;
+        const fallbackMaxTokens = charLimit <= 200 ? 800 : charLimit <= 500 ? 1200 : Math.min(2000, charLimit * 2);
+        aiResponse = await callAIAPI(fallbackModel, prompt, fallbackMaxTokens, systemPrompt);
+        if (process.env.DEBUG_INSIGHTS === 'true') {
+          console.log(`[Enhanced Insights] Fallback (Claude) response received, length: ${aiResponse?.length || 0} chars`);
+        }
       } catch (claudeError) {
         // If both fail, return a basic response
-        console.error('Both Grok and Claude failed:', claudeError.message);
+        console.error('❌ Both Grok and Claude failed:', claudeError.message.substring(0, 150));
         insightData = {
           insight: 'Unable to generate AI insights at this time. Please check your API configuration.',
           xFeeds: [],
@@ -4643,7 +5048,40 @@ Format your response as JSON with:
         // Try to extract JSON from response
         const jsonMatch = aiResponse.match(/\{[\s\S]*\}/);
         if (jsonMatch) {
+          if (process.env.DEBUG_INSIGHTS === 'true') {
+            console.log(`[Enhanced Insights] Parsing JSON response, length: ${jsonMatch[0].length} chars`);
+          }
           insightData = JSON.parse(jsonMatch[0]);
+          if (process.env.DEBUG_INSIGHTS === 'true') {
+            console.log(`[Enhanced Insights] Parsed successfully, insight length: ${insightData?.insight?.length || 0} chars`);
+            
+            // Check if links are present in insight
+            if (insightData.insight) {
+              const linkMatches = insightData.insight.match(/\[([^\]]+)\|(view|url):([^\]]+)\]/g);
+              console.log(`[Enhanced Insights] Found ${linkMatches?.length || 0} links in insight text`);
+            }
+            
+            // Log visualization data BEFORE coordination
+            console.log(`[Enhanced Insights] BEFORE coordination - Chart:`, insightData.chart ? JSON.stringify(insightData.chart).substring(0, 100) : 'Missing');
+            console.log(`[Enhanced Insights] BEFORE coordination - Image:`, insightData.image ? JSON.stringify(insightData.image).substring(0, 200) : 'Missing');
+            
+            // Always log image issues for debugging
+            if (insightData.image) {
+              const imageStr = JSON.stringify(insightData.image);
+              if (!insightData.image.url || typeof insightData.image.url !== 'string' || insightData.image.url.trim() === '') {
+                console.warn(`[Enhanced Insights] ⚠️ Image object missing/invalid URL:`, imageStr.substring(0, 200));
+              }
+            }
+          }
+          
+          // COORDINATION LAYER: Validate and coordinate multi-modal components
+          insightData = await coordinateMultiModalResponse(insightData, tileMetric, tileValue, tileSize, contentLimits);
+          
+          // Log after coordination (only if DEBUG_INSIGHTS is enabled)
+          if (process.env.DEBUG_INSIGHTS === 'true') {
+            console.log(`[Enhanced Insights] AFTER coordination - Chart:`, insightData.chart ? `Present (type: ${insightData.chart.type}, points: ${insightData.chart.data?.length || 0})` : 'Missing');
+            console.log(`[Enhanced Insights] AFTER coordination - Image:`, insightData.image ? `Present (url: ${insightData.image.url?.substring(0, 50)}...)` : 'Missing');
+          }
           
           // Normalize xFeeds format - handle both array of strings and array of objects
           if (insightData.xFeeds && Array.isArray(insightData.xFeeds)) {
@@ -4726,7 +5164,9 @@ Format your response as JSON with:
     });
   } catch (error) {
     console.error('Enhanced insights error:', error);
-    res.status(500).json({ success: false, error: error.message });
+    console.error('Error stack:', error.stack);
+    console.error('Request body:', JSON.stringify(req.body, null, 2));
+    res.status(500).json({ success: false, error: error.message, details: error.stack });
   }
 });
 
@@ -5044,7 +5484,7 @@ app.get('/', (req, res) => {
 app.post('/api/agent/chat', async (req, res) => {
   try {
     const { message, systemPrompt, context, history } = req.body;
-    const requestedModel = req.headers['x-ai-model'] || 'grok:grok-3';
+    const requestedModel = req.headers['x-ai-model'] || process.env.DEFAULT_AI_MODEL || 'grok:grok-3';
     
     if (!message) {
       return res.json({ success: false, error: 'Message is required' });
@@ -5193,27 +5633,35 @@ app.post('/api/agent/chat', async (req, res) => {
           throw new Error('GROK_API_KEY not configured');
         }
 
-        const response = await fetch('https://api.x.ai/v1/chat/completions', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${apiKey}`
-          },
-          body: JSON.stringify({
-            model: actualModel || 'grok-2',
-            messages: messages,
-            max_tokens: 2000,
-            temperature: 0.7
-          })
-        });
+        // Apply rate limiting
+        await grokRateLimiter.waitIfNeeded();
+        
+        // Retry with exponential backoff on rate limit errors
+        aiResponse = await retryWithBackoff(async () => {
+          const response = await fetch('https://api.x.ai/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${apiKey}`
+            },
+            body: JSON.stringify({
+              model: actualModel || 'grok-2',
+              messages: messages,
+              max_tokens: 2000,
+              temperature: 0.7
+            })
+          });
 
-        if (!response.ok) {
-          const errorText = await response.text();
-          throw new Error(`Grok API error: ${response.status} - ${errorText}`);
-        }
+          if (!response.ok) {
+            const errorText = await response.text();
+            const error = new Error(`Grok API error: ${response.status} - ${errorText}`);
+            error.status = response.status;
+            throw error;
+          }
 
-        const data = await response.json();
-        aiResponse = data.choices?.[0]?.message?.content || 'Sorry, I could not generate a response.';
+          const data = await response.json();
+          return data.choices?.[0]?.message?.content || 'Sorry, I could not generate a response.';
+        }, 3, 2000); // Max 3 retries, starting with 2s delay
       } else if (provider === 'openai') {
         const apiKey = process.env.OPENAI_API_KEY;
         if (!apiKey) {

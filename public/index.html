@@ -1655,6 +1655,11 @@
                         <span>Real-Time Data</span>
                     </button>
                     <div style="flex: 1;"></div>
+                    <label class="toggle-switch" title="Bloomberg Dense Mode" style="display: flex; align-items: center; gap: 6px; cursor: pointer; opacity: 0.7; font-size: 11px; color: var(--text-secondary);">
+                        <input type="checkbox" id="bloombergDenseToggle" style="display: none;">
+                        <span class="toggle-slider"></span>
+                        <span>Dense</span>
+                    </label>
                     <button class="icon-button" id="refreshInsightsHeaderBtn" title="Refresh AI Insights" style="padding: 4px; opacity: 0.6; transition: opacity 0.2s;">
                         <i data-lucide="refresh-cw" id="refreshInsightsIcon" style="width: 16px; height: 16px; transition: transform 0.3s;"></i>
                     </button>
@@ -1710,9 +1715,9 @@
                 </div>
 
                 <!-- Dashboard Tab Content (New Bloomberg Terminal Style) -->
-                <div class="insights-tab-content active" id="insightsTab-dashboard">
+                <div class="insights-tab-content active" id="insightsTab-dashboard" style="display: flex; flex-direction: column; height: calc(100vh - 200px);">
                     <!-- Dashboard Container -->
-                    <div class="section" style="margin-bottom: var(--spacing-md);">
+                    <div class="section" style="flex: 1; display: flex; flex-direction: column; margin-bottom: var(--spacing-md); min-height: 0;">
                         <!-- 4x4 Grid Container -->
                         <div id="dashboardGrid" class="dashboard-grid" style="
                             display: grid;
@@ -1722,7 +1727,8 @@
                             width: 100%;
                             max-width: 1400px;
                             margin: 0 auto;
-                            height: fit-content;
+                            flex: 1;
+                            min-height: 600px;
                         ">
                             <!-- Tiles will be dynamically inserted here -->
                             <div style="grid-column: 1 / -1; display: flex; align-items: center; justify-content: center; color: var(--text-secondary); padding: var(--spacing-xl);">

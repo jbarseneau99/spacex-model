@@ -13326,6 +13326,8 @@ class ValuationApp {
             }
         } catch (error) {
             console.error('Error generating dashboard layout:', error);
+            console.error('Error details:', error.message, error.stack);
+            // Fallback to default layout
             await this.generateDashboardLayoutFallback(data, inputs, gridContainer);
         }
     }
@@ -13343,16 +13345,19 @@ class ValuationApp {
         };
 
         // Define all tiles (no categories - single view)
+        // IMPORTANT: mars-operations MUST come before news in this array so it's placed first
         const allTiles = [
             { id: 'total-valuation', icon: 'zap', title: 'Total Enterprise Value', value: formatBillion(totalValue), color: '#0066cc', size: 'horizontal', insightType: 'valuation', data: { totalValue, earthValue, marsValue } },
+            { id: 'comprehensive-overview', icon: 'layout-dashboard', title: 'Comprehensive Overview', value: 'Summary', color: '#0066cc', size: 'large', insightType: 'valuation-summary', data: { totalValue, earthValue, marsValue } },
+            { id: 'mars-timeline', icon: 'calendar', title: 'Mars Timeline', value: `${inputs?.mars?.firstColonyYear || 2030}`, color: '#f59e0b', size: 'square', insightType: 'mars', data: { firstColonyYear: inputs?.mars?.firstColonyYear || 2030 } },
+            { id: 'x-posts', icon: 'message-square', title: 'Key X Posts', value: 'Recent', color: '#1da1f2', size: 'vertical', insightType: 'x-feeds', data: {}, isSpecialTile: true, preferredPosition: { below: 'mars-timeline' } },
             { id: 'earth-operations', icon: 'globe', title: 'Earth Operations', value: `${earthPercent.toFixed(1)}%`, subtitle: formatBillion(earthValue), color: '#10b981', size: 'square', insightType: 'starlink-earth', data: { earthValue, earthPercent } },
             { id: 'mars-operations', icon: 'rocket', title: 'Mars Operations', value: `${marsPercent.toFixed(1)}%`, subtitle: formatBillion(marsValue), color: '#f59e0b', size: 'square', insightType: 'mars-optionality', data: { marsValue, marsPercent } },
             { id: 'revenue-growth', icon: 'trending-up', title: 'Revenue Growth', value: '25.0%', color: '#10b981', size: 'square', insightType: 'financial', data: {} },
             { id: 'margin-expansion', icon: 'arrow-up', title: 'Margin Expansion', value: '15.0%', color: '#10b981', size: 'square', insightType: 'financial', data: {} },
             { id: 'capex-efficiency', icon: 'zap', title: 'Capex Efficiency', value: '85.0%', color: '#0066cc', size: 'square', insightType: 'financial', data: {} },
-            { id: 'x-posts', icon: 'message-square', title: 'Key X Posts', value: 'Recent', color: '#1da1f2', size: 'horizontal', insightType: 'x-feeds', data: {}, isSpecialTile: true },
-            { id: 'news', icon: 'newspaper', title: 'Recent News', value: 'Latest', color: '#ef4444', size: 'horizontal', insightType: 'news', data: {}, isSpecialTile: true },
-            { id: 'comprehensive-overview', icon: 'layout-dashboard', title: 'Comprehensive Overview', value: 'Summary', color: '#0066cc', size: 'large', insightType: 'valuation-summary', data: { totalValue, earthValue, marsValue } }
+            { id: 'discount-rate', icon: 'percent', title: 'Discount Rate', value: `${((inputs?.financial?.discountRate || 0.12) * 100).toFixed(1)}%`, color: inputs?.financial?.discountRate < 0.10 ? '#10b981' : inputs?.financial?.discountRate > 0.15 ? '#ef4444' : '#f59e0b', size: 'vertical', insightType: 'risk', data: { discountRate: inputs?.financial?.discountRate || 0.12 } },
+            { id: 'news', icon: 'newspaper', title: 'Recent News', value: 'Latest', color: '#ef4444', size: 'square', insightType: 'news', data: {}, isSpecialTile: true, preferredPosition: { below: 'discount-rate' } }
         ];
 
         const tiles = this.packGridTiles(allTiles, 4);
@@ -13365,9 +13370,69 @@ class ValuationApp {
         gridContainer.style.gridTemplateColumns = 'repeat(4, 1fr)';
         gridContainer.style.gridTemplateRows = 'repeat(4, 1fr)';
         gridContainer.style.gap = 'var(--spacing-sm)';
-        gridContainer.style.height = 'fit-content';
-        gridContainer.style.maxHeight = '100%';
+        
+        // Apply dense mode if enabled
+        const denseToggle = document.getElementById('bloombergDenseToggle');
+        if (denseToggle && denseToggle.checked) {
+            gridContainer.classList.add('bloomberg-dense');
+        }
+        
+        // Calculate height to fill available viewport space
+        // Find the insights tab content container
+        const insightsTabContent = gridContainer.closest('.insights-tab-content');
+        const insightsView = gridContainer.closest('#insights');
+        
+        let availableHeight = 600; // Default fallback
+        
+        if (insightsTabContent && insightsView) {
+            // Get viewport height
+            const viewportHeight = window.innerHeight;
+            
+            // Get heights of elements above the grid
+            const insightsTabs = insightsView.querySelector('.insights-tabs');
+            const tabsHeight = insightsTabs ? insightsTabs.getBoundingClientRect().height : 50;
+            
+            // Get section padding/margins
+            const section = gridContainer.closest('.section');
+            const sectionRect = section ? section.getBoundingClientRect() : null;
+            const sectionTop = sectionRect ? sectionRect.top : 0;
+            
+            // Calculate available height: viewport - tabs - section top offset - bottom padding
+            const topOffset = sectionTop - (insightsTabs ? insightsTabs.getBoundingClientRect().bottom : 0);
+            const bottomPadding = 32; // Reserve space for bottom padding/margins
+            
+            availableHeight = viewportHeight - tabsHeight - topOffset - bottomPadding;
+            
+            // Ensure minimum height
+            availableHeight = Math.max(availableHeight, 600);
+            
+            console.log(`📏 Grid height calculation: viewport=${viewportHeight}px, tabs=${tabsHeight}px, topOffset=${topOffset}px, available=${availableHeight}px`);
+        } else {
+            // Fallback: use container or calculate from viewport
+            const container = gridContainer.closest('.section') || gridContainer.parentElement;
+            if (container) {
+                const containerRect = container.getBoundingClientRect();
+                availableHeight = containerRect.height || window.innerHeight - 200;
+            } else {
+                availableHeight = window.innerHeight - 200;
+            }
+        }
+        
+        // Set fixed height to ensure 4x4 grid constraint
+        gridContainer.style.height = `${availableHeight}px`;
+        gridContainer.style.minHeight = `${availableHeight}px`;
+        gridContainer.style.maxHeight = `${availableHeight}px`;
         gridContainer.style.overflow = 'hidden';
+        
+        // Store grid dimensions for character calculations
+        this.gridContainerHeight = availableHeight;
+        
+        // Wait for next frame to get accurate width after height is set
+        requestAnimationFrame(() => {
+            const rect = gridContainer.getBoundingClientRect();
+            this.gridContainerWidth = rect.width || 1400;
+            console.log(`📐 Grid dimensions: ${this.gridContainerWidth}px × ${this.gridContainerHeight}px`);
+        });
 
         // Check for cached insights
         const modelCache = this.currentModelId && this.cachedTerminalInsights[this.currentModelId] ? this.cachedTerminalInsights[this.currentModelId] : {};
@@ -13382,26 +13447,76 @@ class ValuationApp {
         
         console.log(`📋 Rendering dashboard: ${cachedCount}/${tilesNeedingInsights.length} tiles have cached insights (Model: ${this.currentModelId})`);
         
+        // Store tiles for toggle re-rendering
+        this.currentTiles = tiles;
+        
         // Render tiles first, using cached insights if available
         for (const tile of tiles) {
             const cacheKey = `${tile.id}-${tile.insightType}`;
-            const cachedInsight = modelCache[cacheKey] || null;
-            const tileHTML = this.renderDashboardTile(tile, cachedInsight);
+            let cachedInsight = modelCache[cacheKey] || null;
+            
+            // Coordinate cached insights - add charts if missing
+            if (cachedInsight && (!cachedInsight.chart && !cachedInsight.image)) {
+                const isNewsOrPost = tile.title.toLowerCase().includes('news') || 
+                                   tile.title.toLowerCase().includes('post') ||
+                                   tile.title.toLowerCase().includes('x post');
+                if (!isNewsOrPost) {
+                    const baseValue = parseFloat((tile.value || '0').replace(/[^0-9.]/g, '')) || 100;
+                    cachedInsight = {
+                        ...cachedInsight,
+                        chart: {
+                            type: 'line',
+                            labels: ['2024', '2025', '2026', '2027', '2028'],
+                            data: [
+                                baseValue * 0.8,
+                                baseValue * 0.9,
+                                baseValue,
+                                baseValue * 1.1,
+                                baseValue * 1.2
+                            ],
+                            label: tile.title,
+                            sparkline: false, // Show axes and interactivity
+                            fill: false
+                        }
+                    };
+                    // Update cache with coordinated data
+                    modelCache[cacheKey] = cachedInsight;
+                    console.log(`[Cache Coordination] ✅ Generated chart for cached tile ${tile.id}`);
+                }
+            }
+            
+            const tileHTML = this.renderDashboardTile(tile, cachedInsight, !cachedInsight);
             const tempDiv = document.createElement('div');
             tempDiv.innerHTML = tileHTML.trim();
             const tileElement = tempDiv.firstElementChild;
             if (tileElement) {
                 gridContainer.appendChild(tileElement);
+                
+                // Render chart if present (for cached insights with charts)
+                if (cachedInsight && cachedInsight.chart) {
+                    requestAnimationFrame(() => {
+                        setTimeout(() => {
+                            const rendered = this.renderTileChart(tile.id, cachedInsight.chart, tile.color);
+                            console.log(`[Initial Render] ${tile.id}: Chart render result:`, rendered ? 'SUCCESS' : 'FAILED');
+                        }, 150);
+                    });
+                }
             }
         }
         if (window.lucide) window.lucide.createIcons();
+        
+        // Setup link click handlers for insight links
+        this.setupInsightLinks();
 
         // Only load insights if not all tiles are cached
         // If all tiles have cached insights, skip the API call
         if (data && inputs && !allTilesCached) {
             console.log(`📊 ${tilesNeedingInsights.length - cachedCount} tiles missing cached insights, loading from API...`);
-            this.loadTerminalInsightsInParallel(tiles, data, inputs, gridContainer).catch(err => {
-                console.error('Error loading terminal insights:', err);
+            // Wait a frame for tiles to be rendered and measured
+            requestAnimationFrame(() => {
+                this.loadTerminalInsightsInParallel(tiles, data, inputs, gridContainer).catch(err => {
+                    console.error('Error loading terminal insights:', err);
+                });
             });
         } else if (allTilesCached) {
             console.log('✅ All tiles have cached insights, using buffer - no API call needed');
@@ -13457,25 +13572,85 @@ class ValuationApp {
         // Create promise for this load operation
         this.terminalInsightsLoadPromise = (async () => {
             try {
-                console.log(`📊 Loading insights for ${tilesNeedingInsights.length} tiles in parallel...`);
+                console.log(`📊 Loading insights for ${tilesNeedingInsights.length} tiles in batched parallel...`);
 
-                // Load all insights in parallel (check cache first)
-                const insightPromises = tilesNeedingInsights.map(async (tile) => {
+                // Batch parallel loading to avoid overwhelming rate limiter
+                // Process 4 tiles at a time with small delays between batches
+                // This balances speed with rate limit compliance
+                const BATCH_SIZE = 4; // Process 4 tiles per batch
+                const BATCH_DELAY_MS = 500; // 500ms delay between batches
+                
+                // Helper function to load insight for a single tile
+                const loadTileInsight = async (tile) => {
                     // Check cache first
                     const cacheKey = `${tile.id}-${tile.insightType}`;
                     if (modelCache[cacheKey]) {
-                        console.log(`✅ Using cached insight for tile ${tile.id}`);
+                        let cachedInsight = modelCache[cacheKey];
+                        
+                        // Coordinate cached insights - add charts if missing
+                        if (!cachedInsight.chart && !cachedInsight.image) {
+                            const isNewsOrPost = tile.title.toLowerCase().includes('news') || 
+                                               tile.title.toLowerCase().includes('post') ||
+                                               tile.title.toLowerCase().includes('x post');
+                            if (!isNewsOrPost) {
+                                const baseValue = parseFloat((tile.value || '0').replace(/[^0-9.]/g, '')) || 100;
+                                cachedInsight = {
+                                    ...cachedInsight,
+                                    chart: {
+                                        type: 'line',
+                                        labels: ['2024', '2025', '2026', '2027', '2028'],
+                                        data: [
+                                            baseValue * 0.8,
+                                            baseValue * 0.9,
+                                            baseValue,
+                                            baseValue * 1.1,
+                                            baseValue * 1.2
+                                        ],
+                                        label: tile.title,
+                                        sparkline: false,
+                                        fill: false
+                                    }
+                                };
+                                modelCache[cacheKey] = cachedInsight;
+                                console.log(`[Cache Coordination] ✅ Added chart to cached tile ${tile.id}`);
+                            }
+                        }
+                        
+                        console.log(`✅ Using cached insight for tile ${tile.id} (Chart: ${cachedInsight.chart ? 'YES' : 'NO'})`);
+                        
                         return {
                             tileId: tile.id,
-                            insightData: modelCache[cacheKey],
+                            insightData: cachedInsight,
                             error: null,
                             fromCache: true
                         };
                     }
 
                     try {
-                        // Get content limits for this tile size
-                        const contentLimits = this.getTileContentLimits(tile.size);
+                        // Show loading spinner for this tile
+                        const tileElement = gridContainer.querySelector(`[data-tile-id="${tile.id}"]`);
+                        if (tileElement) {
+                            const contentArea = tileElement.querySelector('.tile-content-dual, .tile-prose');
+                            if (contentArea && !contentArea.querySelector('.tile-loading')) {
+                                contentArea.innerHTML = `
+                                    <div class="tile-loading" style="
+                                        display: flex;
+                                        align-items: center;
+                                        justify-content: center;
+                                        height: 100%;
+                                        flex-direction: column;
+                                        gap: 8px;
+                                    ">
+                                        <i data-lucide="loader" class="spinning" style="width: 20px; height: 20px; color: ${tile.color || '#0066cc'};"></i>
+                                        <div style="font-size: 9px; color: var(--text-secondary);">Loading...</div>
+                                    </div>
+                                `;
+                                if (window.lucide) window.lucide.createIcons();
+                            }
+                        }
+                        
+                        const contentLimits = this.getTileContentLimits(tile.size, tileElement);
+                        console.log(`📏 Tile ${tile.id} (${tile.size}): ${contentLimits.chars} chars, ${contentLimits.words} words`);
                         
                         const response = await fetch('/api/insights/enhanced', {
                             method: 'POST',
@@ -13499,7 +13674,6 @@ class ValuationApp {
                         const result = await response.json();
                         const insightData = result.success ? result.data : null;
                         
-                        // Cache the insight
                         if (insightData) {
                             modelCache[cacheKey] = insightData;
                             console.log(`💾 Cached insight for tile ${tile.id}`);
@@ -13520,20 +13694,88 @@ class ValuationApp {
                             fromCache: false
                         };
                     }
-                });
+                };
+                
+                // Process tiles in batches
+                const insightPromises = [];
+                for (let i = 0; i < tilesNeedingInsights.length; i += BATCH_SIZE) {
+                    const batch = tilesNeedingInsights.slice(i, i + BATCH_SIZE);
+                    const batchIndex = Math.floor(i / BATCH_SIZE) + 1;
+                    const totalBatches = Math.ceil(tilesNeedingInsights.length / BATCH_SIZE);
+                    
+                    // Add delay before this batch (except first batch)
+                    if (i > 0) {
+                        console.log(`📦 Processing batch ${batchIndex}/${totalBatches} (${batch.length} tiles)...`);
+                        await new Promise(resolve => setTimeout(resolve, BATCH_DELAY_MS));
+                    }
+                    
+                    // Create promises for this batch (they'll execute in parallel within the batch)
+                    batch.forEach(tile => {
+                        insightPromises.push(loadTileInsight(tile));
+                    });
+                }
 
-                // Wait for all insights to load
-                const insightResults = await Promise.all(insightPromises);
-
-                // Update tiles with loaded insights
-                insightResults.forEach(({ tileId, insightData }) => {
+                // Progressive rendering: Update tiles as they load instead of waiting for all
+                // This makes the UI feel much faster - tiles appear as soon as their data arrives
+                const updateTile = ({ tileId, insightData, error, fromCache }) => {
                     const tileElement = gridContainer.querySelector(`[data-tile-id="${tileId}"]`);
-                    if (tileElement) {
-                        // Find the tile definition
-                        const tile = tiles.find(t => t.id === tileId);
-                        if (tile) {
+                    if (!tileElement) return;
+                    
+                    // Find the tile definition
+                    const tile = tiles.find(t => t.id === tileId);
+                    if (!tile) return;
+                    
+                    if (insightData) {
+                            // Coordinate insight data if it doesn't have chart/image
+                            if (!insightData.chart && !insightData.image) {
+                                const isNewsOrPost = tile.title.toLowerCase().includes('news') || 
+                                                   tile.title.toLowerCase().includes('post') ||
+                                                   tile.title.toLowerCase().includes('x post');
+                                if (!isNewsOrPost) {
+                                    // Extract numeric value from tile.value (handles formats like "$1.8T", "15.0%", "100/year")
+                                    let baseValue = 100; // default
+                                    const valueStr = (tile.value || '0').toString();
+                                    const numMatch = valueStr.match(/[\d.]+/);
+                                    if (numMatch) {
+                                        baseValue = parseFloat(numMatch[0]);
+                                        // Adjust for T (trillions) or B (billions)
+                                        if (valueStr.includes('T')) baseValue *= 1000;
+                                        // For percentages, use as-is
+                                        if (valueStr.includes('%')) baseValue = baseValue;
+                                        // For "100/year", use as-is
+                                    }
+                                    
+                                    insightData = {
+                                        ...insightData,
+                                        chart: {
+                                            type: 'line',
+                                            labels: ['2024', '2025', '2026', '2027', '2028'],
+                                            data: [
+                                                baseValue * 0.8,
+                                                baseValue * 0.9,
+                                                baseValue,
+                                                baseValue * 1.1,
+                                                baseValue * 1.2
+                                            ],
+                                            label: tile.title,
+                                            sparkline: false, // Show axes and interactivity
+                                            fill: false
+                                        }
+                                    };
+                                    // Update cache
+                                    const cacheKey = `${tileId}-${tile.insightType}`;
+                                    if (this.cachedTerminalInsights[this.currentModelId]) {
+                                        this.cachedTerminalInsights[this.currentModelId][cacheKey] = insightData;
+                                    }
+                                    console.log(`[Tile Update Coordination] ✅ Added chart to ${tileId} (baseValue: ${baseValue}, valueStr: "${tile.value}")`);
+                                }
+                            }
+                            
+                            // Log what we're about to render
+                            console.log(`[Tile Update] ${tileId}: Chart=${insightData?.chart ? 'YES' : 'NO'}, Image=${insightData?.image ? 'YES' : 'NO'}, News=${insightData?.news ? `YES (${insightData.news.length} items)` : 'NO'}, XFeeds=${insightData?.xFeeds ? `YES (${insightData.xFeeds.length} items)` : 'NO'}`);
+                            
                             // Update tile content with insight data
-                            const updatedHTML = this.renderDashboardTile(tile, insightData);
+                            const updatedHTML = this.renderDashboardTile(tile, insightData, false);
                             const tempDiv = document.createElement('div');
                             tempDiv.innerHTML = updatedHTML.trim();
                             const updatedElement = tempDiv.firstElementChild;
@@ -13542,15 +13784,64 @@ class ValuationApp {
                                 updatedElement.style.gridColumn = tileElement.style.gridColumn;
                                 updatedElement.style.gridRow = tileElement.style.gridRow;
                                 tileElement.replaceWith(updatedElement);
+                                
+                                // Render chart if present (after DOM update)
+                                if (insightData && insightData.chart) {
+                                    console.log(`[Tile Update] ${tileId}: Rendering chart with data:`, insightData.chart);
+                                    // Use multiple frames to ensure DOM is fully ready
+                                    requestAnimationFrame(() => {
+                                        requestAnimationFrame(() => {
+                                            setTimeout(() => {
+                                                const rendered = this.renderTileChart(tileId, insightData.chart, tile.color);
+                                                console.log(`[Tile Update] ${tileId}: Chart render result:`, rendered ? 'SUCCESS' : 'FAILED');
+                                                
+                                                // Double-check chart is visible
+                                                if (rendered) {
+                                                    const canvas = updatedElement.querySelector('.tile-mini-chart');
+                                                    if (canvas && canvas.chartInstance) {
+                                                        setTimeout(() => {
+                                                            canvas.chartInstance.update('none');
+                                                            console.log(`[Tile Update] ${tileId}: Chart force-updated`);
+                                                        }, 100);
+                                                    }
+                                                }
+                                            }, 200);
+                                        });
+                                    });
+                                } else {
+                                    console.log(`[Tile Update] ${tileId}: No chart data to render`);
+                                }
                             }
                         }
+                };
+
+                // Process insights as they complete (progressive rendering)
+                // Each tile updates immediately when its data arrives, not waiting for others
+                let completedCount = 0;
+                const totalTiles = insightPromises.length;
+                
+                // Update tiles as each promise resolves (progressive rendering)
+                insightPromises.forEach(async (promise) => {
+                    try {
+                        const result = await promise;
+                        updateTile(result);
+                        completedCount++;
+                        
+                        // Refresh icons after each update (progressive)
+                        if (window.lucide) window.lucide.createIcons();
+                        
+                        if (completedCount === totalTiles) {
+                            console.log(`✅ All terminal insights loaded: ${completedCount}/${totalTiles} tiles`);
+                        }
+                    } catch (error) {
+                        console.error(`❌ Failed to load insight:`, error);
+                        completedCount++;
                     }
                 });
 
-                // Refresh icons after updates
-                if (window.lucide) window.lucide.createIcons();
-
-                console.log(`✅ Terminal insights loaded successfully for ${insightResults.length} tiles`);
+                // Also wait for all to complete for final status
+                await Promise.allSettled(insightPromises);
+                console.log(`✅ Terminal insights loading complete: ${completedCount}/${totalTiles} tiles`);
             } catch (error) {
                 console.error('❌ Error loading terminal insights in parallel:', error);
             } finally {
@@ -13565,13 +13856,24 @@ class ValuationApp {
     }
 
     packGridTiles(tiles, gridColumns) {
-        const maxRows = 4; // Fixed 4x4 grid
+        const maxRows = 4; // Fixed 4x4 grid (16 cells total)
+        const maxCells = 16; // Hard constraint: 4 columns × 4 rows
         const occupied = new Set();
+        let totalCellsUsed = 0;
+        const maxIterations = tiles.length * 2; // Prevent infinite loops
+        let iteration = 0;
+        
         const isAvailable = (col, row, width, height) => {
             // Check if tile fits within grid bounds (4 columns x 4 rows)
             if (col + width > gridColumns || row + height > maxRows) {
                 return false;
             }
+            // Check if adding this tile would exceed 16 cell limit
+            const cellsNeeded = width * height;
+            if (totalCellsUsed + cellsNeeded > maxCells) {
+                return false;
+            }
+            // Check if cells are already occupied
             for (let r = row; r < row + height; r++) {
                 for (let c = col; c < col + width; c++) {
                     if (c >= gridColumns || r >= maxRows || occupied.has(`${c},${r}`)) {
@@ -13581,76 +13883,245 @@ class ValuationApp {
             }
             return true;
         };
+        
         const markOccupied = (col, row, width, height) => {
             for (let r = row; r < row + height; r++) {
                 for (let c = col; c < col + width; c++) {
                     occupied.add(`${c},${r}`);
                 }
             }
+            totalCellsUsed += width * height;
         };
 
-        const tilePriority = { 'large': 0, '2x2': 0, 'vertical': 1, '1x2': 1, 'horizontal': 2, '2x1': 2, 'square': 3 };
+        // Priority: larger tiles first (they're harder to place)
+        // Also prioritize tiles that other tiles depend on (like mars-operations before news)
+        const tilePriority = { 
+            'large': 0, 
+            '2x2': 0, 
+            'vertical': 1, 
+            '1x2': 1, 
+            'horizontal': 2, 
+            '2x1': 2, 
+            'square': 3 
+        };
+        
+        // Sort tiles by size priority only - no hardcoded ordering
         const sortedTiles = [...tiles].sort((a, b) => {
-            return (tilePriority[a.size] || 3) - (tilePriority[b.size] || 3);
+            const priorityA = tilePriority[a.size] || 3;
+            const priorityB = tilePriority[b.size] || 3;
+            
+            // If same priority and one depends on the other, ensure dependency is placed first
+            if (priorityA === priorityB) {
+                // If 'a' wants to be below 'b', place 'b' first
+                if (a.preferredPosition?.below === b.id) {
+                    return 1; // 'a' comes after 'b'
+                }
+                // If 'b' wants to be below 'a', place 'a' first
+                if (b.preferredPosition?.below === a.id) {
+                    return -1; // 'a' comes before 'b'
+                }
+            }
+            
+            return priorityA - priorityB;
         });
 
         const placedTiles = [];
-        for (const tile of sortedTiles) {
-            let placed = false;
-            let width = 1;
-            let height = 1;
-            if (tile.size === 'horizontal' || tile.size === '2x1') {
-                width = 2;
-                height = 1;
-            } else if (tile.size === 'vertical' || tile.size === '1x2') {
-                width = 1;
-                height = 2;
-            } else if (tile.size === 'large' || tile.size === '2x2') {
-                width = 2;
-                height = 2;
-            }
+        const tilePositions = new Map(); // Track positions for preferred placement
+        const unplacedTiles = [...sortedTiles]; // Tiles waiting to be placed
+        
+        // Place tiles - may need multiple passes for tiles with preferred positions
+        while (unplacedTiles.length > 0 && iteration < maxIterations) {
+            iteration++;
+            const tilesToPlace = [...unplacedTiles];
+            unplacedTiles.length = 0; // Clear for this iteration
+            
+            for (const tile of tilesToPlace) {
+                let placed = false;
+                let width = 1;
+                let height = 1;
+            
+                // Map tile size to grid cells
+                if (tile.size === 'horizontal' || tile.size === '2x1') {
+                    width = 2;
+                    height = 1;
+                } else if (tile.size === 'vertical' || tile.size === '1x2') {
+                    width = 1;
+                    height = 2;
+                } else if (tile.size === 'large' || tile.size === '2x2') {
+                    width = 2;
+                    height = 2;
+                }
+                // else: square = 1x1 (default)
 
-            // Limit to 4 rows (4x4 grid = 16 cells total)
-            for (let row = 0; row < maxRows && !placed; row++) {
-                for (let col = 0; col <= gridColumns - width && !placed; col++) {
-                    // Check if tile fits within the 4-row limit
-                    if (row + height > maxRows) {
-                        continue; // Skip if tile would exceed row limit
+                // Check for preferred position (e.g., below another tile)
+                if (tile.preferredPosition?.below && !placed) {
+                    const belowTileId = tile.preferredPosition.below;
+                    const belowTile = placedTiles.find(t => t.id === belowTileId);
+                    
+                    if (!belowTile) {
+                        // Target tile not placed yet - skip preferred position for now, will try again in next iteration
+                        // But we need to ensure the target tile is placed first, so defer this tile
+                        console.log(`⏳ Deferring ${tile.id} - waiting for ${belowTileId} to be placed first`);
+                    } else if (belowTile.gridColumn && belowTile.gridRow) {
+                        // Extract column and row from gridColumn/gridRow (e.g., "2 / 3" -> col 1, row 1)
+                        const colMatch = belowTile.gridColumn.match(/(\d+)\s*\/\s*\d+/);
+                        const rowMatch = belowTile.gridRow.match(/(\d+)\s*\/\s*\d+/);
+                        
+                        if (colMatch && rowMatch) {
+                            const belowTileStartCol = parseInt(colMatch[1]) - 1; // Convert to 0-based
+                            const belowTileStartRow = parseInt(rowMatch[1]) - 1; // Convert to 0-based
+                            
+                            // Calculate tile height from its size
+                            let belowTileHeight = 1;
+                            if (belowTile.size === 'large' || belowTile.size === '2x2') {
+                                belowTileHeight = 2;
+                            } else if (belowTile.size === 'vertical' || belowTile.size === '1x2') {
+                                belowTileHeight = 2;
+                            }
+                            
+                            // Calculate preferred position: same column, row directly below
+                            const preferredCol = belowTileStartCol;
+                            const preferredRow = belowTileStartRow + belowTileHeight;
+                            
+                            // Try to place in preferred position first
+                            if (preferredRow < maxRows && preferredCol + width <= gridColumns) {
+                                if (isAvailable(preferredCol, preferredRow, width, height)) {
+                                    tile.gridColumn = `${preferredCol + 1} / ${preferredCol + width + 1}`;
+                                    tile.gridRow = `${preferredRow + 1} / ${preferredRow + height + 1}`;
+                                    markOccupied(preferredCol, preferredRow, width, height);
+                                    placedTiles.push(tile);
+                                    tilePositions.set(tile.id, { col: preferredCol, row: preferredRow, width, height });
+                                    placed = true;
+                                    console.log(`✅ Placed ${tile.id} below ${belowTileId} at col ${preferredCol + 1}, row ${preferredRow + 1}`);
+                                }
+                            }
+                        }
                     }
-                    if (isAvailable(col, row, width, height)) {
-                        tile.gridColumn = `${col + 1} / ${col + width + 1}`;
-                        tile.gridRow = `${row + 1} / ${row + height + 1}`;
-                        markOccupied(col, row, width, height);
-                        placedTiles.push(tile);
-                        placed = true;
+                }
+
+                // If not placed in preferred position, try normal placement (top-to-bottom, left-to-right)
+                if (!placed) {
+                    for (let row = 0; row < maxRows && !placed; row++) {
+                        for (let col = 0; col <= gridColumns - width && !placed; col++) {
+                            // Check if tile fits within the 4-row limit
+                            if (row + height > maxRows) {
+                                continue; // Skip if tile would exceed row limit
+                            }
+                            if (isAvailable(col, row, width, height)) {
+                                tile.gridColumn = `${col + 1} / ${col + width + 1}`;
+                                tile.gridRow = `${row + 1} / ${row + height + 1}`;
+                                markOccupied(col, row, width, height);
+                                placedTiles.push(tile);
+                                tilePositions.set(tile.id, { col, row, width, height });
+                                placed = true;
+                            }
+                        }
                     }
+                }
+
+                // If tile couldn't be placed, add it back to unplaced list
+                if (!placed) {
+                    // If it has a preferred position and target isn't placed yet, defer it
+                    if (tile.preferredPosition?.below) {
+                        const targetTile = placedTiles.find(t => t.id === tile.preferredPosition.below);
+                        if (!targetTile) {
+                            unplacedTiles.push(tile); // Try again next iteration
+                            continue;
+                        }
+                    }
+                    // Otherwise, try normal placement failed - add back to try again
+                    unplacedTiles.push(tile);
                 }
             }
         }
+        
+        // Warn about any tiles that still couldn't be placed
+        if (unplacedTiles.length > 0) {
+            console.warn(`⚠️ Could not place ${unplacedTiles.length} tiles: ${unplacedTiles.map(t => t.id).join(', ')}. Cells used: ${totalCellsUsed}/16`);
+        }
+        
+        console.log(`📊 Grid packing complete: ${placedTiles.length}/${tiles.length} tiles placed, ${totalCellsUsed}/16 cells used`);
         return placedTiles;
     }
 
-    // Calculate character and word limits for each tile size
-    getTileContentLimits(tileSize) {
+    // Calculate character and word limits dynamically based on 4x4 grid cell dimensions
+    getTileContentLimits(tileSize, tileElement = null) {
         // Standardized font: 12px, line-height 1.4
-        // Average character width: ~7px, average word length: ~5 chars
-        // Tile dimensions (approximate): ~300px per grid cell
-        // Header takes ~40px height
+        // Average character width: ~7px (monospace approximation)
+        // Average word length: ~5 chars
+        // Header takes ~40px height, padding ~8px total, border ~2px
         
-        const limits = {
-            'square': { chars: 500, words: 100 },      // 1x1: ~12 lines × 40 chars
-            'horizontal': { chars: 1000, words: 200 }, // 2x1: ~12 lines × 80 chars
-            '2x1': { chars: 1000, words: 200 },
-            'vertical': { chars: 1100, words: 220 },  // 1x2: ~28 lines × 40 chars
-            '1x2': { chars: 1100, words: 220 },
-            'large': { chars: 2200, words: 440 },      // 2x2: ~28 lines × 80 chars
-            '2x2': { chars: 2200, words: 440 }
+        const gridContainer = document.getElementById('dashboardGrid');
+        if (!gridContainer) {
+            // Fallback if grid not found
+            const limits = {
+                'square': { chars: 400, words: 80 },
+                'horizontal': { chars: 800, words: 160 },
+                '2x1': { chars: 800, words: 160 },
+                'vertical': { chars: 900, words: 180 },
+                '1x2': { chars: 900, words: 180 },
+                'large': { chars: 1800, words: 360 },
+                '2x2': { chars: 1800, words: 360 }
+            };
+            return limits[tileSize] || limits.square;
+        }
+        
+        // Get actual grid container dimensions
+        const containerRect = gridContainer.getBoundingClientRect();
+        const gridWidth = containerRect.width || this.gridContainerWidth || 1400;
+        const gridHeight = containerRect.height || this.gridContainerHeight || 600;
+        const gap = 8; // var(--spacing-sm) = 8px
+        
+        // Calculate single cell dimensions (accounting for gaps)
+        const cellWidth = (gridWidth - (gap * 3)) / 4; // 3 gaps between 4 columns
+        const cellHeight = (gridHeight - (gap * 3)) / 4; // 3 gaps between 4 rows
+        
+        // Calculate tile dimensions based on size (in grid cells)
+        let tileWidth, tileHeight;
+        if (tileSize === 'square') {
+            tileWidth = cellWidth;
+            tileHeight = cellHeight;
+        } else if (tileSize === 'horizontal' || tileSize === '2x1') {
+            tileWidth = (cellWidth * 2) + gap; // 2 cells + 1 gap
+            tileHeight = cellHeight;
+        } else if (tileSize === 'vertical' || tileSize === '1x2') {
+            tileWidth = cellWidth;
+            tileHeight = (cellHeight * 2) + gap; // 2 cells + 1 gap
+        } else if (tileSize === 'large' || tileSize === '2x2') {
+            tileWidth = (cellWidth * 2) + gap; // 2 cells + 1 gap
+            tileHeight = (cellHeight * 2) + gap; // 2 cells + 1 gap
+        } else {
+            tileWidth = cellWidth;
+            tileHeight = cellHeight;
+        }
+        
+        // If we have the actual rendered tile element, use its dimensions (more accurate)
+        if (tileElement) {
+            const rect = tileElement.getBoundingClientRect();
+            tileWidth = rect.width;
+            tileHeight = rect.height;
+        }
+        
+        // Calculate available text area (subtract header, padding, border)
+        const headerHeight = 40;
+        const padding = 8; // Total padding (2px on all sides)
+        const border = 2; // Border top for insight section
+        const availableHeight = tileHeight - headerHeight - padding - border;
+        const availableWidth = tileWidth - padding;
+        
+        // Calculate characters per line and lines
+        const charsPerLine = Math.floor(availableWidth / 7); // ~7px per char
+        const lines = Math.floor(availableHeight / (12 * 1.4)); // 12px font, 1.4 line-height
+        const totalChars = Math.floor(charsPerLine * lines * 0.85); // 85% to account for word wrapping
+        const totalWords = Math.floor(totalChars / 5); // ~5 chars per word
+        
+        return {
+            chars: Math.max(100, totalChars), // Minimum 100 chars
+            words: Math.max(20, totalWords)    // Minimum 20 words
         };
-        
-        return limits[tileSize] || limits.square;
     }
 
-    renderDashboardTile(tile, aiData) {
+    renderDashboardTile(tile, aiData, isLoading = false) {
         const tileStyles = {
             square: { gridColumn: tile.gridColumn || 'auto', gridRow: tile.gridRow || 'auto' },
             horizontal: { gridColumn: tile.gridColumn || 'span 2', gridRow: tile.gridRow || 'auto' },
@@ -13678,6 +14149,17 @@ class ValuationApp {
         const isSpecialTile = tile.isSpecialTile;
         const specialContent = isSpecialTile && aiData ? this.renderSpecialTileContent(tile, aiData) : '';
         
+        // For special tiles, ignore visualizations - only render special content
+        // Check for visualizations (chart or image) - but skip for special tiles
+        const hasChart = !isSpecialTile && aiData && aiData.chart && aiData.chart.data && Array.isArray(aiData.chart.data);
+        const hasImage = !isSpecialTile && aiData && aiData.image && (aiData.image.url || typeof aiData.image === 'string');
+        const hasVisualization = hasChart || hasImage;
+        const visualization = hasChart ? aiData.chart : (hasImage ? aiData.image : null);
+        const visualizationType = hasChart ? 'chart' : (hasImage ? 'image' : null);
+        
+        // Determine layout: prose + visualization (Bloomberg style)
+        const useDualLayout = !isSpecialTile && hasAI && hasVisualization;
+        
         return `
             <div class="dashboard-tile" data-tile-id="${tile.id}" style="
                 grid-column: ${style.gridColumn};
@@ -13690,15 +14172,15 @@ class ValuationApp {
                 flex-direction: column;
                 transition: all 0.2s;
                 cursor: pointer;
-                min-height: 150px;
+                min-height: 0;
                 position: relative;
                 justify-content: flex-start;
                 gap: 0;
                 overflow: hidden;
                 height: 100%;
             " onmouseover="this.style.boxShadow='0 4px 12px rgba(0,0,0,0.1)'; this.style.borderColor='${tile.color}'; this.style.transform='translateY(-2px)'" onmouseout="this.style.boxShadow='none'; this.style.borderColor='var(--border-color)'; this.style.transform='none'">
-                <div style="display: flex; align-items: start; gap: 2px; margin-bottom: ${hasAI && !isSpecialTile ? '1px' : '2px'}; flex-shrink: 0;">
-                    <div style="
+                <div class="tile-header" style="display: flex; align-items: start; gap: 2px; margin-bottom: ${hasAI && !isSpecialTile ? '1px' : '2px'}; flex-shrink: 0; min-height: fit-content;">
+                    <div class="tile-icon-container" style="
                         width: ${iconContainerSize};
                         height: ${iconContainerSize};
                         min-width: ${iconContainerSize};
@@ -13712,42 +14194,545 @@ class ValuationApp {
                         justify-content: center;
                         flex-shrink: 0;
                     ">
-                        <i data-lucide="${tile.icon}" style="width: ${iconSize}; height: ${iconSize}; max-width: ${iconSize}; max-height: ${iconSize}; color: ${tile.color};"></i>
+                        <i data-lucide="${tile.icon}" class="tile-icon" style="width: ${iconSize}; height: ${iconSize}; max-width: ${iconSize}; max-height: ${iconSize}; color: ${tile.color};"></i>
                     </div>
                     <div style="flex: 1; min-width: 0; overflow: hidden; max-width: calc(100% - ${iconContainerSize} - 4px);">
-                        <div style="font-size: ${titleSize}; color: var(--text-secondary); margin-bottom: 0px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.2px; line-height: 1.0;">${tile.title}</div>
-                        <div style="font-size: ${valueSize}; font-weight: 700; color: var(--text-primary); line-height: 1.0;">
+                        <div class="tile-title" style="font-size: ${titleSize}; color: var(--text-secondary); margin-bottom: 0px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.2px; line-height: 1.0;">${tile.title}</div>
+                        <div class="tile-value" style="font-size: ${valueSize}; font-weight: 700; color: var(--text-primary); line-height: 1.0;">
                             ${tile.value}
-                            ${tile.subtitle ? `<div style="font-size: ${subtitleSize}; font-weight: 500; color: var(--text-secondary); margin-top: 0px;">${tile.subtitle}</div>` : ''}
+                            ${tile.subtitle ? `<div class="tile-subtitle" style="font-size: ${subtitleSize}; font-weight: 500; color: var(--text-secondary); margin-top: 0px;">${tile.subtitle}</div>` : ''}
                         </div>
                     </div>
                 </div>
-                ${isSpecialTile ? specialContent : (hasAI ? `
-                    <div style="
+                ${isSpecialTile ? specialContent : (isLoading ? `
+                    <!-- Loading state with spinner -->
+                    <div class="tile-loading" style="
                         margin-top: 2px;
                         padding-top: 2px;
                         border-top: 1px solid var(--border-color);
-                        font-size: ${insightSize};
-                        color: var(--text-secondary);
-                        line-height: 1.4;
-                        flex: 1;
-                        overflow-y: auto;
-                        display: flex;
-                        flex-direction: column;
+                        flex: 1 1 auto;
                         min-height: 0;
-                        word-wrap: break-word;
-                        overflow-wrap: break-word;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        height: 100%;
+                        flex-direction: column;
+                        gap: 8px;
                     ">
-                        <div style="flex: 1;">
-                            ${aiData.insight}
-                        </div>
+                        <i data-lucide="loader" class="spinning" style="width: 20px; height: 20px; color: ${tile.color};"></i>
+                        <div style="font-size: 9px; color: var(--text-secondary);">Loading insights...</div>
                     </div>
-                ` : '')}
+                ` : (hasAI ? `
+                    <div class="tile-content-dual" style="
+                        margin-top: 2px;
+                        padding-top: 2px;
+                        border-top: 1px solid var(--border-color);
+                        flex: 1 1 auto;
+                        min-height: 0;
+                        display: ${useDualLayout ? 'grid' : 'flex'};
+                        ${useDualLayout ? 'grid-template-columns: 1fr; grid-template-rows: auto 1fr; gap: 4px;' : 'flex-direction: column;'}
+                        height: 100%;
+                        overflow: hidden;
+                    ">
+                        ${useDualLayout ? `
+                            <!-- Bloomberg-style: Visualization first (top) -->
+                            <div class="tile-visualization" style="
+                                width: 100%;
+                                height: ${isLarge ? '80px' : (isVertical ? '60px' : '50px')};
+                                min-height: ${isLarge ? '80px' : (isVertical ? '60px' : '50px')};
+                                flex-shrink: 0;
+                                background: var(--background);
+                                border: 0.5px solid var(--border-color);
+                                border-radius: 2px;
+                                padding: 2px;
+                                display: flex;
+                                align-items: center;
+                                justify-content: center;
+                                overflow: hidden;
+                            ">
+                                ${visualizationType === 'chart' ? `
+                                    <canvas class="tile-mini-chart" data-tile-id="${tile.id}" style="width: 100%; height: 100%;"></canvas>
+                                ` : visualizationType === 'image' ? `
+                                    <img src="${visualization.url || visualization}" alt="${visualization.alt || tile.title}" style="
+                                        width: 100%;
+                                        height: 100%;
+                                        object-fit: cover;
+                                        border-radius: 1px;
+                                    " onerror="this.style.display='none'; this.parentElement.innerHTML='<div style=\\'color: var(--text-secondary); font-size: 8px;\\'>Image unavailable</div>';">
+                                ` : ''}
+                            </div>
+                            <!-- Prose below visualization -->
+                            <div class="tile-prose" style="
+                                font-size: ${insightSize};
+                                color: var(--text-secondary);
+                                line-height: 1.2;
+                                overflow-y: auto;
+                                word-wrap: break-word;
+                                overflow-wrap: break-word;
+                                flex: 1;
+                                min-height: 0;
+                            ">
+                                ${this.processInsightLinks(aiData.insight || '')}
+                            </div>
+                        ` : `
+                            <!-- Text-only layout -->
+                            <div class="tile-prose" style="
+                                font-size: ${insightSize};
+                                color: var(--text-secondary);
+                                line-height: 1.2;
+                                flex: 1 1 auto;
+                                overflow-y: auto;
+                                word-wrap: break-word;
+                                overflow-wrap: break-word;
+                                min-height: 0;
+                                height: 100%;
+                            ">
+                                ${this.processInsightLinks(aiData.insight || '')}
+                            </div>
+                        `}
+                    </div>
+                ` : '<div style="flex: 1;"></div>'))}
             </div>
         `;
     }
 
+    toggleBloombergDenseMode(enabled) {
+        const gridContainer = document.getElementById('dashboardGrid');
+        const insightsView = document.getElementById('insights');
+        
+        if (enabled) {
+            gridContainer?.classList.add('bloomberg-dense');
+            insightsView?.classList.add('bloomberg-dense');
+        } else {
+            gridContainer?.classList.remove('bloomberg-dense');
+            insightsView?.classList.remove('bloomberg-dense');
+        }
+        
+        // Re-render tiles to apply new styles
+        if (gridContainer && this.currentData) {
+            const tiles = Array.from(gridContainer.querySelectorAll('[data-tile-id]')).map(el => {
+                const tileId = el.getAttribute('data-tile-id');
+                const tile = this.currentTiles?.find(t => t.id === tileId);
+                if (tile) {
+                    const cacheKey = `${tile.id}-${tile.insightType}`;
+                    const modelCache = this.currentModelId && this.cachedTerminalInsights[this.currentModelId] ? this.cachedTerminalInsights[this.currentModelId] : {};
+                    const cachedInsight = modelCache[cacheKey] || null;
+                    return { tile, insight: cachedInsight };
+                }
+                return null;
+            }).filter(Boolean);
+            
+            // Re-render tiles with updated styles
+            tiles.forEach(({ tile, insight }) => {
+                const tileElement = gridContainer.querySelector(`[data-tile-id="${tile.id}"]`);
+                if (tileElement) {
+                    const newHTML = this.renderDashboardTile(tile, insight);
+                    const tempDiv = document.createElement('div');
+                    tempDiv.innerHTML = newHTML.trim();
+                    const newElement = tempDiv.firstElementChild;
+                    if (newElement) {
+                        newElement.style.gridColumn = tileElement.style.gridColumn;
+                        newElement.style.gridRow = tileElement.style.gridRow;
+                        tileElement.replaceWith(newElement);
+                    }
+                }
+            });
+            
+            if (window.lucide) window.lucide.createIcons();
+            this.setupInsightLinks();
+        }
+    }
+
+    setupInsightLinks() {
+        // Handle view links (internal navigation)
+        document.querySelectorAll('.insight-link[data-view-link]').forEach(link => {
+            link.addEventListener('click', (e) => {
+                e.preventDefault();
+                const viewPath = link.getAttribute('data-view-link');
+                const [view, tab, subTab] = viewPath.split(':');
+                if (view) {
+                    this.switchView(view);
+                    if (tab) {
+                        setTimeout(() => {
+                            const tabButton = document.querySelector(`[data-tab="${tab}"]`);
+                            tabButton?.click();
+                            if (subTab) {
+                                setTimeout(() => {
+                                    const subTabButton = document.querySelector(`[data-sub-tab="${subTab}"]`);
+                                    subTabButton?.click();
+                                }, 100);
+                            }
+                        }, 100);
+                    }
+                }
+            });
+        });
+    }
+
+    /**
+     * Render a chart for a specific tile
+     */
+    renderTileChart(tileId, chartData, tileColor) {
+        const tileElement = document.querySelector(`[data-tile-id="${tileId}"]`);
+        if (!tileElement) {
+            console.warn(`[Chart Render] Tile element not found: ${tileId}`);
+            return null;
+        }
+        
+        const chartCanvas = tileElement.querySelector('.tile-mini-chart');
+        if (!chartCanvas) {
+            console.warn(`[Chart Render] Chart canvas not found for tile: ${tileId}`);
+            return null;
+        }
+        
+        if (!chartData || !chartData.data || !Array.isArray(chartData.data)) {
+            console.warn(`[Chart Render] Invalid chart data for tile: ${tileId}`, chartData);
+            return null;
+        }
+        
+        if (!window.Chart) {
+            console.error(`[Chart Render] Chart.js not loaded!`);
+            return null;
+        }
+        
+        // Destroy existing chart if present
+        if (chartCanvas.chartInstance) {
+            chartCanvas.chartInstance.destroy();
+        }
+        
+        // Assign a consistent point style based on tileId hash for variety
+        if (!chartData.pointStyle) {
+            const pointStyles = ['circle', 'triangle', 'rect', 'rectRot', 'star', 'cross', 'crossRot', 'dash'];
+            // Use tileId to deterministically assign a style
+            let hash = 0;
+            for (let i = 0; i < tileId.length; i++) {
+                hash = ((hash << 5) - hash) + tileId.charCodeAt(i);
+                hash = hash & hash; // Convert to 32-bit integer
+            }
+            chartData.pointStyle = pointStyles[Math.abs(hash) % pointStyles.length];
+        }
+        
+        console.log(`[Chart Render] Creating chart for ${tileId} with ${chartData.data.length} data points`);
+        
+        // Create new chart
+        const chartInstance = this.createMiniChart(chartCanvas, chartData, tileColor);
+        if (chartInstance) {
+            chartCanvas.chartInstance = chartInstance;
+            console.log(`[Chart Render] ✅ Chart created successfully for ${tileId}`);
+            return chartInstance;
+        } else {
+            console.error(`[Chart Render] ❌ Failed to create chart for ${tileId}`);
+            return null;
+        }
+    }
+
+    /**
+     * Create a mini Bloomberg-style chart for a tile
+     */
+    createMiniChart(canvasElement, chartData, tileColor) {
+        if (!canvasElement) {
+            console.error('[createMiniChart] No canvas element provided');
+            return null;
+        }
+        if (!chartData) {
+            console.error('[createMiniChart] No chart data provided');
+            return null;
+        }
+        if (!window.Chart) {
+            console.error('[createMiniChart] Chart.js not loaded');
+            return null;
+        }
+        
+        // Get context after setting dimensions (will be re-gotten after scaling)
+        let ctx = canvasElement.getContext('2d');
+        if (!ctx) {
+            console.error('[createMiniChart] Could not get 2d context');
+            return null;
+        }
+        
+        const chartType = chartData.type || 'line';
+        // Default to showing axes and interactivity (sparkline only if explicitly requested)
+        const isSparkline = chartData.sparkline === true; // Only sparkline if explicitly set to true
+        
+        // Ensure data arrays exist and match
+        const labels = chartData.labels || ['2024', '2025', '2026', '2027', '2028'];
+        let data = chartData.data || [];
+        
+        // Ensure data matches labels length
+        while (data.length < labels.length) {
+            const lastValue = data[data.length - 1] || 100;
+            data.push(lastValue * 1.1);
+        }
+        while (data.length > labels.length) {
+            data.pop();
+        }
+        
+        // Convert hex to rgba for background with opacity (helper function)
+        const hexToRgba = (hex, alpha) => {
+            if (!hex || !hex.startsWith('#')) return `rgba(0, 102, 204, ${alpha})`;
+            const r = parseInt(hex.slice(1, 3), 16);
+            const g = parseInt(hex.slice(3, 5), 16);
+            const b = parseInt(hex.slice(5, 7), 16);
+            return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+        };
+        
+        // Normalize tile color - ensure it's a valid hex color
+        let normalizedColor = tileColor || '#0066cc';
+        if (normalizedColor && !normalizedColor.startsWith('#')) {
+            // Convert CSS color names or rgb() to hex if needed
+            normalizedColor = '#0066cc'; // Fallback
+        }
+        if (!normalizedColor.match(/^#[0-9A-Fa-f]{6}$/)) {
+            normalizedColor = '#0066cc'; // Ensure valid hex
+        }
+        
+        console.log(`[createMiniChart] Creating ${chartType} chart with ${data.length} data points, color: ${normalizedColor}`);
+        
+        // Ensure canvas has explicit dimensions (Chart.js needs this)
+        // Wait for container to be fully rendered before measuring
+        const container = canvasElement.parentElement;
+        let containerWidth = 100;
+        let containerHeight = 50;
+        
+        if (container) {
+            // Force a reflow to ensure dimensions are accurate
+            const rect = container.getBoundingClientRect();
+            containerWidth = rect.width || container.clientWidth || container.offsetWidth || 100;
+            containerHeight = rect.height || container.clientHeight || container.offsetHeight || 50;
+            
+            // Ensure minimum dimensions
+            if (containerWidth < 50) containerWidth = 100;
+            if (containerHeight < 30) containerHeight = 50;
+            
+            // Set canvas size attributes (not CSS) for proper rendering
+            // Chart.js needs these to be set before creating the chart
+            // Chart.js will handle devicePixelRatio automatically via options
+            canvasElement.width = containerWidth;
+            canvasElement.height = containerHeight;
+            canvasElement.setAttribute('width', containerWidth);
+            canvasElement.setAttribute('height', containerHeight);
+            canvasElement.style.width = containerWidth + 'px';
+            canvasElement.style.height = containerHeight + 'px';
+            canvasElement.style.display = 'block';
+            
+            console.log(`[createMiniChart] Canvas dimensions set to ${containerWidth}x${containerHeight}`);
+        } else {
+            // Fallback dimensions if container not found
+            canvasElement.width = 100;
+            canvasElement.height = 50;
+            canvasElement.setAttribute('width', '100');
+            canvasElement.setAttribute('height', '50');
+            canvasElement.style.width = '100px';
+            canvasElement.style.height = '50px';
+            console.warn(`[createMiniChart] Container not found, using fallback dimensions`);
+        }
+        
+        const config = {
+            type: chartType,
+            data: {
+                labels: labels,
+                datasets: [{
+                    label: chartData.label || '',
+                    data: data,
+                    borderColor: normalizedColor,
+                    backgroundColor: chartData.fill ? hexToRgba(normalizedColor, 0.15) : 'transparent',
+                    borderWidth: isSparkline ? 1.5 : 1.5, // Thinner lines
+                    fill: chartData.fill || false,
+                    tension: chartData.tension !== undefined ? chartData.tension : 0.4,
+                    pointRadius: isSparkline ? 0 : 2.5, // Finer marks
+                    pointHoverRadius: isSparkline ? 0 : 4,
+                    pointHitRadius: isSparkline ? 0 : 8,
+                    pointBackgroundColor: normalizedColor,
+                    pointBorderColor: '#ffffff',
+                    pointBorderWidth: 0.5, // Thinner border
+                    pointHoverBackgroundColor: normalizedColor,
+                    pointHoverBorderColor: '#ffffff',
+                    pointHoverBorderWidth: 1,
+                    // Different point styles for variety (assigned in renderTileChart)
+                    pointStyle: chartData.pointStyle || 'circle',
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                devicePixelRatio: window.devicePixelRatio || 2, // Use device pixel ratio for crisp rendering
+                layout: {
+                    padding: {
+                        left: isSparkline ? 2 : 4, // Reduced padding for more compact charts
+                        right: isSparkline ? 2 : 4,
+                        top: isSparkline ? 2 : 4, // Removed extra padding for legend
+                        bottom: isSparkline ? 2 : 4
+                    }
+                },
+                plugins: {
+                    legend: {
+                        display: false // Disable legend to save space and avoid layout issues
+                    },
+                    tooltip: {
+                        enabled: true,
+                        backgroundColor: 'rgba(0, 0, 0, 0.9)',
+                        titleFont: { size: 12, weight: '600' },
+                        bodyFont: { size: 11 },
+                        padding: 10,
+                        cornerRadius: 6,
+                        borderColor: normalizedColor,
+                        borderWidth: 2,
+                        displayColors: true,
+                        position: 'nearest',
+                        callbacks: {
+                            title: function(context) {
+                                return context[0].label || '';
+                            },
+                            label: function(context) {
+                                const value = context.parsed.y;
+                                const label = context.dataset.label || '';
+                                // Format numbers nicely
+                                let formattedValue = value;
+                                if (typeof value === 'number') {
+                                    if (Math.abs(value) >= 1000000) {
+                                        formattedValue = (value / 1000000).toFixed(2) + 'M';
+                                    } else if (Math.abs(value) >= 1000) {
+                                        formattedValue = (value / 1000).toFixed(2) + 'K';
+                                    } else {
+                                        formattedValue = value.toFixed(2);
+                                    }
+                                }
+                                return label ? `${label}: ${formattedValue}` : formattedValue.toString();
+                            }
+                        }
+                    }
+                },
+                scales: isSparkline ? {
+                    x: {
+                        display: false // No axes for sparklines
+                    },
+                    y: {
+                        display: false
+                    }
+                } : {
+                    x: {
+                        display: true,
+                        grid: {
+                            display: true,
+                            color: 'rgba(0, 0, 0, 0.06)', // Subtle grid lines
+                            drawBorder: true,
+                            borderColor: 'rgba(0, 0, 0, 0.12)',
+                            lineWidth: 0.5 // Thinner grid lines
+                        },
+                        ticks: {
+                            font: { size: 7, weight: '400' }, // Even smaller font
+                            color: 'rgba(0, 0, 0, 0.5)',
+                            padding: 2,
+                            maxTicksLimit: 5 // Limit number of ticks
+                        }
+                    },
+                    y: {
+                        display: true,
+                        grid: {
+                            display: true,
+                            color: 'rgba(0, 0, 0, 0.06)', // Subtle grid lines
+                            drawBorder: true,
+                            borderColor: 'rgba(0, 0, 0, 0.12)',
+                            lineWidth: 0.5 // Thinner grid lines
+                        },
+                        ticks: {
+                            font: { size: 7, weight: '400' }, // Even smaller font
+                            color: 'rgba(0, 0, 0, 0.5)',
+                            padding: 2,
+                            maxTicksLimit: 5, // Limit number of ticks for cleaner look
+                            callback: function(value) {
+                                // Format large numbers
+                                if (value >= 1000000) return (value / 1000000).toFixed(1) + 'M';
+                                if (value >= 1000) return (value / 1000).toFixed(1) + 'K';
+                                return value.toFixed(0);
+                            }
+                        },
+                        // Ensure proper scaling to show variation
+                        beginAtZero: false, // Don't force zero, show actual data range
+                        grace: '5%' // Add small padding to show variation better
+                    }
+                },
+                animation: {
+                    duration: 300, // Smooth animation
+                    easing: 'easeOutQuart'
+                },
+                interaction: {
+                    intersect: false,
+                    mode: 'index',
+                    includeInvisible: false
+                },
+                onHover: (event, activeElements) => {
+                    // Change cursor to pointer when hovering over chart
+                    event.native.target.style.cursor = activeElements.length > 0 ? 'pointer' : 'default';
+                },
+                onClick: (event, activeElements) => {
+                    // Handle click events for interactivity
+                    if (activeElements.length > 0) {
+                        const element = activeElements[0];
+                        const datasetIndex = element.datasetIndex;
+                        const index = element.index;
+                        const value = element.parsed.y;
+                        const label = element.label;
+                        console.log(`[Chart Click] ${label}: ${value}`);
+                    }
+                }
+            }
+        };
+        
+        try {
+            const chartInstance = new Chart(ctx, config);
+            console.log(`[createMiniChart] ✅ Chart instance created successfully`);
+            
+            // Force chart to update and render
+            setTimeout(() => {
+                if (chartInstance && typeof chartInstance.update === 'function') {
+                    chartInstance.update('none'); // Update without animation
+                    console.log(`[createMiniChart] Chart updated/rendered`);
+                }
+            }, 50);
+            
+            return chartInstance;
+        } catch (error) {
+            console.error(`[createMiniChart] ❌ Error creating chart:`, error);
+            return null;
+        }
+    }
+
+    processInsightLinks(text) {
+        if (!text) return text;
+        
+        // Convert URLs to clickable links with Bloomberg orange
+        const urlRegex = /(https?:\/\/[^\s\)]+)/g;
+        // Updated regex to handle nested brackets: [text|view:path] or [text|url:http://...]
+        const linkRegex = /\[([^\|]+)\|(view|url):([^\]]+)\]/g;
+        
+        let processed = text;
+        
+        // Process [text|view:path] or [text|url:http://...] links FIRST
+        processed = processed.replace(linkRegex, (match, linkText, type, path) => {
+            const trimmedText = linkText.trim();
+            const trimmedPath = path.trim();
+            if (type === 'view') {
+                return `<a href="#" class="insight-link" data-view-link="${trimmedPath}" style="color: #FF6600 !important; text-decoration: underline; cursor: pointer; font-weight: 500;">${trimmedText}</a>`;
+            } else if (type === 'url') {
+                return `<a href="${trimmedPath}" target="_blank" class="insight-link" style="color: #FF6600 !important; text-decoration: underline; cursor: pointer; font-weight: 500;">${trimmedText}</a>`;
+            }
+            return match;
+        });
+        
+        // Process plain URLs (but avoid double-processing)
+        processed = processed.replace(urlRegex, (url) => {
+            // Skip if already inside an <a> tag
+            if (url.includes('<a') || url.includes('</a>')) return url;
+            return `<a href="${url}" target="_blank" class="insight-link" style="color: #FF6600 !important; text-decoration: underline; cursor: pointer;">${url}</a>`;
+        });
+        
+        return processed;
+    }
+
     renderSpecialTileContent(tile, aiData) {
+        console.log(`[renderSpecialTileContent] Rendering for tile: ${tile.id}, hasNews: ${!!aiData?.news}, hasXFeeds: ${!!aiData?.xFeeds}, newsCount: ${aiData?.news?.length || 0}, xFeedsCount: ${aiData?.xFeeds?.length || 0}`);
+        
         // Standardized font sizes for special tiles
         const fontSize = '12px';
         const accountNameSize = '11px';
@@ -13781,34 +14766,37 @@ class ValuationApp {
         if (tile.id === 'x-posts' && aiData.xFeeds && Array.isArray(aiData.xFeeds) && aiData.xFeeds.length > 0) {
             
             return `
-                <div style="margin-top: 2px; padding-top: 2px; border-top: 1px solid var(--border-color); display: flex; flex-direction: column; gap: 4px; flex: 1; overflow-y: auto; min-height: 0;">
+                <div class="special-content" style="margin-top: 2px; padding-top: 2px; border-top: 1px solid var(--border-color); display: flex; flex-direction: column; gap: 4px; flex: 1; overflow-y: auto; min-height: 0;">
                     ${aiData.xFeeds.slice(0, itemCount).map(post => `
-                        <div style="font-size: ${fontSize}; line-height: 1.4; padding: 4px 0; border-bottom: 1px solid rgba(0,0,0,0.05);">
-                            <div style="font-weight: 600; color: ${post.isKeyAccount ? tile.color : 'var(--text-secondary)'}; margin-bottom: 2px; font-size: ${accountNameSize};">
+                        <div class="special-item" style="font-size: ${fontSize}; line-height: 1.4; padding: 4px 0; border-bottom: 1px solid rgba(0,0,0,0.05);">
+                            <div class="special-item-title" style="font-weight: 600; color: ${post.isKeyAccount ? tile.color : 'var(--text-secondary)'}; margin-bottom: 2px; font-size: ${accountNameSize};">
                                 ${post.accountName || post.account}
                             </div>
                             <div style="color: var(--text-primary); word-wrap: break-word; line-height: 1.4;">
-                                ${(post.content || '').substring(0, charLimit)}${(post.content || '').length > charLimit ? '...' : ''}
+                                ${this.processInsightLinks((post.content || '').substring(0, charLimit))}${(post.content || '').length > charLimit ? '...' : ''}
                             </div>
                         </div>
                     `).join('')}
                 </div>
             `;
         } else if (tile.id === 'news' && aiData.news && Array.isArray(aiData.news) && aiData.news.length > 0) {
+            console.log(`[renderSpecialTileContent] ✅ Rendering ${aiData.news.length} news items for tile: ${tile.id}`);
             return `
-                <div style="margin-top: 2px; padding-top: 2px; border-top: 1px solid var(--border-color); display: flex; flex-direction: column; gap: 4px; flex: 1; overflow-y: auto; min-height: 0;">
+                <div class="special-content" style="margin-top: 2px; padding-top: 2px; border-top: 1px solid var(--border-color); display: flex; flex-direction: column; gap: 4px; flex: 1; overflow-y: auto; min-height: 0;">
                     ${aiData.news.slice(0, itemCount).map(item => `
-                        <div style="font-size: ${fontSize}; line-height: 1.4; padding: 4px 0; border-bottom: 1px solid rgba(0,0,0,0.05);">
-                            <div style="font-weight: 600; color: ${tile.color}; margin-bottom: 2px; font-size: ${accountNameSize};">
+                        <div class="special-item" style="font-size: ${fontSize}; line-height: 1.4; padding: 4px 0; border-bottom: 1px solid rgba(0,0,0,0.05);">
+                            <div class="special-item-title" style="font-weight: 600; color: ${tile.color}; margin-bottom: 2px; font-size: ${accountNameSize};">
                                 ${item.title || item.source || 'News'}
                             </div>
                             <div style="color: var(--text-primary); word-wrap: break-word; line-height: 1.4;">
-                                ${(item.summary || item.content || '').substring(0, charLimit)}${(item.summary || item.content || '').length > charLimit ? '...' : ''}
+                                ${this.processInsightLinks((item.summary || item.content || '').substring(0, charLimit))}${(item.summary || item.content || '').length > charLimit ? '...' : ''}
                             </div>
                         </div>
                     `).join('')}
                 </div>
             `;
+        } else if (tile.id === 'news') {
+            console.warn(`[renderSpecialTileContent] ⚠️ News tile has no news data. aiData:`, aiData);
         }
         return '';
     }

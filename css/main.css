@@ -1136,8 +1136,169 @@ body {
     grid-template-columns: repeat(4, 1fr);
     grid-template-rows: repeat(4, 1fr);
     gap: var(--spacing-sm);
-    height: 100%;
     width: 100%;
+    /* Height will be set dynamically via JavaScript */
+}
+
+/* Bloomberg Dense Mode Toggle */
+.toggle-switch {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    user-select: none;
+    padding: 4px 8px;
+    border-radius: 4px;
+    transition: background 0.2s;
+}
+
+.toggle-switch:hover {
+    background: var(--background);
+}
+
+.toggle-slider {
+    position: relative;
+    width: 36px;
+    height: 18px;
+    background: var(--border-color);
+    border-radius: 9px;
+    transition: background 0.2s;
+}
+
+.toggle-slider::before {
+    content: '';
+    position: absolute;
+    width: 14px;
+    height: 14px;
+    background: white;
+    border-radius: 50%;
+    top: 2px;
+    left: 2px;
+    transition: transform 0.2s;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.2);
+}
+
+#bloombergDenseToggle:checked + .toggle-slider {
+    background: #FF6600; /* Bloomberg orange */
+}
+
+#bloombergDenseToggle:checked + .toggle-slider::before {
+    transform: translateX(18px);
+}
+
+/* Bloomberg Dense Mode Styles */
+.bloomberg-dense .dashboard-grid {
+    gap: 4px !important;
+}
+
+.bloomberg-dense .dashboard-tile {
+    padding: 4px !important;
+    border-width: 0.5px !important;
+    border-radius: 2px !important;
+    min-height: 0 !important;
+}
+
+.dashboard-tile {
+    min-height: 0 !important;
+}
+
+.bloomberg-dense .dashboard-tile:hover {
+    transform: none !important;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.1) !important;
+}
+
+/* Dense typography */
+.bloomberg-dense .dashboard-tile .tile-title {
+    font-size: 6px !important;
+    line-height: 1.1 !important;
+    letter-spacing: 0.1px !important;
+    margin-bottom: 1px !important;
+}
+
+.bloomberg-dense .dashboard-tile .tile-value {
+    font-size: 11px !important;
+    line-height: 1.1 !important;
+    font-family: 'Courier New', 'Monaco', monospace !important;
+}
+
+.bloomberg-dense .dashboard-tile .tile-subtitle {
+    font-size: 8px !important;
+    line-height: 1.1 !important;
+    margin-top: 0px !important;
+}
+
+.bloomberg-dense .dashboard-tile .tile-insight {
+    font-size: 10px !important;
+    line-height: 1.2 !important;
+    margin-top: 1px !important;
+    padding-top: 1px !important;
+    flex: 1 !important;
+    min-height: 0 !important;
+    max-height: 100% !important;
+}
+
+.dashboard-tile .tile-insight {
+    flex: 1 !important;
+    min-height: 0 !important;
+    max-height: 100% !important;
+    overflow-y: auto !important;
+}
+
+.bloomberg-dense .dashboard-tile .tile-icon-container {
+    width: 12px !important;
+    height: 12px !important;
+    min-width: 12px !important;
+    min-height: 12px !important;
+    max-width: 12px !important;
+    max-height: 12px !important;
+}
+
+.bloomberg-dense .dashboard-tile .tile-icon {
+    width: 8px !important;
+    height: 8px !important;
+    max-width: 8px !important;
+    max-height: 8px !important;
+}
+
+.bloomberg-dense .dashboard-tile .tile-header {
+    margin-bottom: 1px !important;
+    gap: 2px !important;
+}
+
+/* Dense special tiles */
+.bloomberg-dense .dashboard-tile .special-content {
+    font-size: 10px !important;
+    line-height: 1.2 !important;
+    gap: 2px !important;
+    padding-top: 1px !important;
+    margin-top: 1px !important;
+}
+
+.bloomberg-dense .dashboard-tile .special-item {
+    padding: 2px 0 !important;
+    font-size: 10px !important;
+    line-height: 1.2 !important;
+}
+
+.bloomberg-dense .dashboard-tile .special-item-title {
+    font-size: 9px !important;
+    margin-bottom: 1px !important;
+}
+
+/* Links in insights - Bloomberg orange (works in both modes) */
+.dashboard-tile .insight-link,
+.dashboard-tile a.insight-link {
+    color: #FF6600 !important;
+    text-decoration: underline !important;
+    cursor: pointer !important;
+    transition: color 0.2s;
+    font-weight: 500 !important;
+}
+
+.dashboard-tile .insight-link:hover,
+.dashboard-tile a.insight-link:hover {
+    color: #FF8533 !important;
+    text-decoration: underline !important;
 }
 
 .dashboard-tile {
@@ -1149,8 +1310,25 @@ body {
     flex-direction: column;
     transition: all 0.2s;
     cursor: pointer;
-    min-height: 150px;
+    min-height: 0;
     overflow: hidden;
+    height: 100%;
+    width: 100%;
+}
+
+.dashboard-tile .tile-insight {
+    flex: 1 1 auto !important;
+    min-height: 0 !important;
+    overflow-y: auto !important;
+    height: 100% !important;
+    max-height: 100% !important;
+}
+
+.dashboard-tile .tile-insight > div {
+    height: 100% !important;
+    min-height: 100% !important;
+    overflow-y: auto !important;
+    display: block !important;
 }
 
 .dashboard-tile * {
@@ -1161,6 +1339,85 @@ body {
     max-width: 100%;
     height: auto;
     object-fit: contain;
+}
+
+/* Bloomberg-style dual-modality tiles (prose + chart/image) */
+.tile-content-dual {
+    display: grid;
+    grid-template-columns: 1fr;
+    grid-template-rows: auto 1fr;
+    gap: 4px;
+    height: 100%;
+    overflow: hidden;
+}
+
+.tile-visualization {
+    width: 100%;
+    flex-shrink: 0;
+    background: var(--background);
+    border: 0.5px solid var(--border-color);
+    border-radius: 2px;
+    padding: 2px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    min-height: 60px; /* Smaller height to show more charts */
+    max-height: 80px; /* Limit max height */
+}
+
+.tile-mini-chart {
+    width: 100% !important;
+    height: 100% !important;
+    max-width: 100% !important;
+    max-height: 100% !important;
+    display: block !important;
+    position: relative !important;
+}
+
+.tile-prose {
+    overflow-y: auto;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+    min-height: 0;
+    flex: 1;
+}
+
+/* Bloomberg dense mode adjustments for dual-modality */
+.bloomberg-dense .tile-visualization {
+    padding: 1px;
+    border-width: 0.5px;
+    min-height: 50px; /* Smaller for dense mode */
+    max-height: 65px;
+}
+
+.bloomberg-dense .tile-content-dual {
+    gap: 2px;
+}
+
+.bloomberg-dense .tile-prose {
+    font-size: 10px !important;
+    line-height: 1.2 !important;
+}
+
+/* Tile loading spinner */
+.tile-loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    gap: 8px;
+    min-height: 60px;
+}
+
+.tile-loading .spinning {
+    animation: spin 1s linear infinite;
+    color: var(--primary-color);
+}
+
+.tile-loading i[data-lucide="loader"] {
+    width: 20px;
+    height: 20px;
 }
 
 .dashboard-tile:hover {
