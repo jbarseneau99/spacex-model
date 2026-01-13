@@ -7,7 +7,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 SERVER_FILE="$PROJECT_DIR/server.js"
 PID_FILE="$PROJECT_DIR/server.pid"
-DEFAULT_PORT=2999
+DEFAULT_PORT=3333
 
 # Get port from environment or use default
 PORT=${PORT:-$DEFAULT_PORT}
@@ -57,6 +57,8 @@ NEW_PID=$!
 echo "$NEW_PID" > "$PID_FILE"
 echo "Server started with PID $NEW_PID"
 echo "PID saved to $PID_FILE"
+
+
 
 
 

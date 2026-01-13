@@ -11,7 +11,7 @@ const path = require('path');
 
 const SERVER_FILE = path.join(__dirname, '..', 'server.js');
 const PID_FILE = path.join(__dirname, '..', 'server.pid');
-const DEFAULT_PORT = 2999;
+const DEFAULT_PORT = 3333;
 
 // Get port from environment or use default
 const PORT = process.env.PORT || DEFAULT_PORT;
@@ -151,6 +151,8 @@ restart().catch((error) => {
   console.error('Error during restart:', error);
   process.exit(1);
 });
+
+
 
 
 

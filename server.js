@@ -8,6 +8,8 @@ const mongoose = require('mongoose');
 const fetch = require('node-fetch');
 const http = require('http');
 const WebSocket = require('ws');
+const EventEmitter = require('events');
+const { Server: SocketIOServer } = require('socket.io');
 const Mach33Lib = require('./lib/mach33lib');
 const ValuationAlgorithms = require('./lib/valuation-algorithms');
 const CalculationEngine = require('./lib/calculation-engine');
@@ -16,7 +18,9 @@ const LaunchDataService = require('./services/launch-data');
 
 const app = express();
 const server = http.createServer(app);
-const PORT = process.env.PORT || 2999;
+const PORT = process.env.PORT || 3333;
+const HOST = process.env.HOST || '0.0.0.0'; // Listen on all interfaces by default
+const PUBLIC_URL = process.env.PUBLIC_URL || `http://localhost:${PORT}`; // Public URL for API calls
 
 // Database connection - Use spacex_valuation database
 let atlasUri = process.env.ATLAS_MONGODB_URI || 'mongodb+srv://brantarseneau_db_user:NJ3nwtwdcpFXwnks@mach33semanticeditorclu.vxuueax.mongodb.net/spacex_valuation';
@@ -36,8 +40,14 @@ mongoose.connect(atlasUri, {
   console.log('⚠️ Continuing without database...');
 });
 
-// Middleware
-app.use(cors());
+// Middleware - CORS configuration
+const corsOptions = {
+  origin: process.env.CORS_ALLOWED_ORIGINS 
+    ? process.env.CORS_ALLOWED_ORIGINS.split(',').map(origin => origin.trim())
+    : true, // Allow all origins if not specified
+  credentials: true
+};
+app.use(cors(corsOptions));
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, 'public')));
@@ -3404,7 +3414,7 @@ app.post('/api/var', async (req, res) => {
     if (method === 'monte-carlo' || method === 'combined') {
       try {
         // Use Monte Carlo simulation results if available
-        const monteCarloResponse = await fetch(`http://localhost:${PORT}/api/monte-carlo/scenarios`, {
+        const monteCarloResponse = await fetch(`${PUBLIC_URL}/api/monte-carlo/scenarios`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -4831,39 +4841,11 @@ async function callAIAPI(model, prompt, maxTokens = 300, systemPrompt = null) {
     const data = await response.json();
     return data.choices && data.choices[0] ? data.choices[0].message.content : 'Analysis complete.';
   } else if (provider === 'grok') {
-    const apiKey = process.env.XAI_API_KEY || process.env.GROK_API_KEY;
-    if (!apiKey) {
-      throw new Error('XAI_API_KEY or GROK_API_KEY not configured');
-    }
-    
-    // Apply rate limiting
-    await grokRateLimiter.waitIfNeeded();
-    
-    // Retry with exponential backoff on rate limit errors
-    return await retryWithBackoff(async () => {
-      const response = await fetch('https://api.x.ai/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`
-        },
-        body: JSON.stringify({
-          model: actualModel,
-          max_tokens: maxTokens,
-          messages: messages
-        })
-      });
-      
-      if (!response.ok) {
-        const errorText = await response.text();
-        const error = new Error(`Grok API error: ${response.status} ${errorText}`);
-        error.status = response.status;
-        throw error;
-      }
-      
-      const data = await response.json();
-      return data.choices && data.choices[0] ? data.choices[0].message.content : 'Analysis complete.';
-    }, 3, 2000); // Max 3 retries, starting with 2s delay
+    // GROK HTTP API DISABLED - Grok is ONLY used for WebSocket voice
+    // Fallback to Claude for HTTP chat
+    console.warn('⚠️ Grok HTTP API disabled - Grok is ONLY for voice (WebSocket). Falling back to Claude.');
+    // Recursively call with Claude instead
+    return await callAIAPI('claude-opus-4-1-20250805', prompt, maxTokens, systemPrompt);
   }
   
   throw new Error(`Unknown AI provider for model: ${model}`);
@@ -5458,13 +5440,14 @@ app.post('/api/insights/bandwidth-economics', (req, res) => {
 app.post('/api/insights/enhanced', async (req, res) => {
   try {
     const { data, inputs, insightType, context, tileSize, contentLimits, tileId: bodyTileId } = req.body;
-    // Use environment variable for default model, fallback to grok-3
-    // Set DEFAULT_AI_MODEL env var to 'claude-opus-4-1-20250805' to avoid Grok rate limits
-    let requestedModel = req.headers['x-ai-model'] || process.env.DEFAULT_AI_MODEL || 'grok:grok-3';
+    // Use environment variable for default model
+    // GROK HTTP API DISABLED - Grok is ONLY used for WebSocket voice
+    let requestedModel = req.headers['x-ai-model'] || process.env.DEFAULT_AI_MODEL || 'claude-opus-4-1-20250805';
     
-    // Map deprecated models to grok-3
-    if (requestedModel === 'grok:grok-2' || requestedModel === 'grok:grok-beta') {
-      requestedModel = 'grok:grok-3';
+    // Map Grok models to Claude (Grok HTTP disabled, only WebSocket voice)
+    if (requestedModel.startsWith('grok:')) {
+      console.warn('⚠️ Grok HTTP API disabled - Grok is ONLY for voice (WebSocket). Using Claude instead.');
+      requestedModel = 'claude-opus-4-1-20250805';
     }
     
     // Extract key metrics from data
@@ -5549,8 +5532,8 @@ app.post('/api/insights/enhanced', async (req, res) => {
                                     tweetText.includes('model') ||
                                     tweetText.includes('financial');
                   
-                  // Only include relevant tweets from builders (as requested: "if they are relevant")
-                  if (!isRelevant) return;
+                  // Always include tweets from builders (Aaron and Vlad) - they're the tool creators
+                  // Relevance check is optional for them
                   
                   const accountName = user.name || user.username;
                   const username = user.username;
@@ -5569,7 +5552,7 @@ app.post('/api/insights/enhanced', async (req, res) => {
                     date: formattedDate,
                     timestamp: tweet.created_at,
                     url: `https://twitter.com/${username}/status/${tweet.id}`,
-                    relevanceScore: 2 // Relevant tweets from builders
+                    relevanceScore: isRelevant ? 3 : 2 // Higher score if relevant, but always include
                   });
                 });
               }
@@ -5615,8 +5598,8 @@ app.post('/api/insights/enhanced', async (req, res) => {
                                     tweetText.includes('model') ||
                                     tweetText.includes('financial');
                   
-                  // Only include relevant tweets from partners
-                  if (!isRelevant) return;
+                  // Always include tweets from Cathie Wood (partner) - she's a key stakeholder
+                  // Relevance check is optional for her
                   
                   const accountName = user.name || user.username;
                   const username = user.username;
@@ -5635,7 +5618,7 @@ app.post('/api/insights/enhanced', async (req, res) => {
                     date: formattedDate,
                     timestamp: tweet.created_at,
                     url: `https://twitter.com/${username}/status/${tweet.id}`,
-                    relevanceScore: 2 // Relevant tweets from partners
+                    relevanceScore: isRelevant ? 3 : 2 // Higher score if relevant, but always include
                   });
                 });
               }
@@ -5721,7 +5704,8 @@ app.post('/api/insights/enhanced', async (req, res) => {
               }
             });
             
-            // Sort by relevance score (higher first), then by timestamp (newest first), limit to 5
+            // Sort by relevance score (higher first), then by timestamp (newest first), limit to 10
+            // Increased limit to show more tweets from Cathie, Aaron, and Vlad
             const sortedTweets = uniqueTweets
               .sort((a, b) => {
                 // First sort by relevance score (higher = more relevant)
@@ -5731,7 +5715,7 @@ app.post('/api/insights/enhanced', async (req, res) => {
                 // Then by timestamp (newest first)
                 return new Date(b.timestamp) - new Date(a.timestamp);
               })
-              .slice(0, 5)
+              .slice(0, 10)
               .map(tweet => {
                 // Remove relevanceScore before returning (not needed in frontend)
                 const { relevanceScore, ...tweetData } = tweet;
@@ -6845,7 +6829,7 @@ app.get('/', (req, res) => {
 app.post('/api/agent/chat', async (req, res) => {
   try {
     const { message, systemPrompt, context, history, imageUrl } = req.body;
-    let requestedModel = req.headers['x-ai-model'] || process.env.DEFAULT_AI_MODEL || 'grok:grok-3';
+    let requestedModel = req.headers['x-ai-model'] || process.env.DEFAULT_AI_MODEL || 'claude-opus-4-1-20250805';
     
     if (!message) {
       return res.json({ success: false, error: 'Message is required' });
@@ -7060,41 +7044,14 @@ app.post('/api/agent/chat', async (req, res) => {
       }
 
       if (provider === 'grok') {
-        const apiKey = process.env.GROK_API_KEY || process.env.XAI_API_KEY;
-        if (!apiKey) {
-          throw new Error('GROK_API_KEY not configured');
-        }
-
-        // Apply rate limiting
-        await grokRateLimiter.waitIfNeeded();
-        
-        // Retry with exponential backoff on rate limit errors
-        aiResponse = await retryWithBackoff(async () => {
-          const response = await fetch('https://api.x.ai/v1/chat/completions', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${apiKey}`
-            },
-            body: JSON.stringify({
-              model: actualModel || 'grok-2',
-              messages: messages,
-              max_tokens: 500, // Shorter responses
-              temperature: 0.7
-            })
-          });
-
-          if (!response.ok) {
-            const errorText = await response.text();
-            const error = new Error(`Grok API error: ${response.status} - ${errorText}`);
-            error.status = response.status;
-            throw error;
-          }
-
-          const data = await response.json();
-          return data.choices?.[0]?.message?.content || 'Sorry, I could not generate a response.';
-        }, 3, 2000); // Max 3 retries, starting with 2s delay
-      } else if (provider === 'openai') {
+        // GROK HTTP API DISABLED - Grok is ONLY used for WebSocket voice
+        // Fallback to Claude for HTTP chat
+        console.warn('⚠️ Grok HTTP API disabled - Grok is ONLY for voice (WebSocket). Using Claude instead.');
+        provider = 'anthropic';
+        actualModel = 'claude-opus-4-1-20250805';
+      }
+      
+      if (provider === 'openai') {
         const apiKey = process.env.OPENAI_API_KEY;
         if (!apiKey) {
           throw new Error('OPENAI_API_KEY not configured');
@@ -7204,6 +7161,56 @@ app.post('/api/agent/chat', async (req, res) => {
 // Initialize
 loadData();
 
+// Grok Voice API - Health Check Endpoint
+app.get('/api/analyst/browser/voice-health', (req, res) => {
+  const grokApiKey = process.env.GROK_API_KEY || process.env.XAI_API_KEY;
+  const status = grokVoiceProxy.getStatus();
+  const wsState = status.websocketState;
+  
+  return res.json({
+    status: status.grokConnected ? 'connected' : 'disconnected',
+    websocketPath: '/api/analyst/ws/grok-voice',
+    grokApiKeyConfigured: !!grokApiKey,
+    grokConnected: status.grokConnected,
+    websocketState: wsState === 0 ? 'CONNECTING' : wsState === 1 ? 'OPEN' : wsState === 2 ? 'CLOSING' : wsState === 3 ? 'CLOSED' : 'NULL',
+    retryCount: status.retryCount,
+    connectedClients: status.connectedClients,
+    isConnecting: status.isConnecting,
+    timestamp: new Date().toISOString()
+  });
+});
+
+// Grok Voice API - Recent Logs Endpoint (for debugging)
+const recentLogs = [];
+const MAX_LOGS = 100;
+
+function addLog(level, message, data = null) {
+  const logEntry = {
+    timestamp: new Date().toISOString(),
+    level,
+    message,
+    data: data ? JSON.stringify(data, null, 2) : null
+  };
+  recentLogs.push(logEntry);
+  if (recentLogs.length > MAX_LOGS) {
+    recentLogs.shift();
+  }
+}
+
+app.get('/api/analyst/browser/voice-logs', (req, res) => {
+  const limit = parseInt(req.query.limit) || 50;
+  const filtered = req.query.filter ? recentLogs.filter(log => 
+    log.message.toLowerCase().includes(req.query.filter.toLowerCase()) ||
+    log.level.toLowerCase() === req.query.filter.toLowerCase()
+  ) : recentLogs;
+  
+  return res.json({
+    logs: filtered.slice(-limit),
+    total: recentLogs.length,
+    filtered: filtered.length
+  });
+});
+
 // Grok Voice API - Ephemeral Token Endpoint
 app.post('/api/analyst/browser/voice-token', async (req, res) => {
   try {
@@ -7246,174 +7253,522 @@ app.post('/api/analyst/browser/voice-token', async (req, res) => {
   }
 });
 
-// WebSocket Server for Grok Voice Proxy
+// ============================================================================
+// Grok Voice WebSocket Proxy Service (Following Working Implementation Pattern)
+// ============================================================================
+
+/**
+ * GrokVoiceWebSocketProxy - Manages shared Grok Voice API connection
+ * Follows the working implementation pattern with proper connection reuse,
+ * singleton pattern, and rate limiting prevention
+ */
+class GrokVoiceWebSocketProxy extends EventEmitter {
+  constructor() {
+    super();
+    this.setMaxListeners(20);
+    
+    // Shared Grok connection (single persistent connection for all clients)
+    this.sharedGrokWs = null;
+    this.grokConnected = false;
+    this.isConnecting = false;
+    this.connectionPromise = null;
+    
+    // Client tracking
+    this.connectedClients = new Map(); // Map<clientWs, {clientId, sessionId}>
+    this.messageQueue = []; // Queue messages until Grok is connected
+    
+    // Retry tracking
+    this.retryCount = 0;
+    this.lastRetryTime = 0;
+    this.maxRetryAttempts = 3; // Max 3 retry attempts (not infinite)
+    
+    // API key
+    this.grokApiKey = process.env.GROK_API_KEY || process.env.XAI_API_KEY || '';
+    
+    if (!this.grokApiKey) {
+      console.error('⚠️ Grok API key not configured - Grok Voice will not work');
+    }
+  }
+
+  /**
+   * CRITICAL: Check for existing connection BEFORE creating new one
+   * This prevents rate limiting by reusing connections
+   */
+  async connectToGrok() {
+    // Check if already connected
+    if (this.sharedGrokWs && this.sharedGrokWs.readyState === WebSocket.OPEN) {
+      console.log('[grok-voice-proxy] ✅ Reusing existing Grok connection');
+      this.emit('session-ready');
+      return this.sharedGrokWs;
+    }
+    
+    // Check if connection is already in progress
+    if (this.isConnecting && this.connectionPromise) {
+      console.log('[grok-voice-proxy] ⏳ Grok connection already in progress, reusing promise...');
+      return this.connectionPromise;
+    }
+    
+    // Check retry limit
+    if (this.retryCount >= this.maxRetryAttempts) {
+      const error = new Error('Max retry attempts reached');
+      error.isMaxRetries = true;
+      throw error;
+    }
+    
+    // Close stale connection if exists
+    if (this.sharedGrokWs && this.sharedGrokWs.readyState !== WebSocket.OPEN) {
+      console.log('[grok-voice-proxy] 🔌 Closing stale Grok connection');
+      this.sharedGrokWs.removeAllListeners();
+      this.sharedGrokWs.close();
+      this.sharedGrokWs = null;
+    }
+    
+    // Set connecting flag and create promise
+    this.isConnecting = true;
+    this.connectionPromise = new Promise((resolve, reject) => {
+      const timestamp = new Date().toISOString();
+      console.log(`[${timestamp}] [grok-voice-proxy] 🔌 Creating SHARED Grok Voice API connection`);
+      addLog('info', 'Creating shared Grok Voice API connection');
+      
+      if (!this.grokApiKey) {
+        const error = new Error('Grok API key not configured');
+        this.isConnecting = false;
+        this.connectionPromise = null;
+        reject(error);
+        return;
+      }
+      
+      this.sharedGrokWs = new WebSocket('wss://api.x.ai/v1/realtime', {
+        headers: {
+          'Authorization': `Bearer ${this.grokApiKey}`
+        }
+      });
+      
+      this.sharedGrokWs.on('open', () => {
+        const timestamp = new Date().toISOString();
+        console.log(`[${timestamp}] [grok-voice-proxy] ✅ WebSocket connected to Grok Voice API`);
+        addLog('info', 'Shared Grok Voice WebSocket connection established');
+        
+        this.grokConnected = true;
+        this.isConnecting = false;
+        this.connectionPromise = null;
+        this.retryCount = 0; // Reset retry count on success
+        
+        // Emit session-ready event
+        this.emit('session-ready');
+        
+        // Process queued messages
+        while (this.messageQueue.length > 0 && this.sharedGrokWs.readyState === WebSocket.OPEN) {
+          const queuedMessage = this.messageQueue.shift();
+          this.sharedGrokWs.send(queuedMessage.data);
+        }
+        
+        resolve(this.sharedGrokWs);
+      });
+      
+      this.sharedGrokWs.on('message', (data) => {
+        this.handleGrokMessage(data);
+      });
+      
+      this.sharedGrokWs.on('error', (error) => {
+        const timestamp = new Date().toISOString();
+        const isRateLimited = String(error).includes('429') || 
+                             String(error).includes('Unexpected server response: 429') ||
+                             String(error).includes('Too Many Requests');
+        
+        if (isRateLimited) {
+          this.retryCount++;
+          console.error(`[${timestamp}] [grok-voice-proxy] ❌❌❌ GROK API RATE LIMITED ❌❌❌`);
+          console.error(`[${timestamp}] [grok-voice-proxy] ⚠️ Attempt ${this.retryCount}/${this.maxRetryAttempts}`);
+          console.error(`[${timestamp}] [grok-voice-proxy] 🛑 NOT retrying automatically - wait 5-10 minutes`);
+          addLog('error', 'Grok API Rate Limited', { retryCount: this.retryCount });
+        } else {
+          console.error(`[${timestamp}] [grok-voice-proxy] ❌ WebSocket error:`, error.message);
+          addLog('error', 'Shared Grok WebSocket error', { message: error.message });
+        }
+        
+        this.grokConnected = false;
+        this.isConnecting = false;
+        this.connectionPromise = null;
+        
+        // Close all client connections
+        this.connectedClients.forEach((clientInfo, clientWs) => {
+          if (clientWs.readyState === WebSocket.OPEN) {
+            clientWs.close(1011, isRateLimited ? 'Grok rate limited' : 'Grok connection error');
+          }
+        });
+        this.connectedClients.clear();
+        
+        // DO NOT RETRY if rate limited
+        if (!isRateLimited && this.retryCount < this.maxRetryAttempts) {
+          // Retry for non-rate-limit errors only
+          const delay = 2000 * this.retryCount; // 2s, 4s, 6s
+          this.lastRetryTime = Date.now();
+          setTimeout(() => {
+            if (this.connectedClients.size > 0) {
+              console.log(`[${new Date().toISOString()}] [grok-voice-proxy] 🔄 Retrying connection (${this.retryCount + 1}/${this.maxRetryAttempts})...`);
+              this.connectToGrok().catch(err => {
+                console.error(`[grok-voice-proxy] Retry failed:`, err.message);
+              });
+            }
+          }, delay);
+        }
+        
+        reject(error);
+      });
+      
+      this.sharedGrokWs.on('close', (code, reason) => {
+        const timestamp = new Date().toISOString();
+        console.log(`[${timestamp}] [grok-voice-proxy] 🔌 Grok WebSocket closed: ${code} - ${reason.toString()}`);
+        addLog('info', `Shared Grok WebSocket closed: ${code} - ${reason.toString()}`);
+        
+        this.grokConnected = false;
+        this.isConnecting = false;
+        this.connectionPromise = null;
+        this.sharedGrokWs = null;
+        
+        // Close all client connections
+        this.connectedClients.forEach((clientInfo, clientWs) => {
+          if (clientWs.readyState === WebSocket.OPEN) {
+            clientWs.close(1011, 'Grok connection closed');
+          }
+        });
+        this.connectedClients.clear();
+        
+        // Don't auto-retry on close - let clients trigger reconnection
+      });
+    });
+    
+    return this.connectionPromise;
+  }
+
+  /**
+   * Handle messages from Grok
+   * IMPORTANT: Uses correct message types (response.output_audio.delta)
+   */
+  handleGrokMessage(data) {
+    const timestamp = new Date().toISOString();
+    try {
+      const message = JSON.parse(data.toString());
+      const messageType = message.type || 'unknown';
+      
+      // Log important messages
+      if (messageType === 'error' || message.error) {
+        console.error(`[${timestamp}] [grok-voice-proxy] ❌ ERROR FROM GROK API`);
+        console.error(`[${timestamp}] Error:`, JSON.stringify(message, null, 2));
+        addLog('error', 'Grok API Error', message);
+      } else if (messageType === 'response.output_audio.delta') {
+        // CORRECT message type (NOT response.audio.delta)
+        if (message.delta) {
+          const audioSize = message.delta.length;
+          console.log(`[${timestamp}] [grok-voice-proxy] 🎵 Audio chunk: ${audioSize} chars (base64)`);
+        }
+      } else if (messageType === 'response.create') {
+        console.log(`[${timestamp}] [grok-voice-proxy] 🎬 Response creation confirmed`);
+      }
+      
+      // Emit event for Socket.io listeners
+      this.emit('grok-message', data);
+      
+      // Broadcast to all connected raw WebSocket clients
+      let forwardedCount = 0;
+      this.connectedClients.forEach((clientInfo, clientWs) => {
+        if (clientWs.readyState === WebSocket.OPEN) {
+          try {
+            clientWs.send(data);
+            forwardedCount++;
+          } catch (error) {
+            console.error(`[grok-voice-proxy] Error forwarding to client:`, error.message);
+            this.connectedClients.delete(clientWs);
+          }
+        } else {
+          this.connectedClients.delete(clientWs);
+        }
+      });
+      
+      if (forwardedCount > 0 && messageType !== 'ping') {
+        console.log(`[${timestamp}] [grok-voice-proxy] ✅ Forwarded ${messageType} to ${forwardedCount} raw WebSocket client(s)`);
+      }
+    } catch (e) {
+      console.error(`[${timestamp}] [grok-voice-proxy] Error parsing Grok message:`, e.message);
+    }
+  }
+
+  /**
+   * Send message to Grok
+   */
+  sendToGrok(data) {
+    if (this.sharedGrokWs && this.sharedGrokWs.readyState === WebSocket.OPEN) {
+      this.sharedGrokWs.send(data);
+      return true;
+    } else {
+      // Queue message
+      this.messageQueue.push({ data, timestamp: Date.now() });
+      
+      // Try to connect if not already connecting
+      if (!this.isConnecting) {
+        this.connectToGrok().catch(err => {
+          console.error(`[grok-voice-proxy] Failed to connect:`, err.message);
+        });
+      }
+      return false;
+    }
+  }
+
+  /**
+   * Add client connection
+   */
+  addClient(clientWs, clientId) {
+    this.connectedClients.set(clientWs, { clientId, timestamp: Date.now() });
+    
+    // Ensure Grok connection exists
+    if (!this.sharedGrokWs || this.sharedGrokWs.readyState !== WebSocket.OPEN) {
+      this.connectToGrok().catch(err => {
+        console.error(`[grok-voice-proxy] Failed to connect:`, err.message);
+      });
+    }
+  }
+
+  /**
+   * Remove client connection
+   */
+  removeClient(clientWs) {
+    this.connectedClients.delete(clientWs);
+    // Note: We DON'T close shared Grok connection when client disconnects
+    // The shared connection stays open for other clients
+  }
+
+  /**
+   * Get connection status
+   */
+  getStatus() {
+    return {
+      grokConnected: this.grokConnected && this.sharedGrokWs && this.sharedGrokWs.readyState === WebSocket.OPEN,
+      websocketState: this.sharedGrokWs ? this.sharedGrokWs.readyState : null,
+      connectedClients: this.connectedClients.size,
+      retryCount: this.retryCount,
+      isConnecting: this.isConnecting
+    };
+  }
+}
+
+// Singleton pattern - prevents multiple instances
+let grokVoiceProxyInstance = null;
+
+function getGrokVoiceProxy() {
+  if (!grokVoiceProxyInstance) {
+    grokVoiceProxyInstance = new GrokVoiceWebSocketProxy();
+  }
+  return grokVoiceProxyInstance;
+}
+
+// ============================================================================
+// Socket.io Server for Grok Voice (Matching Working Implementation)
+// ============================================================================
+
+const io = new SocketIOServer(server, {
+  path: '/api/analyst/socket.io',
+  cors: {
+    origin: corsOptions.origin,
+    credentials: true
+  }
+});
+
+// Initialize Grok Voice Proxy (singleton)
+const grokVoiceProxy = getGrokVoiceProxy();
+
+// Socket.io connection handler (matching working implementation pattern)
+io.on('connection', (socket) => {
+  const connectTimestamp = new Date().toISOString();
+  const sessionId = socket.id; // Use socket.id as sessionId
+  console.log(`[${connectTimestamp}] [socket.io] 🔌 Client connected (sessionId: ${sessionId})`);
+  addLog('info', `Socket.io client connected (sessionId: ${sessionId})`);
+  
+  // Connect to Grok Voice
+  socket.on('grok-voice:connect', async (data) => {
+    const { sessionId: clientSessionId, voice = 'ara' } = data || {};
+    const actualSessionId = clientSessionId || sessionId;
+    
+    console.log(`[socket.io] 📨 Received grok-voice:connect event (sessionId: ${actualSessionId}, voice: ${voice})`);
+    
+    // Set up session-ready handler
+    const sessionReadyHandler = () => {
+      socket.emit('grok-voice:connected', { sessionId: actualSessionId, voice });
+      console.log(`[socket.io] ✅ Emitted grok-voice:connected (sessionId: ${actualSessionId})`);
+    };
+    
+    grokVoiceProxy.once('session-ready', sessionReadyHandler);
+    
+    // Connect to Grok
+    try {
+      await grokVoiceProxy.connectToGrok();
+      // Session-ready event will be emitted when Grok connects
+    } catch (error) {
+      console.error(`[socket.io] ❌ Failed to connect to Grok:`, error.message);
+      socket.emit('grok-voice:error', { sessionId: actualSessionId, error: error.message });
+    }
+    
+    // Forward messages from Grok to frontend via Socket.io
+    const grokMessageHandler = (data) => {
+      try {
+        const message = JSON.parse(data.toString());
+        const messageType = message.type || 'unknown';
+        
+        // Forward audio chunks
+        if (messageType === 'response.output_audio.delta' && message.delta) {
+          socket.emit('grok-voice:audio', {
+            sessionId: actualSessionId,
+            audio: message.delta,
+            format: 'pcm',
+            sampleRate: 24000
+          });
+        }
+        // Forward transcript deltas
+        else if (messageType === 'response.output_audio_transcript.delta' && message.delta) {
+          socket.emit('grok-voice:transcript-delta', {
+            sessionId: actualSessionId,
+            transcript: message.delta
+          });
+        }
+        // Forward transcript complete
+        else if (messageType === 'response.output_audio_transcript.done' && message.transcript) {
+          socket.emit('grok-voice:transcript-complete', {
+            sessionId: actualSessionId,
+            transcript: message.transcript
+          });
+        }
+        // Forward response complete
+        else if (messageType === 'response.done') {
+          socket.emit('grok-voice:response-complete', {
+            sessionId: actualSessionId
+          });
+        }
+      } catch (e) {
+        // Binary message or parse error - skip
+      }
+    };
+    
+    // Listen to Grok messages and forward via Socket.io
+    grokVoiceProxy.on('grok-message', grokMessageHandler);
+    
+    // Clean up on disconnect
+    socket.on('disconnect', () => {
+      grokVoiceProxy.removeListener('grok-message', grokMessageHandler);
+      console.log(`[socket.io] 🔌 Client disconnected (sessionId: ${actualSessionId})`);
+    });
+  });
+  
+  // Send text to Grok Voice
+  socket.on('grok-voice:text', (data) => {
+    const { sessionId: clientSessionId, text } = data || {};
+    const actualSessionId = clientSessionId || sessionId;
+    
+    console.log(`[socket.io] 📨 Received grok-voice:text event (sessionId: ${actualSessionId}, textLength: ${text?.length || 0})`);
+    
+    if (!text) {
+      socket.emit('grok-voice:error', { sessionId: actualSessionId, error: 'No text provided' });
+      return;
+    }
+    
+    // Send text to Grok via proxy
+    const conversationItem = {
+      type: 'conversation.item.create',
+      item: {
+        type: 'message',
+        role: 'user',
+        content: [{ type: 'input_text', text: text }]
+      }
+    };
+    
+    grokVoiceProxy.sendToGrok(JSON.stringify(conversationItem));
+    
+    // Wait 500ms, then send response.create
+    setTimeout(() => {
+      const responseCreate = {
+        type: 'response.create',
+        response: { modalities: ['audio', 'text'] }
+      };
+      grokVoiceProxy.sendToGrok(JSON.stringify(responseCreate));
+      console.log(`[socket.io] 📤 Sent response.create to Grok`);
+    }, 500);
+  });
+});
+
+// ============================================================================
+// Raw WebSocket Server (for backward compatibility)
+// ============================================================================
+
 const wss = new WebSocket.Server({ 
   server: server,
   path: '/api/analyst/ws/grok-voice'
 });
 
+// Raw WebSocket connection handler (backward compatibility)
 wss.on('connection', (clientWs, req) => {
-  console.log('🔌 Client WebSocket connected for Grok Voice');
+  const connectTimestamp = new Date().toISOString();
+  const clientId = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+  console.log(`[${connectTimestamp}] [raw-ws] 🔌 Client WebSocket connected (ID: ${clientId})`);
+  addLog('info', `Raw WebSocket client connected (ID: ${clientId})`);
   
-  const grokApiKey = process.env.GROK_API_KEY || process.env.XAI_API_KEY;
-  
-  if (!grokApiKey) {
-    clientWs.close(1008, 'Grok API key not configured');
-    return;
-  }
-  
-  // Connect to Grok Voice API
-  const grokWs = new WebSocket('wss://api.x.ai/v1/realtime', {
-    headers: { 
-      'Authorization': `Bearer ${grokApiKey}` 
-    }
-  });
-  
-  let grokConnected = false;
-  const messageQueue = []; // Queue messages until Grok is connected
+  // Add client to proxy
+  grokVoiceProxy.addClient(clientWs, clientId);
   
   // Forward messages from client to Grok
   clientWs.on('message', (data) => {
     // Log message type for debugging
     try {
       if (Buffer.isBuffer(data) || data instanceof ArrayBuffer) {
-        console.log('📤 Client → Grok: Binary message (audio data)');
+        console.log('[raw-ws] 📤 Client → Grok: Binary message (audio data)');
       } else if (typeof data === 'string') {
         const message = JSON.parse(data);
-        console.log('📤 Client → Grok:', message.type || 'unknown message type');
-        
-        // Log important messages in detail
-        if (message.type === 'session.update') {
-          console.log('📤 Session config sent:', JSON.stringify(message.session, null, 2));
-        } else if (message.type === 'conversation.item.create') {
-          console.log('📤 conversation.item.create sent:', {
-            textLength: message.item?.content?.[0]?.text?.length || 0,
-            textPreview: message.item?.content?.[0]?.text?.substring(0, 50) || 'no text'
-          });
-        } else if (message.type === 'response.create') {
-          console.log('📤 response.create sent:', JSON.stringify(message, null, 2));
-          console.log('✅ This should trigger Grok to generate audio response!');
-        }
+        const timestamp = new Date().toISOString();
+        console.log(`[${timestamp}] [raw-ws] 📤 Client → Grok:`, message.type || 'unknown');
+        addLog('client_to_grok', `Client → Grok: ${message.type || 'unknown'}`, message);
       }
     } catch (e) {
-      console.log('📤 Client → Grok: Non-JSON message');
+      console.log('[raw-ws] 📤 Client → Grok: Non-JSON message');
     }
     
-    if (grokConnected && grokWs.readyState === WebSocket.OPEN) {
-      grokWs.send(data);
-    } else {
-      // Queue message until Grok is connected
-      console.log('⏳ Queuing message until Grok connection is ready...');
-      messageQueue.push(data);
-    }
+    // Send to Grok via proxy
+    grokVoiceProxy.sendToGrok(data);
   });
   
-  // Forward messages from Grok to client
-  grokWs.on('message', (data) => {
-    // CRITICAL: Grok sends audio as JSON messages with base64-encoded audio, NOT raw binary!
-    // Per working implementation: All messages from Grok are JSON strings
-    try {
-      // Parse as JSON first (Grok always sends JSON)
-      const messageStr = data.toString();
-      const message = JSON.parse(messageStr);
-      
-      console.log('📨 Grok → Client:', message.type || 'unknown message type');
-      
-      // Log important messages in detail
-      if (message.type === 'session.updated' || message.type === 'session.created') {
-        console.log('✅ Session message received:', JSON.stringify(message, null, 2));
-      } else if (message.type === 'response.create') {
-        console.log('🎬 response.create CONFIRMATION from Grok:', JSON.stringify(message, null, 2));
-        console.log('✅ Grok is now generating audio response!');
-      } else if (message.type === 'response.output_audio.delta' || message.type === 'response.audio.delta') {
-        console.log('🎵🎵🎵 AUDIO CHUNK from Grok! 🎵🎵🎵');
-        console.log('🎵 Message type:', message.type);
-        console.log('🎵 Delta length:', message.delta?.length || 'no delta');
-        console.log('🎵 Audio is base64-encoded in JSON message, NOT binary!');
-      } else if (message.type === 'response.output_audio_transcript.delta' || message.type === 'response.text.delta') {
-        console.log('📝 Transcript delta:', message.delta || message.text || 'no delta');
-      } else if (message.type === 'error') {
-        console.error('❌ ERROR from Grok:', JSON.stringify(message, null, 2));
-      } else if (message.type && message.type.includes('response')) {
-        console.log('📋 Response message:', JSON.stringify(message, null, 2));
-      } else if (message.type === 'conversation.item.created' || message.type === 'conversation.created') {
-        console.log('✅ Conversation item created:', JSON.stringify(message, null, 2));
-      }
-      
-      // Forward JSON message to client (Grok sends JSON, not binary)
-      if (clientWs.readyState === WebSocket.OPEN) {
-        clientWs.send(messageStr);
-        console.log('✅ Forwarded JSON message to client, type:', message.type);
-      } else {
-        console.warn('⚠️ Client WebSocket not open (state:', clientWs.readyState, '), dropping message');
-      }
-    } catch (e) {
-      // If it's not JSON, it might be binary (unlikely but handle it)
-      console.log('⚠️ Grok → Client: Non-JSON message, treating as binary');
-      if (Buffer.isBuffer(data) || data instanceof ArrayBuffer) {
-        const size = Buffer.isBuffer(data) ? data.length : data.byteLength;
-        console.log('📦 Binary message size:', size, 'bytes');
-        if (clientWs.readyState === WebSocket.OPEN) {
-          clientWs.send(data);
-        }
-      } else {
-        // Forward as-is
-        if (clientWs.readyState === WebSocket.OPEN) {
-          clientWs.send(data);
-        }
-      }
-    }
-  });
-  
-  // Handle errors
-  grokWs.on('error', (error) => {
-    console.error('Grok WebSocket error:', error);
-    if (clientWs.readyState === WebSocket.OPEN) {
-      clientWs.close(1011, 'Grok connection error');
-    }
-  });
-  
+  // Handle client errors
   clientWs.on('error', (error) => {
-    console.error('Client WebSocket error:', error);
-    if (grokWs.readyState === WebSocket.OPEN) {
-      grokWs.close();
-    }
+    const timestamp = new Date().toISOString();
+    console.error(`[${timestamp}] [raw-ws] Client WebSocket error:`, error.message);
+    grokVoiceProxy.removeClient(clientWs);
   });
   
-  // Handle disconnections
+  // Handle client disconnections
   clientWs.on('close', (code, reason) => {
-    console.log('🔌 Client WebSocket closed:', code, reason.toString());
-    if (grokWs.readyState === WebSocket.OPEN) {
-      grokWs.close();
-    }
-  });
-  
-  grokWs.on('close', (code, reason) => {
-    console.log('🔌 Grok WebSocket closed:', code, reason.toString());
-    grokConnected = false;
-    if (clientWs.readyState === WebSocket.OPEN) {
-      clientWs.close();
-    }
-  });
-  
-  grokWs.on('open', () => {
-    console.log('✅ Grok Voice WebSocket connection established');
-    grokConnected = true;
-    
-    // Send all queued messages
-    console.log(`📤 Sending ${messageQueue.length} queued messages to Grok...`);
-    while (messageQueue.length > 0) {
-      const queuedMessage = messageQueue.shift();
-      if (grokWs.readyState === WebSocket.OPEN) {
-        grokWs.send(queuedMessage);
-      }
-    }
-    console.log('✅ All queued messages sent');
+    const timestamp = new Date().toISOString();
+    console.log(`[${timestamp}] [raw-ws] 🔌 Client WebSocket closed: ${code}`);
+    grokVoiceProxy.removeClient(clientWs);
   });
 });
 
-server.listen(PORT, () => {
-  console.log(`\n🚀 SpaceX Valuation Platform running on http://localhost:${PORT}\n`);
-  console.log(`🔌 WebSocket server ready for Grok Voice at ws://localhost:${PORT}/api/analyst/ws/grok-voice\n`);
+// Legacy function for backward compatibility (now uses singleton)
+function initializeSharedGrokConnection() {
+  return grokVoiceProxy.connectToGrok();
+}
+
+server.listen(PORT, HOST, () => {
+  const localUrl = `http://localhost:${PORT}`;
+  const publicUrl = PUBLIC_URL;
+  console.log(`\n🚀 SpaceX Valuation Platform running:`);
+  console.log(`   Local:   ${localUrl}`);
+  if (publicUrl !== localUrl) {
+    console.log(`   Public:  ${publicUrl}`);
+  }
+  console.log(`\n🔌 WebSocket servers ready for Grok Voice:`);
+  console.log(`   Socket.io:  http://localhost:${PORT}/api/analyst/socket.io`);
+  console.log(`   Raw WebSocket:  ws://localhost:${PORT}/api/analyst/ws/grok-voice`);
+  if (publicUrl !== localUrl) {
+    const wsPublicUrl = publicUrl.replace(/^http/, 'ws');
+    console.log(`   Socket.io (Public):  ${publicUrl}/api/analyst/socket.io`);
+    console.log(`   Raw WebSocket (Public):  ${wsPublicUrl}/api/analyst/ws/grok-voice`);
+  }
+  console.log('');
 });
 

@@ -461,7 +461,7 @@ Format your response as plain text (2-4 sentences). Use the link format exactly 
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'X-AI-Model': document.getElementById('agentAIModelSelect')?.value || app.aiModel || 'grok:grok-3'
+                    'X-AI-Model': document.getElementById('agentAIModelSelect')?.value || app.aiModel || 'claude-opus-4-1-20250805'
                 },
                 body: JSON.stringify({
                     message: prompt,

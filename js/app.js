@@ -108,6 +108,7 @@ class ValuationApp {
         this.currentView = 'dashboard';
         this.currentData = null;
         this.currentModelName = null;
+        this.terminalDateTimeInterval = null; // Interval for updating terminal date/time
         this.editingModelId = null; // Track which model is being edited
         this.currentGreeksData = null; // Store current Greeks data for micro AI
         this.currentFactorRiskData = null; // Store current factor risk data
@@ -141,9 +142,15 @@ class ValuationApp {
         this.elementSelectionDebounceTimer = null; // Debounce timer for element selection commentary
         this.lastSelectedElement = null; // Track last selected element to avoid duplicate comments
         this.elementSelectionHistory = []; // Track element selections for context // Flag to prevent duplicate generation
+        this.lastClickedCompetitor = null; // Track last clicked competitor for detecting repeated clicks
+        this.competitorClickHistory = []; // Track competitor click history for episodic memory
         this.agentSystemPrompts = null; // Will be loaded on demand
         this.agentChatHistory = []; // Store chat history for context
-        this.agentVoiceMode = false; // Voice mode toggle (false = text, true = voice)
+        // Voice input/output controls (separated for clarity)
+        this.agentVoiceInputEnabled = false; // Microphone input enabled (optional)
+        this.agentVoiceOutputEnabled = false; // Audio output enabled (optional)
+        // Legacy: agentVoiceMode for backward compatibility (maps to voice output)
+        this.agentVoiceMode = false; // DEPRECATED: Use agentVoiceOutputEnabled instead
         this.agentRecognition = null; // Web Speech API recognition instance
         this.isRecording = false; // Track if currently recording
         this.agentSpeechSynthesis = null; // Web Speech Synthesis API instance
@@ -217,6 +224,16 @@ class ValuationApp {
             }, 100);
         }
         
+        // Initialize terminal date/time if terminal view is active
+        if (this.currentView === 'mach33-terminal') {
+            this.updateTerminalDateTime();
+            if (!this.terminalDateTimeInterval) {
+                this.terminalDateTimeInterval = setInterval(() => {
+                    this.updateTerminalDateTime();
+                }, 1000);
+            }
+        }
+        
         // Auto-load last model on startup
         await this.autoLoadFirstModel();
         this.loadSavedInputs();
@@ -263,12 +280,9 @@ class ValuationApp {
         // This will be called again when model loads, but having it here ensures it runs even if no model auto-loads
         setTimeout(() => {
             if (this.currentData && this.currentModelId) {
-                // Check if dashboard tab is active and load insights for active sub-tab
-                const dashboardTab = document.querySelector('#insights .insights-tab[data-tab="dashboard"]');
-                if (dashboardTab && dashboardTab.classList.contains('active')) {
-                    const activeSubTab = document.querySelector('#insightsTab-dashboard .sub-tab.active');
-                    const category = activeSubTab ? activeSubTab.dataset.subtab : 'overview';
-                    const gridContainer = document.getElementById(`dashboardGrid-${category}`);
+                // Check if mach33-terminal view is active and load insights
+                if (this.currentView === 'mach33-terminal') {
+                    const gridContainer = document.getElementById('dashboardGrid');
                     if (gridContainer) {
                         // Get tiles from current layout or generate fallback
                         this.loadTerminalInsightsAfterModelLoad();
@@ -611,39 +625,61 @@ class ValuationApp {
         document.getElementById('refreshInsightsBtn')?.addEventListener('click', () => {
             this.generateAIInsights();
         });
-        const refreshBtn = document.getElementById('refreshInsightsHeaderBtn');
-        const refreshIcon = document.getElementById('refreshInsightsIcon');
+        // Refresh button handlers for both Insights and Terminal views
+        const refreshInsightsBtn = document.getElementById('refreshInsightsHeaderBtn');
+        const refreshInsightsIcon = document.getElementById('refreshInsightsIcon');
+        const refreshTerminalBtn = document.getElementById('refreshTerminalBtn');
+        const refreshTerminalIcon = document.getElementById('refreshTerminalIcon');
         
-        if (refreshBtn) {
-            refreshBtn.addEventListener('click', () => {
-                // Add spinning animation
-                if (refreshIcon) {
-                    refreshIcon.classList.add('spinning');
-                }
-                refreshBtn.style.opacity = '1';
-                
-                this.refreshAllInsights().finally(() => {
-                    // Remove animation after refresh completes
-                    setTimeout(() => {
-                        if (refreshIcon) {
-                            refreshIcon.classList.remove('spinning');
-                        }
-                        refreshBtn.style.opacity = '0.6';
-                    }, 500);
+        const setupRefreshButton = (btn, icon) => {
+            if (btn && icon) {
+                btn.addEventListener('click', () => {
+                    // Add spinning animation
+                    icon.classList.add('spinning');
+                    btn.style.opacity = '1';
+                    
+                    this.refreshAllInsights().finally(() => {
+                        // Remove animation after refresh completes
+                        setTimeout(() => {
+                            icon.classList.remove('spinning');
+                            btn.style.opacity = '0.6';
+                        }, 500);
+                    });
                 });
-            });
-            
-            // Add hover effect
-            refreshBtn.addEventListener('mouseenter', function() {
-                this.style.opacity = '1';
-            });
-            refreshBtn.addEventListener('mouseleave', function() {
-                if (!refreshIcon || !refreshIcon.classList.contains('spinning')) {
-                    this.style.opacity = '0.6';
-                }
-            });
-        }
+                
+                // Add hover effect
+                btn.addEventListener('mouseenter', function() {
+                    this.style.opacity = '1';
+                });
+                btn.addEventListener('mouseleave', function() {
+                    if (!icon || !icon.classList.contains('spinning')) {
+                        this.style.opacity = '0.6';
+                    }
+                });
+            }
+        };
         
+        setupRefreshButton(refreshInsightsBtn, refreshInsightsIcon);
+        setupRefreshButton(refreshTerminalBtn, refreshTerminalIcon);
+        
+        // Bloomberg Dense Mode Toggle - handle both Insights and Terminal toggles
+        const setupDenseToggle = (toggleId) => {
+            const toggle = document.getElementById(toggleId);
+            if (toggle) {
+                toggle.addEventListener('change', (e) => {
+                    this.toggleBloombergDenseMode(e.target.checked);
+                    // Sync both toggles
+                    const otherToggleId = toggleId === 'bloombergDenseToggle' ? 'bloombergDenseToggleTerminal' : 'bloombergDenseToggle';
+                    const otherToggle = document.getElementById(otherToggleId);
+                    if (otherToggle) {
+                        otherToggle.checked = e.target.checked;
+                    }
+                });
+            }
+        };
+        
+        setupDenseToggle('bloombergDenseToggle');
+        setupDenseToggle('bloombergDenseToggleTerminal');
 
         // Monte Carlo Progress Modal Close Button
         document.getElementById('closeMonteCarloProgressBtn')?.addEventListener('click', () => {
@@ -664,12 +700,17 @@ class ValuationApp {
             this.closeAIAgent();
         });
         
-        // Voice Mode Toggle
+        // Voice Input Toggle (Microphone)
+        document.getElementById('agentVoiceInputToggleBtn')?.addEventListener('click', () => {
+            this.toggleAgentVoiceInput();
+        });
+        
+        // Voice Output Toggle (Audio Playback)
         document.getElementById('agentVoiceToggleBtn')?.addEventListener('click', () => {
             this.toggleAgentVoiceMode();
         });
         
-        // Voice Record Button
+        // Voice Record Button (Start/Stop Recording)
         document.getElementById('agentVoiceRecordBtn')?.addEventListener('click', () => {
             this.toggleVoiceRecording();
         });
@@ -1090,15 +1131,7 @@ class ValuationApp {
                 
                 // Handle Insights view tabs
                 if (viewContainer.closest('#insights')) {
-                    if (tabName === 'dashboard' && this.currentData) {
-                        // Terminal tab - generate dashboard layout (will use cached insights if available)
-                        this.generateDashboardLayout(this.currentData, this.getInputs()).catch(err => {
-                            console.error('Error generating dashboard layout:', err);
-                        }).then(() => {
-                            // Only load insights if not already cached (they're loaded during renderDashboardGrid)
-                            // Don't force reload - let cached insights be used
-                        });
-                    } else if (tabName === 'real-time') {
+                    if (tabName === 'real-time') {
                         // Real-Time Data tab - load launch data
                         this.loadLaunchData().catch(err => {
                             console.error('Error loading launch data:', err);
@@ -1448,6 +1481,24 @@ class ValuationApp {
         // Update agent context badge if agent window is open
         this.updateAgentContextBadge();
 
+        // Update terminal view elements when switching to terminal
+        if (viewName === 'mach33-terminal') {
+            this.updateDashboardTitle(this.currentModelName);
+            this.updateTerminalDateTime();
+            // Set up date/time update interval if not already set
+            if (!this.terminalDateTimeInterval) {
+                this.terminalDateTimeInterval = setInterval(() => {
+                    this.updateTerminalDateTime();
+                }, 1000); // Update every second
+            }
+        } else {
+            // Clear interval when leaving terminal view
+            if (this.terminalDateTimeInterval) {
+                clearInterval(this.terminalDateTimeInterval);
+                this.terminalDateTimeInterval = null;
+            }
+        }
+
         // Update actions bar visibility for Reference Data view
         if (viewName === 'inputs') {
             this.updateReferenceDataActionsBar();
@@ -1468,6 +1519,16 @@ class ValuationApp {
         if (viewName === 'insights') {
             if (this.currentData) {
                 this.updateInsightsView(this.currentData).catch(err => console.error('Error updating insights:', err));
+            }
+        }
+
+        // Load terminal dashboard when switching to mach33-terminal view
+        if (viewName === 'mach33-terminal') {
+            if (this.currentData) {
+                const inputs = this.getInputs();
+                this.generateDashboardLayout(this.currentData, inputs).catch(err => {
+                    console.error('Error generating dashboard layout:', err);
+                });
             }
         }
 
@@ -1684,6 +1745,19 @@ class ValuationApp {
 
     updateDashboardTitle(modelName) {
         const dashboardTitle = document.querySelector('#dashboard .view-header h2');
+        const terminalModelName = document.getElementById('terminalCurrentModel');
+        const terminalModelSearch = document.getElementById('terminalModelSearch');
+        
+        // Update terminal view model name search box
+        if (terminalModelSearch) {
+            terminalModelSearch.value = modelName || 'No model loaded';
+        }
+        
+        // Update terminal view model name (legacy element if it exists)
+        if (terminalModelName) {
+            terminalModelName.textContent = modelName || 'No model loaded';
+        }
+        
         if (dashboardTitle) {
             if (modelName) {
                 dashboardTitle.textContent = modelName;
@@ -1691,6 +1765,22 @@ class ValuationApp {
                 dashboardTitle.textContent = 'Valuation Dashboard';
             }
         }
+    }
+
+    updateTerminalDateTime() {
+        const dateTimeElement = document.getElementById('terminalDateTime');
+        if (!dateTimeElement) return;
+        
+        const now = new Date();
+        const options = { 
+            month: 'short', 
+            day: 'numeric', 
+            hour: '2-digit', 
+            minute: '2-digit',
+            hour12: true
+        };
+        const formatted = now.toLocaleString('en-US', options);
+        dateTimeElement.textContent = formatted;
     }
 
     updateDashboard(data) {
@@ -3200,8 +3290,8 @@ class ValuationApp {
         this.generateRiskAssessment(data, inputs);
         
         // Since Terminal is now the default tab, generate dashboard layout if data is available
-        const dashboardTab = document.querySelector('#insights .insights-tab[data-tab="dashboard"]');
-        if (dashboardTab && dashboardTab.classList.contains('active') && data) {
+        // Check if mach33-terminal view is active
+        if (this.currentView === 'mach33-terminal' && data) {
             this.generateDashboardLayout(data, inputs).catch(err => {
                 console.error('Error generating dashboard layout:', err);
             }).then(() => {
@@ -11604,6 +11694,9 @@ class ValuationApp {
                 // Store model name for dashboard title
                 const previousModelName = this.currentModelName;
                 this.currentModelName = model.name;
+                
+                // Update dashboard title and terminal model search box
+                this.updateDashboardTitle(model.name);
 
                 // Detect model change
                 if (previousModelId && previousModelId !== id) {
@@ -13793,20 +13886,39 @@ class ValuationApp {
         gridContainer.style.gridTemplateRows = 'repeat(4, 1fr)';
         gridContainer.style.gap = 'var(--spacing-sm)';
         
-        // Apply dense mode if enabled
-        const denseToggle = document.getElementById('bloombergDenseToggle');
+        // Apply dense mode if enabled (check both toggles - insights and terminal)
+        const denseToggle = document.getElementById('bloombergDenseToggle') || document.getElementById('bloombergDenseToggleTerminal');
         if (denseToggle && denseToggle.checked) {
             gridContainer.classList.add('bloomberg-dense');
         }
         
         // Calculate height to fill available viewport space
-        // Find the insights tab content container
+        // Find the container - could be in insights tab content or mach33-terminal view
         const insightsTabContent = gridContainer.closest('.insights-tab-content');
         const insightsView = gridContainer.closest('#insights');
+        const terminalView = gridContainer.closest('#mach33-terminal');
         
         let availableHeight = 600; // Default fallback
         
-        if (insightsTabContent && insightsView) {
+        if (terminalView) {
+            // Terminal view - calculate height to fill viewport
+            const viewportHeight = window.innerHeight;
+            const section = gridContainer.closest('.section');
+            const controlsRow = section ? section.querySelector('div[style*="Controls Row"]') : null;
+            const controlsHeight = controlsRow ? controlsRow.getBoundingClientRect().height : 0;
+            const sectionRect = section ? section.getBoundingClientRect() : null;
+            const sectionTop = sectionRect ? sectionRect.top : 0;
+            const contentArea = terminalView.closest('.content-area');
+            const contentAreaTop = contentArea ? contentArea.getBoundingClientRect().top : 0;
+            const bottomPadding = 32; // Reserve space for bottom padding/margins
+            
+            // Calculate: viewport height - distance from top of viewport to grid - bottom padding
+            availableHeight = viewportHeight - sectionTop - bottomPadding;
+            
+            // Ensure minimum height
+            availableHeight = Math.max(availableHeight, 600);
+        } else if (insightsTabContent && insightsView) {
+            // Insights view - original logic
             // Get viewport height
             const viewportHeight = window.innerHeight;
             
@@ -13934,6 +14046,15 @@ class ValuationApp {
                     requestAnimationFrame(() => {
                         setTimeout(() => {
                             this.attachImageClickHandler(tileElement, tile, cachedInsight);
+                        }, 200);
+                    });
+                }
+                
+                // Attach competitor click handlers for competitors list tile
+                if (tileContentType === TILE_CONTENT_TYPES.LIST && tile.insightType === 'competitors') {
+                    requestAnimationFrame(() => {
+                        setTimeout(() => {
+                            this.attachCompetitorClickHandlers(tileElement, tile);
                         }, 200);
                     });
                 }
@@ -14282,6 +14403,15 @@ class ValuationApp {
                                 requestAnimationFrame(() => {
                                     setTimeout(() => {
                                         this.attachImageClickHandler(updatedElement, tile, insightData);
+                                    }, 200);
+                                });
+                            }
+                            
+                            // Attach competitor click handlers for competitors list tile
+                            if (tileContentType === TILE_CONTENT_TYPES.LIST && tile.insightType === 'competitors') {
+                                requestAnimationFrame(() => {
+                                    setTimeout(() => {
+                                        this.attachCompetitorClickHandlers(updatedElement, tile);
                                     }, 200);
                                 });
                             }
@@ -14784,13 +14914,16 @@ class ValuationApp {
     toggleBloombergDenseMode(enabled) {
         const gridContainer = document.getElementById('dashboardGrid');
         const insightsView = document.getElementById('insights');
+        const terminalView = document.getElementById('mach33-terminal');
         
         if (enabled) {
             gridContainer?.classList.add('bloomberg-dense');
             insightsView?.classList.add('bloomberg-dense');
+            terminalView?.classList.add('bloomberg-dense');
         } else {
             gridContainer?.classList.remove('bloomberg-dense');
             insightsView?.classList.remove('bloomberg-dense');
+            terminalView?.classList.remove('bloomberg-dense');
         }
         
         // Re-render tiles to apply new styles
@@ -15584,8 +15717,8 @@ class ValuationApp {
             'square': 3,
             'horizontal': 5,
             '2x1': 5,
-            'vertical': 4,
-            '1x2': 4,
+            'vertical': 7,
+            '1x2': 6,
             'large': 8,
             '2x2': 8
         };
@@ -15841,7 +15974,7 @@ class ValuationApp {
         } else if (tileContentType === TILE_CONTENT_TYPES.LIST) {
             // Render competitors list tile - use combined competitors (space + telecom) if available
             const comparables = this.combinedCompetitorsData || this.currentComparablesData || [];
-            const maxItems = tile.size === 'square' ? 5 : (tile.size === 'vertical' || tile.size === '1x2' ? 6 : 4);
+            const maxItems = tile.size === 'square' ? 8 : (tile.size === 'vertical' || tile.size === '1x2' ? 10 : 6);
             const displayItems = comparables.slice(0, maxItems);
             
             // Load combined competitors if not already loaded
@@ -15924,16 +16057,16 @@ class ValuationApp {
                     </div>
                     <!-- Compact column headers -->
                     <div style="
-                        font-size: 6px;
+                        font-size: 9px;
                         font-weight: 600;
                         color: var(--text-secondary);
                         text-transform: uppercase;
                         letter-spacing: 0.5px;
-                        padding: 2px 0 1px 0;
+                        padding: 4px 0 2px 0;
                         border-bottom: 1px solid var(--border-color);
                         display: grid;
-                        grid-template-columns: 35px 45px 30px 30px 35px;
-                        gap: 2px;
+                        grid-template-columns: 50px 1fr 60px 50px 55px;
+                        gap: 6px;
                         align-items: center;
                         flex-shrink: 0;
                     ">
@@ -15945,48 +16078,44 @@ class ValuationApp {
                     </div>
                     <!-- List items container - fills ALL remaining space to bottom -->
                     <div class="scrollable-content" style="flex: 1 1 0%; overflow-y: auto; min-height: 0; padding: 0;">
-                        ${displayItems.map(company => `
-                            <div class="list-item" style="
-                                font-size: 7px;
-                                line-height: 1.2;
-                                padding: 2px 0;
+                        ${displayItems.map((company, index) => `
+                            <div class="list-item competitor-row" 
+                                 data-ticker="${(company.ticker || '').replace(/"/g, '&quot;')}"
+                                 data-company-name="${(company.name || '').replace(/"/g, '&quot;')}"
+                                 data-market-cap="${company.marketCap || 0}"
+                                 data-ev-revenue="${company.evRevenue || 0}"
+                                 data-pe-ratio="${company.peRatio || 0}"
+                                 data-revenue-growth="${company.revenueGrowth || 0}"
+                                 style="
+                                font-size: 10px;
+                                line-height: 1.4;
+                                padding: 4px 0;
                                 border-bottom: 1px solid rgba(0,0,0,0.05);
                                 display: grid;
-                                grid-template-columns: 35px 45px 30px 30px 35px;
-                                gap: 2px;
+                                grid-template-columns: 50px 1fr 60px 50px 55px;
+                                gap: 6px;
                                 align-items: center;
-                            ">
-                                <div style="font-weight: 600; color: var(--text-primary); font-size: 7px; overflow: hidden; text-overflow: ellipsis;">
+                                cursor: pointer;
+                                transition: background-color 0.2s;
+                            " onmouseover="this.style.backgroundColor='var(--background)'" onmouseout="this.style.backgroundColor='transparent'">
+                                <div style="font-weight: 600; color: var(--text-primary); font-size: 10px; overflow: hidden; text-overflow: ellipsis;">
                                     ${company.ticker || company.name?.substring(0, 5) || '--'}
                                 </div>
-                                <div style="color: var(--text-secondary); font-size: 7px; text-align: left; overflow: hidden; text-overflow: ellipsis;">
+                                <div style="color: var(--text-secondary); font-size: 10px; text-align: left; overflow: hidden; text-overflow: ellipsis;">
                                     ${formatCurrency(company.marketCap)}
                                 </div>
-                                <div style="color: var(--text-secondary); font-size: 7px; text-align: center;">
+                                <div style="color: var(--text-secondary); font-size: 10px; text-align: center;">
                                     ${company.evRevenue ? company.evRevenue.toFixed(1) + 'x' : '--'}
                                 </div>
-                                <div style="color: var(--text-secondary); font-size: 7px; text-align: center;">
+                                <div style="color: var(--text-secondary); font-size: 10px; text-align: center;">
                                     ${company.peRatio ? company.peRatio.toFixed(1) + 'x' : '--'}
                                 </div>
-                                <div style="color: var(--text-secondary); font-size: 7px; text-align: right;">
+                                <div style="color: var(--text-secondary); font-size: 10px; text-align: right;">
                                     ${company.revenueGrowth ? formatGrowth(company.revenueGrowth) : '--'}
                                 </div>
                             </div>
                         `).join('')}
                     </div>
-                    ${comparables.length > maxItems ? `
-                        <div style="
-                            font-size: 7px;
-                            color: ${tile.color};
-                            text-align: center;
-                            padding: 3px 0;
-                            cursor: pointer;
-                            font-weight: 500;
-                            flex-shrink: 0;
-                        " onclick="app.switchView('ratios');">
-                            View All (${comparables.length})
-                        </div>
-                    ` : ''}
                 </div>
             `;
         }
@@ -16130,24 +16259,74 @@ class ValuationApp {
         const voiceRecordIcon = document.getElementById('agentVoiceRecordIcon');
         const inputContainer = document.querySelector('.agent-chat-input-container');
         
-        // Load voice mode preference from localStorage
+        // Load voice preferences from localStorage (backward compatible)
         const savedVoiceMode = localStorage.getItem('agentVoiceMode');
-        if (savedVoiceMode === 'true') {
-            this.agentVoiceMode = true;
+        const savedVoiceOutput = localStorage.getItem('agentVoiceOutputEnabled');
+        const savedVoiceInput = localStorage.getItem('agentVoiceInputEnabled');
+        
+        // Migrate old agentVoiceMode to agentVoiceOutputEnabled for backward compatibility
+        if (savedVoiceOutput !== null) {
+            this.agentVoiceOutputEnabled = savedVoiceOutput === 'true';
+        } else if (savedVoiceMode === 'true') {
+            // Legacy: old voice mode meant output enabled
+            this.agentVoiceOutputEnabled = true;
+            localStorage.setItem('agentVoiceOutputEnabled', 'true');
+        }
+        
+        if (savedVoiceInput !== null) {
+            this.agentVoiceInputEnabled = savedVoiceInput === 'true';
+        }
+        
+        // Update legacy flag for backward compatibility
+        this.agentVoiceMode = this.agentVoiceOutputEnabled;
+        
+        // Update UI based on voice output state
+        if (this.agentVoiceOutputEnabled) {
             inputContainer?.classList.add('voice-mode');
             voiceToggleBtn?.classList.add('active');
             if (voiceToggleIcon) {
-                voiceToggleIcon.setAttribute('data-lucide', 'keyboard');
+                voiceToggleIcon.setAttribute('data-lucide', 'volume-2');
             }
             // Load voices for TTS
             this.loadSpeechVoices();
         } else {
-            this.agentVoiceMode = false;
             inputContainer?.classList.remove('voice-mode');
             voiceToggleBtn?.classList.remove('active');
             if (voiceToggleIcon) {
-                voiceToggleIcon.setAttribute('data-lucide', 'mic');
+                voiceToggleIcon.setAttribute('data-lucide', 'volume-x');
             }
+        }
+        
+        // Update voice input toggle button state
+        const voiceInputToggleBtn = document.getElementById('agentVoiceInputToggleBtn');
+        const voiceInputToggleIcon = document.getElementById('agentVoiceInputToggleIcon');
+        const chatInput = document.getElementById('agentChatInput');
+        if (voiceInputToggleBtn && voiceInputToggleIcon) {
+            if (this.agentVoiceInputEnabled) {
+                voiceInputToggleBtn.classList.add('active');
+                voiceInputToggleIcon.setAttribute('data-lucide', 'mic');
+                voiceInputToggleBtn.setAttribute('title', 'Voice Input: ON (Click to disable)');
+                // Update placeholder when voice input is enabled
+                if (chatInput) {
+                    chatInput.placeholder = 'Type your message or click mic to speak...';
+                }
+            } else {
+                voiceInputToggleBtn.classList.remove('active');
+                voiceInputToggleIcon.setAttribute('data-lucide', 'mic-off');
+                voiceInputToggleBtn.setAttribute('title', 'Voice Input: OFF (Click to enable microphone)');
+                // Reset placeholder when voice input is disabled
+                if (chatInput) {
+                    chatInput.placeholder = 'Type your message here...';
+                }
+            }
+            if (window.lucide) window.lucide.createIcons();
+        }
+        
+        // Show record button if voice input is enabled
+        if (this.agentVoiceInputEnabled && voiceRecordBtn) {
+            voiceRecordBtn.style.display = 'flex';
+        } else if (voiceRecordBtn) {
+            voiceRecordBtn.style.display = 'none';
         }
         
         if (voiceRecordIcon) {
@@ -16392,7 +16571,7 @@ class ValuationApp {
             // Load saved AI model selection
             const modelSelect = document.getElementById('agentAIModelSelect');
             if (modelSelect) {
-                const savedModel = localStorage.getItem('agentAIModel') || 'grok:grok-3';
+                const savedModel = localStorage.getItem('agentAIModel') || 'claude-opus-4-1-20250805';
                 modelSelect.value = savedModel;
             }
             
@@ -16534,6 +16713,121 @@ class ValuationApp {
         this.updateAgentSystemPromptDisplay();
     }
 
+    async sendAgentMessageSilent(message) {
+        // Same as sendAgentMessage but doesn't show user message - just spinner then response
+        console.log('📨 sendAgentMessageSilent called');
+        console.log('📨 Message length:', message?.length || 0);
+        console.log('📨 Voice output enabled?', this.agentVoiceOutputEnabled);
+        console.log('📨 Voice input enabled?', this.agentVoiceInputEnabled);
+        
+        if (!message.trim()) {
+            console.warn('⚠️ sendAgentMessageSilent: Empty message, returning');
+            return;
+        }
+
+        // Show loading (don't show user message)
+        const loadingId = this.addAgentLoadingMessage();
+
+        try {
+            const inputs = this.getInputs();
+            
+            // Get current tab and sub-tab information
+            const activeTab = this.getCurrentTabInfo();
+            
+            // Get all models data
+            const allModels = await this.getAllModelsData();
+            
+            // Get Monte Carlo simulations
+            const monteCarloData = this.currentMonteCarloData ? {
+                statistics: this.currentMonteCarloData.statistics,
+                runs: this.currentMonteCarloData.runs,
+                sampleResults: this.currentMonteCarloData.sampleResults?.slice(0, 10) || [] // First 10 samples
+            } : null;
+            
+            // Build comprehensive context
+            const context = {
+                currentView: this.currentView,
+                currentTab: activeTab.tab,
+                currentSubTab: activeTab.subTab,
+                currentModel: {
+                    id: this.currentModelId,
+                    name: this.currentModelName,
+                    inputs: inputs,
+                    valuationData: this.currentData
+                },
+                allModels: allModels,
+                monteCarloSimulations: monteCarloData,
+                parameters: {
+                    earth: inputs.earth || {},
+                    mars: inputs.mars || {},
+                    financial: inputs.financial || {}
+                },
+                navigationHistory: this.navigationHistory.slice(-10) // Include recent navigation history
+            };
+            
+            // Build system prompts from 10-level hierarchy
+            const systemPrompts = this.agentSystemPrompts || this.getDefaultAgentSystemPrompts();
+            const systemPromptText = Object.values(systemPrompts)
+                .filter(p => p && p.trim())
+                .join('\n\n');
+            
+            const response = await fetch('/api/agent/chat', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-AI-Model': document.getElementById('agentAIModelSelect')?.value || this.aiModel || 'claude-opus-4-1-20250805'
+                },
+                body: JSON.stringify({
+                    message: message,
+                    systemPrompt: systemPromptText,
+                    context: context,
+                    history: this.getAgentChatHistory()
+                })
+            });
+
+            const result = await response.json();
+            this.removeAgentMessage(loadingId);
+            
+            console.log('📨 sendAgentMessageSilent: Received response');
+            console.log('📨 Response success?', result.success);
+            console.log('📨 Response length:', result.response?.length || 0);
+            console.log('📨 Voice output enabled?', this.agentVoiceOutputEnabled);
+
+            if (result.success) {
+                this.addAgentMessage(result.response, 'assistant');
+                
+                // If voice output enabled, speak the response
+                if (this.agentVoiceOutputEnabled) {
+                    console.log('🔊🔊🔊 VOICE OUTPUT ENABLED - CALLING speakAgentResponse 🔊🔊🔊');
+                    console.log('🔊 Response text length:', result.response?.length || 0);
+                    console.log('🔊 Response preview:', result.response?.substring(0, 100) + '...');
+                    this.speakAgentResponse(result.response).catch(error => {
+                        console.error('❌ Error speaking response:', error);
+                        console.error('❌ Error details:', error.message, error.stack);
+                    });
+                } else {
+                    console.log('🔇🔇🔇 VOICE OUTPUT DISABLED - SKIPPING AUDIO 🔇🔇🔇');
+                    console.log('🔇 To enable voice output, click the speaker icon in the agent header');
+                }
+            } else {
+                const errorMsg = 'Sorry, I encountered an error: ' + (result.error || 'Unknown error');
+                this.addAgentMessage(errorMsg, 'assistant');
+                
+                // Speak error if voice output enabled
+                if (this.agentVoiceOutputEnabled) {
+                    console.log('🔊 Voice output enabled - speaking error message');
+                    this.speakAgentResponse(errorMsg).catch(error => {
+                        console.error('❌ Error speaking error message:', error);
+                    });
+                }
+            }
+        } catch (error) {
+            console.error('Agent chat error:', error);
+            this.removeAgentMessage(loadingId);
+            this.addAgentMessage('Sorry, I encountered an error. Please check your connection and try again.', 'assistant');
+        }
+    }
+
     async sendAgentMessage(message) {
         if (!message.trim()) return;
 
@@ -16590,7 +16884,7 @@ class ValuationApp {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'X-AI-Model': document.getElementById('agentAIModelSelect')?.value || this.aiModel || 'grok:grok-3'
+                    'X-AI-Model': document.getElementById('agentAIModelSelect')?.value || this.aiModel || 'claude-opus-4-1-20250805'
                 },
                 body: JSON.stringify({
                     message: message,
@@ -16606,17 +16900,26 @@ class ValuationApp {
             if (result.success) {
                 this.addAgentMessage(result.response, 'assistant');
                 
-                // If in voice mode, speak the response
-                if (this.agentVoiceMode) {
-                    this.speakAgentResponse(result.response);
+                // If voice output enabled, speak the response
+                if (this.agentVoiceOutputEnabled) {
+                    console.log('🔊 Voice output enabled - calling speakAgentResponse');
+                    console.log('🔊 Response text length:', result.response?.length || 0);
+                    this.speakAgentResponse(result.response).catch(error => {
+                        console.error('❌ Error speaking response:', error);
+                    });
+                } else {
+                    console.log('🔇 Voice output disabled - skipping audio');
                 }
             } else {
                 const errorMsg = 'Sorry, I encountered an error: ' + (result.error || 'Unknown error');
                 this.addAgentMessage(errorMsg, 'assistant');
                 
-                // Speak error in voice mode too
-                if (this.agentVoiceMode) {
-                    this.speakAgentResponse(errorMsg);
+                // Speak error if voice output enabled
+                if (this.agentVoiceOutputEnabled) {
+                    console.log('🔊 Voice output enabled - speaking error message');
+                    this.speakAgentResponse(errorMsg).catch(error => {
+                        console.error('❌ Error speaking error message:', error);
+                    });
                 }
             }
         } catch (error) {
@@ -16627,47 +16930,112 @@ class ValuationApp {
     }
 
     toggleAgentVoiceMode() {
-        this.agentVoiceMode = !this.agentVoiceMode;
+        // Toggle voice OUTPUT (audio playback)
+        this.agentVoiceOutputEnabled = !this.agentVoiceOutputEnabled;
+        // Update legacy flag for backward compatibility
+        this.agentVoiceMode = this.agentVoiceOutputEnabled;
+        
         const inputContainer = document.querySelector('.agent-chat-input-container');
         const toggleBtn = document.getElementById('agentVoiceToggleBtn');
         const toggleIcon = document.getElementById('agentVoiceToggleIcon');
-        const recordBtn = document.getElementById('agentVoiceRecordBtn');
         
         // Save preference to localStorage
-        localStorage.setItem('agentVoiceMode', this.agentVoiceMode.toString());
+        localStorage.setItem('agentVoiceOutputEnabled', this.agentVoiceOutputEnabled.toString());
+        localStorage.setItem('agentVoiceMode', this.agentVoiceMode.toString()); // Legacy compatibility
         
-        if (this.agentVoiceMode) {
-            // Switch to voice mode
+        if (this.agentVoiceOutputEnabled) {
+            // Enable voice output
             inputContainer?.classList.add('voice-mode');
             toggleBtn?.classList.add('active');
             if (toggleIcon) {
-                toggleIcon.setAttribute('data-lucide', 'keyboard');
+                toggleIcon.setAttribute('data-lucide', 'volume-2');
+                toggleIcon.setAttribute('title', 'Voice Output: ON (Click to disable)');
                 if (window.lucide) window.lucide.createIcons();
             }
             
             // Load voices if not already loaded
             this.loadSpeechVoices();
-            
-            // Initialize Web Speech API if available
-            this.initializeVoiceRecognition();
         } else {
-            // Switch to text mode
+            // Disable voice output
             inputContainer?.classList.remove('voice-mode');
             toggleBtn?.classList.remove('active');
             if (toggleIcon) {
-                toggleIcon.setAttribute('data-lucide', 'mic');
+                toggleIcon.setAttribute('data-lucide', 'volume-x');
+                toggleIcon.setAttribute('title', 'Voice Output: OFF (Click to enable)');
                 if (window.lucide) window.lucide.createIcons();
-            }
-            
-            // Stop any active recording
-            if (this.isRecording) {
-                this.stopVoiceRecording();
             }
             
             // Stop any active speech
             if (this.isSpeaking) {
                 window.speechSynthesis.cancel();
+                if (this.grokVoiceService) {
+                    this.grokVoiceService.stopAudio();
+                }
                 this.isSpeaking = false;
+            }
+        }
+    }
+    
+    toggleAgentVoiceInput() {
+        // Toggle voice INPUT (microphone)
+        this.agentVoiceInputEnabled = !this.agentVoiceInputEnabled;
+        
+        const inputToggleBtn = document.getElementById('agentVoiceInputToggleBtn');
+        const inputToggleIcon = document.getElementById('agentVoiceInputToggleIcon');
+        const recordBtn = document.getElementById('agentVoiceRecordBtn');
+        const chatInput = document.getElementById('agentChatInput');
+        
+        // Save preference to localStorage
+        localStorage.setItem('agentVoiceInputEnabled', this.agentVoiceInputEnabled.toString());
+        
+        if (this.agentVoiceInputEnabled) {
+            // Enable voice input
+            if (inputToggleBtn) {
+                inputToggleBtn.classList.add('active');
+                inputToggleBtn.setAttribute('title', 'Voice Input: ON (Click to disable)');
+            }
+            if (inputToggleIcon) {
+                inputToggleIcon.setAttribute('data-lucide', 'mic');
+                if (window.lucide) window.lucide.createIcons();
+            }
+            
+            // Update placeholder text
+            if (chatInput) {
+                chatInput.placeholder = 'Type your message or click mic to speak...';
+            }
+            
+            // Show record button
+            if (recordBtn) {
+                recordBtn.style.display = 'flex';
+                recordBtn.setAttribute('title', 'Click to start recording');
+            }
+            
+            // Initialize Web Speech API if available
+            this.initializeVoiceRecognition();
+        } else {
+            // Disable voice input
+            if (inputToggleBtn) {
+                inputToggleBtn.classList.remove('active');
+                inputToggleBtn.setAttribute('title', 'Voice Input: OFF (Click to enable microphone)');
+            }
+            if (inputToggleIcon) {
+                inputToggleIcon.setAttribute('data-lucide', 'mic-off');
+                if (window.lucide) window.lucide.createIcons();
+            }
+            
+            // Reset placeholder text
+            if (chatInput) {
+                chatInput.placeholder = 'Type your message here...';
+            }
+            
+            // Hide record button
+            if (recordBtn) {
+                recordBtn.style.display = 'none';
+            }
+            
+            // Stop any active recording
+            if (this.isRecording) {
+                this.stopVoiceRecording();
             }
         }
     }
@@ -16693,11 +17061,12 @@ class ValuationApp {
         // Check if Web Speech API is available
         if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
             this.addAgentMessage('Voice recognition is not supported in your browser. Please use text mode.', 'system');
-            this.agentVoiceMode = false;
-            const inputContainer = document.querySelector('.agent-chat-input-container');
-            const toggleBtn = document.getElementById('agentVoiceToggleBtn');
-            inputContainer?.classList.remove('voice-mode');
-            toggleBtn?.classList.remove('active');
+            this.agentVoiceInputEnabled = false;
+            localStorage.setItem('agentVoiceInputEnabled', 'false');
+            const recordBtn = document.getElementById('agentVoiceRecordBtn');
+            if (recordBtn) {
+                recordBtn.style.display = 'none';
+            }
             return;
         }
 
@@ -16742,8 +17111,8 @@ class ValuationApp {
         };
 
         this.agentRecognition.onend = () => {
-            // Restart recognition if still in voice mode and recording
-            if (this.agentVoiceMode && this.isRecording) {
+            // Restart recognition if voice input is enabled and still recording
+            if (this.agentVoiceInputEnabled && this.isRecording) {
                 try {
                     this.agentRecognition.start();
                 } catch (error) {
@@ -16839,7 +17208,14 @@ class ValuationApp {
     }
 
     async speakAgentResponse(text) {
-        if (!text || !text.trim()) return;
+        console.log('🔊 speakAgentResponse called');
+        console.log('🔊 Voice output enabled?', this.agentVoiceOutputEnabled);
+        console.log('🔊 Text length:', text?.length || 0);
+        
+        if (!text || !text.trim()) {
+            console.warn('⚠️ speakAgentResponse: Empty text, returning');
+            return;
+        }
         
         // Clean up text (remove markdown, HTML tags, etc.)
         const cleanText = text
@@ -16848,10 +17224,15 @@ class ValuationApp {
             .replace(/\n+/g, '. ') // Replace newlines with periods
             .trim();
 
-        if (!cleanText) return;
+        if (!cleanText) {
+            console.warn('⚠️ speakAgentResponse: Clean text is empty, returning');
+            return;
+        }
 
         // ONLY use Grok Voice API with Ara's voice - NO FALLBACKS
-        if (this.agentVoiceMode) {
+        // Check voice output enabled flag
+        if (this.agentVoiceOutputEnabled) {
+            console.log('🔊 Voice output is enabled - proceeding with Grok Voice TTS');
             try {
                 await this.speakWithGrokVoice(cleanText);
             } catch (error) {
@@ -16892,10 +17273,71 @@ class ValuationApp {
                 await this.grokVoiceService.audioContext.resume();
             }
 
-            // Connect WebSocket if not connected
+            // Connect WebSocket if not connected - REUSE EXISTING CONNECTION
             if (!this.grokVoiceService.ws || this.grokVoiceService.ws.readyState !== WebSocket.OPEN) {
-                await this.grokVoiceService.connectWebSocket();
-                await new Promise(resolve => setTimeout(resolve, 1000)); // Wait for session to be ready
+                console.log('🔌 WebSocket not connected, connecting...');
+                console.log('🔌 Current WebSocket state:', this.grokVoiceService.ws?.readyState || 'null');
+                
+                // Check if WebSocket is in a connecting state (CONNECTING = 0)
+                if (this.grokVoiceService.ws && this.grokVoiceService.ws.readyState === WebSocket.CONNECTING) {
+                    console.log('⏳ WebSocket is already connecting, waiting for it to open...');
+                    // Wait up to 5 seconds for connection to complete
+                    for (let i = 0; i < 50; i++) {
+                        await new Promise(resolve => setTimeout(resolve, 100));
+                        if (this.grokVoiceService.ws && this.grokVoiceService.ws.readyState === WebSocket.OPEN) {
+                            console.log('✅ WebSocket connection completed');
+                            break;
+                        }
+                        if (this.grokVoiceService.ws && this.grokVoiceService.ws.readyState === WebSocket.CLOSED) {
+                            console.log('⚠️ WebSocket connection failed, will create new one');
+                            break;
+                        }
+                    }
+                }
+                
+                // Only create new connection if still not connected
+                if (!this.grokVoiceService.ws || this.grokVoiceService.ws.readyState !== WebSocket.OPEN) {
+                    await this.grokVoiceService.connectWebSocket();
+                    console.log('🔌 WebSocket connected, state:', this.grokVoiceService.ws?.readyState);
+                    
+                    // Wait for WebSocket to be fully ready AND for conversation.created
+                    console.log('⏳ Waiting for conversation.created from Grok...');
+                    let conversationCreated = false;
+                    const conversationHandler = (event) => {
+                        try {
+                            const message = JSON.parse(event.data);
+                            if (message.type === 'conversation.created') {
+                                conversationCreated = true;
+                                console.log('✅ conversation.created received - Grok is ready');
+                                this.grokVoiceService.ws.removeEventListener('message', conversationHandler);
+                            }
+                        } catch (e) {
+                            // Ignore parse errors
+                        }
+                    };
+                    
+                    this.grokVoiceService.ws.addEventListener('message', conversationHandler);
+                    
+                    // Wait up to 3 seconds for conversation.created
+                    for (let i = 0; i < 30; i++) {
+                        await new Promise(resolve => setTimeout(resolve, 100));
+                        if (conversationCreated) break;
+                    }
+                    
+                    if (!conversationCreated) {
+                        console.warn('⚠️ conversation.created not received, proceeding anyway');
+                        this.grokVoiceService.ws.removeEventListener('message', conversationHandler);
+                    }
+                }
+                
+                // Verify WebSocket is actually open
+                if (!this.grokVoiceService.ws || this.grokVoiceService.ws.readyState !== WebSocket.OPEN) {
+                    console.error('❌ WebSocket failed to connect! State:', this.grokVoiceService.ws?.readyState);
+                    throw new Error('WebSocket connection failed. State: ' + (this.grokVoiceService.ws?.readyState || 'null'));
+                }
+                console.log('✅ WebSocket verified as OPEN');
+            } else {
+                console.log('✅ WebSocket already connected and ready');
             }
 
             // ALWAYS re-send session config to ensure Ara voice is active
@@ -16903,12 +17345,16 @@ class ValuationApp {
             console.log('📤 Ensuring Ara voice is active - sending session config...');
             
             try {
-                // sendSessionConfig now returns a promise that resolves when session.updated is received
+                // sendSessionConfig now returns a promise that resolves when session.updated is received (or times out)
                 await this.grokVoiceService.sendSessionConfig();
-                console.log('✅ Session updated received - Ara voice config accepted (voice: "ara" sent)');
+                console.log('✅ Session config sent (may have timed out waiting for confirmation, but proceeding)');
+                
+                // Give Grok a moment to process the session config
+                await new Promise(resolve => setTimeout(resolve, 300));
             } catch (error) {
                 console.error('❌ Session configuration failed:', error);
-                throw new Error('Ara voice configuration failed: ' + error.message);
+                // Don't throw - session config timeout is normal, proceed anyway
+                console.warn('⚠️ Continuing despite session config timeout (this is often normal)');
             }
 
             // CRITICAL: Stop any audio recording before sending text (TTS doesn't need microphone)
@@ -17017,10 +17463,13 @@ class ValuationApp {
             // CRITICAL: Verify WebSocket is open before sending
             if (!this.grokVoiceService.ws || this.grokVoiceService.ws.readyState !== WebSocket.OPEN) {
                 console.error('❌ WebSocket not open! State:', this.grokVoiceService.ws?.readyState);
+                console.error('❌ Cannot send text to Grok Voice - WebSocket connection failed');
                 throw new Error('WebSocket not connected. Cannot send text to Grok Voice.');
             }
             
-            console.log('📤 Sending conversation.item.create to Grok Voice API:', text.substring(0, 50) + '...');
+            console.log('📤 Sending conversation.item.create to Grok Voice API');
+            console.log('📤 Text preview:', text.substring(0, 50) + '...');
+            console.log('📤 Text length:', text.length, 'characters');
             console.log('📤 WebSocket state:', this.grokVoiceService.ws.readyState, '(should be 1=OPEN)');
             console.log('📤 Full conversation.item.create message:', JSON.stringify(conversationMessage, null, 2));
             
@@ -17029,39 +17478,47 @@ class ValuationApp {
                 console.log('✅ conversation.item.create sent successfully');
             } catch (error) {
                 console.error('❌ Error sending conversation.item.create:', error);
+                console.error('❌ Error details:', error.message, error.stack);
                 throw error;
             }
             
-            // Step 2: Send response.create to trigger audio response (required!)
-            // Wait 500ms after conversation.item.create (as per debugging guide)
+            // Step 2: Send response.create after 500ms delay (as per working implementation)
+            // Working implementation: Don't wait for conversation.item.created, just wait 500ms
             setTimeout(() => {
                 // Verify WebSocket is still open
                 if (!this.grokVoiceService.ws || this.grokVoiceService.ws.readyState !== WebSocket.OPEN) {
                     console.error('❌ WebSocket closed before sending response.create!');
+                    console.error('❌ WebSocket state:', this.grokVoiceService.ws?.readyState);
+                    console.error('❌ This means Grok Voice will NOT generate audio response!');
                     return;
                 }
                 
                 const responseMessage = {
                     type: 'response.create',
                     response: {
-                        modalities: ['audio', 'text']
+                        modalities: ['audio', 'text'] // Request both audio and text
                     }
                 };
                 
                 console.log('📤 Sending response.create to trigger Grok Voice audio response');
-                console.log('📤 WebSocket state:', this.grokVoiceService.ws.readyState);
+                console.log('📤 WebSocket state:', this.grokVoiceService.ws.readyState, '(should be 1=OPEN)');
+                console.log('📤 Requesting modalities:', responseMessage.response.modalities);
                 console.log('📋 response.create message:', JSON.stringify(responseMessage, null, 2));
                 
                 try {
                     this.grokVoiceService.ws.send(JSON.stringify(responseMessage));
                     console.log('✅ response.create sent successfully');
+                    console.log('⏳ Now waiting for Grok to generate audio response...');
+                    console.log('⏳ Expected messages:');
+                    console.log('   1. response.create (confirmation)');
+                    console.log('   2. response.output_audio.delta (audio chunks)');
+                    console.log('   3. response.output_audio_transcript.delta (text transcript)');
+                    console.log('   4. response.done (completion)');
                 } catch (error) {
                     console.error('❌ Error sending response.create:', error);
+                    console.error('❌ Error details:', error.message, error.stack);
                 }
-                
-                // Log that we're waiting for audio
-                console.log('⏳ Waiting for response.output_audio.delta or response.audio.delta messages from Grok...');
-            }, 500);
+            }, 500); // 500ms delay as per working implementation
             
             this.isSpeaking = true;
             
@@ -17525,6 +17982,161 @@ class ValuationApp {
     /**
      * Attach click handler to a tile for agent commentary
      */
+    attachCompetitorClickHandlers(tileElement, tile) {
+        try {
+            if (!tileElement) {
+                console.warn('[Competitor Click Handler] Missing tileElement');
+                return;
+            }
+            
+            const competitorRows = tileElement.querySelectorAll('.competitor-row');
+            if (!competitorRows || competitorRows.length === 0) {
+                console.warn('[Competitor Click Handler] No competitor rows found in tile:', tile.id);
+                return;
+            }
+            
+            console.log(`[Competitor Click Handler] Attaching handlers to ${competitorRows.length} competitor rows`);
+            
+            competitorRows.forEach((row, index) => {
+                // Remove existing handler if any
+                const existingHandler = row._clickHandler;
+                if (existingHandler) {
+                    row.removeEventListener('click', existingHandler);
+                }
+                
+                // Create click handler
+                const clickHandler = async (e) => {
+                    e.stopPropagation();
+                    
+                    // Extract company data from data attributes
+                    const ticker = row.getAttribute('data-ticker') || '';
+                    const companyName = row.getAttribute('data-company-name') || '';
+                    const marketCap = parseFloat(row.getAttribute('data-market-cap') || 0);
+                    const evRevenue = parseFloat(row.getAttribute('data-ev-revenue') || 0);
+                    const peRatio = parseFloat(row.getAttribute('data-pe-ratio') || 0);
+                    const revenueGrowth = parseFloat(row.getAttribute('data-revenue-growth') || 0);
+                    
+                    const companyKey = ticker || companyName;
+                    const isRepeatClick = this.lastClickedCompetitor === companyKey;
+                    
+                    console.log('[Competitor Click] Company clicked:', {
+                        ticker,
+                        companyName,
+                        marketCap,
+                        evRevenue,
+                        peRatio,
+                        revenueGrowth,
+                        isRepeatClick,
+                        lastClicked: this.lastClickedCompetitor
+                    });
+                    
+                    // Track click history for episodic memory
+                    const clickEvent = {
+                        timestamp: new Date().toISOString(),
+                        ticker,
+                        companyName,
+                        marketCap,
+                        evRevenue,
+                        peRatio,
+                        revenueGrowth,
+                        view: this.currentView,
+                        tab: this.getCurrentTabInfo().tab,
+                        isRepeatClick
+                    };
+                    
+                    this.competitorClickHistory.push(clickEvent);
+                    if (this.competitorClickHistory.length > 20) {
+                        this.competitorClickHistory.shift();
+                    }
+                    
+                    // Update last clicked competitor
+                    this.lastClickedCompetitor = companyKey;
+                    
+                    // Ensure agent window is open
+                    const agentWindow = document.getElementById('aiAgentWindow');
+                    if (agentWindow) {
+                        const isHidden = agentWindow.style.display === 'none' || 
+                                       !agentWindow.style.display ||
+                                       agentWindow.classList.contains('hidden');
+                        if (isHidden) {
+                            agentWindow.style.display = 'flex';
+                            agentWindow.classList.remove('hidden');
+                        }
+                    }
+                    
+                    // Get conversation history for episodic memory context
+                    const chatHistory = this.getAgentChatHistory();
+                    const recentConversation = chatHistory.slice(-5).map(msg => 
+                        `${msg.role === 'user' ? 'User' : 'Assistant'}: ${msg.content}`
+                    ).join('\n');
+                    
+                    // Use existing navigation history for context
+                    const navHistory = this.navigationHistory.slice(-5).map(entry => 
+                        `${entry.view}${entry.tab ? ` > ${entry.tab}` : ''}${entry.subTab ? ` > ${entry.subTab}` : ''}${entry.modelName ? ` (${entry.modelName})` : ''}`
+                    ).join(' → ');
+                    
+                    // Build company information message
+                    const companyInfo = [];
+                    if (ticker) companyInfo.push(`Ticker: ${ticker}`);
+                    if (companyName) companyInfo.push(`Company: ${companyName}`);
+                    if (marketCap > 0) {
+                        const marketCapFormatted = marketCap >= 1e12 ? `$${(marketCap / 1e12).toFixed(2)}T` :
+                                                   marketCap >= 1e9 ? `$${(marketCap / 1e9).toFixed(2)}B` :
+                                                   marketCap >= 1e6 ? `$${(marketCap / 1e6).toFixed(2)}M` : `$${marketCap.toFixed(0)}`;
+                        companyInfo.push(`Market Cap: ${marketCapFormatted}`);
+                    }
+                    if (evRevenue > 0) companyInfo.push(`EV/Revenue: ${evRevenue.toFixed(1)}x`);
+                    if (peRatio > 0) companyInfo.push(`P/E Ratio: ${peRatio.toFixed(1)}x`);
+                    if (revenueGrowth > 0) companyInfo.push(`Revenue Growth: ${(revenueGrowth * 100).toFixed(0)}%`);
+                    
+                    // Build message for agent with episodic memory context
+                    let message = '';
+                    
+                    if (isRepeatClick) {
+                        // User clicked same company twice - they want more information
+                        message = `I'm clicking on ${ticker || companyName || 'this competitor'} again because I'd like to know more. `;
+                        message += `Please provide additional analysis or deeper insights about ${ticker || companyName || 'this company'} in relation to SpaceX's valuation and operations. `;
+                        message += `${companyInfo.join(', ')}. `;
+                        message += `This is a follow-up question - please reference our previous conversation about this company and expand on it.`;
+                    } else {
+                        // First click or different company
+                        message = `Please analyze ${ticker || companyName || 'this competitor'} in relation to SpaceX's valuation and operations. `;
+                        message += `${companyInfo.join(', ')}. `;
+                        message += `How does this company compare to SpaceX/Starlink in terms of market position, valuation metrics, and competitive dynamics?`;
+                    }
+                    
+                    // Add conversation context if available
+                    if (recentConversation) {
+                        message += `\n\n[Context from recent conversation:\n${recentConversation}]`;
+                    }
+                    
+                    // Add navigation context
+                    if (navHistory) {
+                        message += `\n\n[User has been navigating: ${navHistory}]`;
+                    }
+                    
+                    // Send to agent without showing user prompt - just spinner then response
+                    console.log('[Competitor Click] 📤 About to call sendAgentMessageSilent');
+                    console.log('[Competitor Click] 📤 Voice output enabled?', this.agentVoiceOutputEnabled);
+                    console.log('[Competitor Click] 📤 Voice input enabled?', this.agentVoiceInputEnabled);
+                    console.log('[Competitor Click] 📤 Message preview:', message.substring(0, 100) + '...');
+                    await this.sendAgentMessageSilent(message);
+                    console.log('[Competitor Click] ✅ sendAgentMessageSilent completed');
+                };
+                
+                // Store handler reference
+                row._clickHandler = clickHandler;
+                
+                // Attach handler
+                row.addEventListener('click', clickHandler);
+            });
+            
+            console.log('[Competitor Click Handler] ✅ Handlers attached successfully');
+        } catch (error) {
+            console.error('[Competitor Click Handler] Error attaching handlers:', error);
+        }
+    }
+
     attachTileClickHandler(tileElement, tile, insightData) {
         if (!tileElement || !tile) return;
         
@@ -17747,7 +18359,7 @@ Format your response as plain text. Use the link format exactly as shown above.`
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'X-AI-Model': document.getElementById('agentAIModelSelect')?.value || this.aiModel || 'grok:grok-3'
+                    'X-AI-Model': document.getElementById('agentAIModelSelect')?.value || this.aiModel || 'claude-opus-4-1-20250805'
                 },
                 body: JSON.stringify({
                     message: prompt,
@@ -17999,7 +18611,7 @@ Example response (copy this exact format):
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'X-AI-Model': document.getElementById('agentAIModelSelect')?.value || this.aiModel || 'grok:grok-3'
+                    'X-AI-Model': document.getElementById('agentAIModelSelect')?.value || this.aiModel || 'claude-opus-4-1-20250805'
                 },
                 body: JSON.stringify(requestBody)
             });
@@ -18209,7 +18821,7 @@ Format your response as plain text (2-3 sentences). Use the link format exactly 
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'X-AI-Model': document.getElementById('agentAIModelSelect')?.value || this.aiModel || 'grok:grok-3'
+                    'X-AI-Model': document.getElementById('agentAIModelSelect')?.value || this.aiModel || 'claude-opus-4-1-20250805'
                 },
                 body: JSON.stringify({
                     message: prompt,
@@ -18336,7 +18948,7 @@ Format your response as plain text. Use the link format exactly as shown above.`
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'X-AI-Model': document.getElementById('agentAIModelSelect')?.value || this.aiModel || 'grok:grok-3'
+                    'X-AI-Model': document.getElementById('agentAIModelSelect')?.value || this.aiModel || 'claude-opus-4-1-20250805'
                 },
                 body: JSON.stringify({
                     message: prompt,
@@ -18847,7 +19459,7 @@ Format your response as plain text (2-4 sentences). Use the link format exactly 
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'X-AI-Model': document.getElementById('agentAIModelSelect')?.value || this.aiModel || 'grok:grok-3'
+                    'X-AI-Model': document.getElementById('agentAIModelSelect')?.value || this.aiModel || 'claude-opus-4-1-20250805'
                 },
                 body: JSON.stringify({
                     message: prompt,

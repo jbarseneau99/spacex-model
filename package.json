@@ -16,7 +16,11 @@
     "formulajs": "^1.0.8",
     "mongoose": "^8.21.0",
     "node-fetch": "^2.7.0",
+    "socket.io": "^4.8.3",
     "ws": "^8.19.0",
     "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "socket.io-client": "^4.8.3"
   }
 }

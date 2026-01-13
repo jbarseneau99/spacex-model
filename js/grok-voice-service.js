@@ -58,9 +58,33 @@ class GrokVoiceService {
 
     /**
      * Connect to backend WebSocket proxy
+     * REUSES existing connection if available, prevents duplicate connections
      */
     async connectWebSocket() {
-        return new Promise((resolve, reject) => {
+        // If already connected, return immediately
+        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+            console.log('✅ WebSocket already connected, reusing existing connection');
+            return Promise.resolve();
+        }
+        
+        // If connection is in progress, wait for it
+        if (this.connectionPromise) {
+            console.log('⏳ WebSocket connection already in progress, waiting...');
+            return this.connectionPromise;
+        }
+        
+        // Rate limit: Don't connect more than once per second
+        const now = Date.now();
+        const timeSinceLastAttempt = now - this.lastConnectionAttempt;
+        if (timeSinceLastAttempt < 1000) {
+            const waitTime = 1000 - timeSinceLastAttempt;
+            console.log(`⏳ Rate limiting: Waiting ${waitTime}ms before connecting (prevent Grok rate limits)`);
+            await new Promise(resolve => setTimeout(resolve, waitTime));
+        }
+        this.lastConnectionAttempt = Date.now();
+        
+        // Create connection promise
+        this.connectionPromise = new Promise((resolve, reject) => {
             // Initialize AudioContext if not already initialized (needed for playback)
             if (!this.audioContext) {
                 try {
@@ -87,11 +111,13 @@ class GrokVoiceService {
             const hostname = window.location.hostname;
             const currentPort = window.location.port || (protocol === 'wss:' ? '443' : '80');
             
-            // Detect port (handle different deployment scenarios)
+            // Use the same port as the current page (server runs WebSocket on same port as HTTP)
+            // Only special case: if accessing via port 1999 (proxy), connect to 1998 (backend)
             let analystPort = currentPort;
-            if (currentPort === '1999' || currentPort === '3333') {
-                analystPort = currentPort === '1999' ? '1998' : '3341';
+            if (currentPort === '1999') {
+                analystPort = '1998'; // Proxy scenario: frontend on 1999, backend on 1998
             }
+            // For port 3333 or any other port, use the same port (server handles both HTTP and WebSocket)
 
             const proxyUrl = `${protocol}//${hostname}:${analystPort}/api/analyst/ws/grok-voice`;
 
@@ -112,6 +138,9 @@ class GrokVoiceService {
                 console.log('🔧 WebSocket protocol:', this.ws.protocol);
                 console.log('🔧 WebSocket extensions:', this.ws.extensions);
                 
+                // Clear connection promise since we're now connected
+                this.connectionPromise = null;
+                
                 // Test: Send a test message to verify connection works
                 console.log('🧪 Testing WebSocket connection...');
                 try {
@@ -131,12 +160,44 @@ class GrokVoiceService {
             this.ws.onerror = (error) => {
                 console.error('❌ WebSocket error:', error);
                 console.error('❌ WebSocket error details:', error.message, error.type);
+                console.error('❌ Attempted to connect to:', proxyUrl);
+                console.error('❌ Current page URL:', window.location.href);
+                console.error('❌ Current port:', window.location.port);
+                console.error('❌ Detected analyst port:', analystPort);
+                console.error('❌ If connection failed, check:');
+                console.error('   1. Server is running on port', analystPort);
+                console.error('   2. WebSocket path is correct: /api/analyst/ws/grok-voice');
+                console.error('   3. CORS allows WebSocket connections');
+                // Clear connection promise on error
+                this.connectionPromise = null;
                 reject(error);
             };
             
             this.ws.onclose = (event) => {
                 console.log('🔌 WebSocket closed:', event.code, event.reason);
                 console.log('🔌 Was clean close?', event.wasClean);
+                // Clear connection promise on close
+                this.connectionPromise = null;
+                
+                if (!event.wasClean && event.code !== 1000) {
+                    console.error('❌ WebSocket closed unexpectedly!');
+                    console.error('❌ Close code:', event.code);
+                    console.error('❌ Close reason:', event.reason?.toString() || 'no reason');
+                    console.error('❌ Close code meanings:');
+                    console.error('   1000 = Normal closure');
+                    console.error('   1001 = Going away');
+                    console.error('   1006 = Abnormal closure (no close frame)');
+                    console.error('   1008 = Policy violation');
+                    console.error('   1011 = Internal server error');
+                    console.error('   4000+ = Application-specific errors');
+                    console.error('❌ This usually means:');
+                    console.error('   - Server is not running');
+                    console.error('   - Port is incorrect');
+                    console.error('   - WebSocket path is wrong');
+                    console.error('   - Connection was refused');
+                    console.error('   - API key is invalid');
+                    console.error('   - Rate limit exceeded');
+                }
                 this.ws = null;
             };
             
@@ -327,12 +388,38 @@ class GrokVoiceService {
             return;
         }
         
-        const message = {
+        const commitMessage = {
             type: 'input_audio_buffer.commit'
         };
         
         console.log('📤 Committing audio buffer');
-        this.ws.send(JSON.stringify(message));
+        this.ws.send(JSON.stringify(commitMessage));
+        
+        // CRITICAL: After committing audio input, request audio response from Grok
+        // Wait 500ms after commit (same delay as TTS mode) then send response.create
+        setTimeout(() => {
+            if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+                console.warn('WebSocket closed before sending response.create');
+                return;
+            }
+            
+            const responseMessage = {
+                type: 'response.create',
+                response: {
+                    modalities: ['audio', 'text'] // Request both audio and text response
+                }
+            };
+            
+            console.log('📤 Requesting audio response from Grok (response.create)');
+            console.log('📋 response.create message:', JSON.stringify(responseMessage, null, 2));
+            
+            try {
+                this.ws.send(JSON.stringify(responseMessage));
+                console.log('✅ response.create sent - Grok will now generate audio response');
+            } catch (error) {
+                console.error('❌ Error sending response.create:', error);
+            }
+        }, 500); // 500ms delay after commit (same as TTS mode)
     }
 
     /**
@@ -435,23 +522,15 @@ class GrokVoiceService {
                             }
                             break;
                         
-                        case 'response.audio.delta':
-                            // Audio chunk (base64 PCM) - Working implementation uses this!
-                            console.log('🎵 response.audio.delta received!');
-                            if (message.delta) {
-                                console.log('📥 Received audio chunk (delta), length:', message.delta.length);
-                                this.playAudioChunk(message.delta);
-                            } else {
-                                console.warn('⚠️ response.audio.delta received but no delta data');
-                            }
-                            break;
-                            
                         case 'response.output_audio.delta':
-                            // Alternative message type (newer API version?)
-                            console.log('🎵 response.output_audio.delta received!');
+                            // CORRECT message type (Grok only sends this, NOT response.audio.delta)
+                            console.log('🎵🎵🎵 AUDIO CHUNK RECEIVED: response.output_audio.delta 🎵🎵🎵');
                             if (message.delta) {
-                                console.log('📥 Received audio chunk (delta), length:', message.delta.length);
+                                console.log('📥 Audio chunk delta length:', message.delta.length, 'characters (base64)');
+                                console.log('📥 Estimated audio bytes:', Math.floor(message.delta.length * 3 / 4));
+                                console.log('📥 Calling playAudioChunk...');
                                 this.playAudioChunk(message.delta);
+                                console.log('✅ playAudioChunk called successfully');
                             } else {
                                 console.warn('⚠️ response.output_audio.delta received but no delta data');
                             }
@@ -466,9 +545,20 @@ class GrokVoiceService {
                             break;
                             
                         case 'response.create':
-                            console.log('🎬 response.create CONFIRMATION received from Grok!');
+                            console.log('🎬🎬🎬 response.create CONFIRMATION received from Grok! 🎬🎬🎬');
                             console.log('📋 Full response.create message:', JSON.stringify(message, null, 2));
                             console.log('✅ Grok is now generating audio response...');
+                            if (message.response) {
+                                console.log('📋 Response ID:', message.response.id || 'no ID');
+                                console.log('📋 Response status:', message.response.status || 'no status');
+                                console.log('📋 Response modalities:', message.response.modalities || 'no modalities');
+                            }
+                            break;
+                        
+                        case 'response.output_item.added':
+                        case 'response.output_item.done':
+                            console.log('📋 Response output item:', message.type);
+                            console.log('📋 Full message:', JSON.stringify(message, null, 2));
                             break;
                             
                         case 'response.done':
@@ -545,11 +635,28 @@ class GrokVoiceService {
                             }, 500);
                             break;
                             
+                        case 'conversation.item.created':
+                            console.log('✅✅✅ CONVERSATION ITEM CREATED ✅✅✅');
+                            console.log('📋 Item ID:', message.item?.id || 'no ID');
+                            console.log('📋 Item type:', message.item?.type || 'no type');
+                            console.log('📋 Full message:', JSON.stringify(message, null, 2));
+                            console.log('✅ This confirms Grok received the text message!');
+                            break;
+                            
                         case 'error':
-                            console.error('❌ Grok Voice API error:', message.error);
+                            console.error('❌❌❌ GROK VOICE API ERROR ❌❌❌');
+                            console.error('❌ Error type:', message.type);
+                            console.error('❌ Error code:', message.error?.code || 'no code');
+                            console.error('❌ Error message:', message.error?.message || message.error || 'no message');
+                            console.error('❌ Full error message:', JSON.stringify(message, null, 2));
                             if (this.onErrorCallback) {
                                 this.onErrorCallback(message.error?.message || message.error || 'Grok Voice API error');
                             }
+                            break;
+                            
+                        case 'ping':
+                            // Ping messages are keepalive - ignore them silently
+                            // Don't log every ping to reduce noise
                             break;
                             
                         default:
@@ -816,34 +923,60 @@ class GrokVoiceService {
      */
     async playAudioChunk(base64Audio) {
         try {
+            console.log('🔊 playAudioChunk called');
+            console.log('🔊 Base64 audio length:', base64Audio?.length || 0);
+            
             if (!base64Audio || base64Audio.length === 0) {
-                console.warn('Empty base64 audio, skipping');
+                console.warn('⚠️ Empty base64 audio, skipping');
                 return;
             }
             
             // Ensure audio context is initialized
             if (!this.audioContext) {
-                console.warn('Audio context not initialized, creating new one');
-                this.audioContext = new AudioContext({ sampleRate: 24000 });
+                console.warn('⚠️ Audio context not initialized, creating new one');
+                try {
+                    this.audioContext = new AudioContext({ sampleRate: 24000 });
+                    console.log('✅ AudioContext created');
+                } catch (error) {
+                    console.error('❌ Failed to create AudioContext:', error);
+                    this.audioContext = new AudioContext();
+                }
             }
+            
+            console.log('🔊 AudioContext state:', this.audioContext.state);
             
             // Resume audio context if suspended (browser autoplay policy)
             if (this.audioContext.state === 'suspended') {
+                console.log('⏸️ AudioContext suspended, resuming...');
                 await this.audioContext.resume();
+                console.log('✅ AudioContext resumed, state:', this.audioContext.state);
+            }
+            
+            if (this.audioContext.state === 'closed') {
+                console.error('❌ AudioContext is closed! Cannot play audio.');
+                return;
             }
             
             // Convert base64 to ArrayBuffer
+            console.log('🔊 Converting base64 to ArrayBuffer...');
             const binaryString = atob(base64Audio);
             const bytes = new Uint8Array(binaryString.length);
             for (let i = 0; i < binaryString.length; i++) {
                 bytes[i] = binaryString.charCodeAt(i);
             }
             
+            console.log('🔊 Converted to ArrayBuffer, size:', bytes.buffer.byteLength, 'bytes');
+            console.log('🔊 Calling playAudioFromBuffer...');
+            
             // Play from buffer
             this.playAudioFromBuffer(bytes.buffer);
+            
+            console.log('✅ playAudioChunk completed');
         } catch (error) {
-            console.error('Error playing audio chunk:', error);
-            console.error('Base64 length:', base64Audio?.length);
+            console.error('❌ Error playing audio chunk:', error);
+            console.error('❌ Error message:', error.message);
+            console.error('❌ Error stack:', error.stack);
+            console.error('❌ Base64 length:', base64Audio?.length);
         }
     }
 
