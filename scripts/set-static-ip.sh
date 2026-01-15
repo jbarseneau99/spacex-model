@@ -49,3 +49,12 @@ echo "3. Or update your router's port forwarding to use 10.88.111.4 instead"
 
 
 
+
+
+
+
+
+
+
+
+

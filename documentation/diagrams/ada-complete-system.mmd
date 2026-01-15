@@ -1,0 +1,90 @@
+graph LR
+    subgraph "User Layer"
+        U[User<br/>Aaron]
+    end
+    
+    subgraph "Frontend Layer"
+        UI[Browser UI]
+        VRec[Voice Recognition]
+        VTog[Voice Toggle]
+    end
+    
+    subgraph "Application Layer"
+        APP[app.js<br/>Main Controller]
+        SIO[Socket.io Client]
+    end
+    
+    subgraph "Backend API Layer"
+        SIO_SRV[Socket.io Server]
+        CHAT[/api/agent/chat]
+        CHAT_ENH[/api/agent/chat-enhanced]
+        PROXY[GrokVoiceProxy]
+    end
+    
+    subgraph "Agent Intelligence"
+        REL[Relationship<br/>Detector]
+        RESP[Response<br/>Builder]
+        MEM[Permanent<br/>Memory]
+        EMB[Embedding<br/>Service]
+    end
+    
+    subgraph "External Services"
+        GROK_V[Grok Voice API<br/>TTS]
+        CLAUDE[Claude API<br/>Text Gen]
+        OPENAI[OpenAI API<br/>Embeddings]
+    end
+    
+    subgraph "Storage"
+        REDIS[(Redis<br/>Fast Cache)]
+        MONGO[(MongoDB<br/>Persistent)]
+    end
+    
+    %% User Flow
+    U -->|Types/Speaks| UI
+    UI -->|Sends Message| APP
+    APP -->|Text Chat| CHAT_ENH
+    APP -->|Voice Output| SIO
+    
+    %% Voice Flow
+    SIO -->|Socket.io| SIO_SRV
+    SIO_SRV -->|WebSocket| PROXY
+    PROXY -->|Raw WebSocket| GROK_V
+    GROK_V -->|Audio| PROXY
+    PROXY -->|Audio| SIO_SRV
+    SIO_SRV -->|Audio| SIO
+    SIO -->|Plays| UI
+    UI -->|Sound| U
+    
+    %% Intelligence Flow
+    CHAT_ENH -->|If Enabled| REL
+    REL -->|Uses| EMB
+    EMB -->|Calls| OPENAI
+    REL -->|Detects| RESP
+    RESP -->|Loads| MEM
+    MEM -->|Reads| REDIS
+    MEM -->|Reads| MONGO
+    RESP -->|Generates| CLAUDE
+    CLAUDE -->|Text| CHAT_ENH
+    CHAT_ENH -->|Response| APP
+    APP -->|Displays| UI
+    
+    %% Configuration
+    VTog -->|Toggles Flag| APP
+    VRec -->|Speech Input| APP
+    
+    %% Styling
+    classDef user fill:#ffebee,stroke:#c62828
+    classDef frontend fill:#e3f2fd,stroke:#1565c0
+    classDef backend fill:#fff3e0,stroke:#ef6c00
+    classDef agent fill:#f3e5f5,stroke:#6a1b9a
+    classDef api fill:#e8f5e9,stroke:#2e7d32
+    classDef storage fill:#fce4ec,stroke:#c2185b
+    
+    class U user
+    class UI,VRec,VTog,APP,SIO frontend
+    class SIO_SRV,CHAT,CHAT_ENH,PROXY backend
+    class REL,RESP,MEM,EMB agent
+    class GROK_V,CLAUDE,OPENAI api
+    class REDIS,MONGO storage
+
+

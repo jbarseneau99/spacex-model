@@ -15,6 +15,7 @@ const ValuationAlgorithms = require('./lib/valuation-algorithms');
 const CalculationEngine = require('./lib/calculation-engine');
 const FactorModelsService = require('./services/factor-models');
 const LaunchDataService = require('./services/launch-data');
+const { getRedisService } = require('./services/redis-service');
 
 const app = express();
 const server = http.createServer(app);
@@ -712,6 +713,65 @@ const appStateSchema = new mongoose.Schema({
 appStateSchema.index({ key: 1 }); // Index for quick lookups
 
 const AppState = mongoose.models.AppState || mongoose.model('AppState', appStateSchema, 'app_state');
+
+// Agent Prompts Schema - stores 10-level system prompts for Ada
+const agentPromptsSchema = new mongoose.Schema({
+  userId: { type: String, required: true, index: true }, // User identifier (can be email, username, or session ID)
+  name: { type: String, default: 'default' }, // Prompt set name (for multiple prompt sets per user)
+  prompts: {
+    level1: { type: String, default: '' },
+    level2: { type: String, default: '' },
+    level3: { type: String, default: '' },
+    level4: { type: String, default: '' },
+    level5: { type: String, default: '' },
+    level6: { type: String, default: '' },
+    level7: { type: String, default: '' },
+    level8: { type: String, default: '' },
+    level9: { type: String, default: '' },
+    level10: { type: String, default: '' }
+  },
+  isDefault: { type: Boolean, default: false }, // Mark as default prompt set
+  isActive: { type: Boolean, default: true }, // Active/inactive flag
+  createdAt: { type: Date, default: Date.now },
+  updatedAt: { type: Date, default: Date.now },
+  createdBy: String,
+  updatedBy: String
+}, {
+  timestamps: true
+});
+
+// Indexes for efficient queries
+agentPromptsSchema.index({ userId: 1, name: 1 }, { unique: true }); // One prompt set per user/name combination
+agentPromptsSchema.index({ userId: 1, isDefault: 1 });
+agentPromptsSchema.index({ userId: 1, isActive: 1 });
+
+const AgentPrompts = mongoose.models.AgentPrompts || mongoose.model('AgentPrompts', agentPromptsSchema, 'agent_prompts');
+
+// Twitter Handles Settings Schema
+const twitterHandlesSchema = new mongoose.Schema({
+  userId: { type: String, required: true, default: 'default' }, // User identifier
+  handles: [{
+    handle: { type: String, required: true }, // Twitter handle (without @)
+    category: { type: String, enum: ['builder', 'partner', 'key'], default: 'key' }, // Category: builder, partner, or key account
+    isActive: { type: Boolean, default: true }, // Active/inactive flag
+    addedAt: { type: Date, default: Date.now }
+  }],
+  isDefault: { type: Boolean, default: false }, // Mark as default settings
+  isActive: { type: Boolean, default: true }, // Active/inactive flag
+  createdAt: { type: Date, default: Date.now },
+  updatedAt: { type: Date, default: Date.now },
+  createdBy: String,
+  updatedBy: String
+}, {
+  timestamps: true
+});
+
+// Indexes for efficient queries
+twitterHandlesSchema.index({ userId: 1 }, { unique: true }); // One settings per user
+twitterHandlesSchema.index({ userId: 1, isActive: 1 });
+twitterHandlesSchema.index({ 'handles.handle': 1 });
+
+const TwitterHandles = mongoose.models.TwitterHandles || mongoose.model('TwitterHandles', twitterHandlesSchema, 'twitter_handles');
 
 // Application State API endpoints
 app.get('/api/app-state/:key', async (req, res) => {
@@ -5483,22 +5543,25 @@ app.post('/api/insights/enhanced', async (req, res) => {
       
       if (twitterBearerToken) {
         try {
-          // Fetch real tweets from key SpaceX-related accounts
-          const keyAccounts = ['elonmusk', 'SpaceX', 'CathieDWood', 'aaronburnett', 'VladSaigau']; // Verified accounts
+          // Get Twitter handles from settings (with fallback to defaults)
+          const userId = req.headers['x-user-id'] || req.query.userId || 'default';
+          const handlesConfig = await getTwitterHandlesFromSettings(userId);
+          
+          const keyAccounts = handlesConfig.all; // All active handles
           const allTweets = [];
           
           // Strategy: Get recent tweets from key accounts, then filter for relevance
-          // First, get recent tweets from Aaron and Vlad (they're the tool builders/users)
-          // Also get tweets from Cathie Wood (partner, not builder)
-          const builderAccounts = ['aaronburnett', 'VladSaigau'];
-          const partnerAccounts = ['CathieDWood'];
+          // First, get recent tweets from builders (they're the tool builders/users)
+          // Also get tweets from partners
+          const builderAccounts = handlesConfig.builders;
+          const partnerAccounts = handlesConfig.partners;
           const builderTweets = [];
           const partnerTweets = [];
           
           // Fetch tweets from builders (Aaron and Vlad)
           for (const account of builderAccounts) {
             try {
-              const accountUrl = `https://api.twitter.com/2/tweets/search/recent?query=from:${account}&max_results=10&tweet.fields=created_at,author_id,public_metrics,text&expansions=author_id&user.fields=name,username`;
+              const accountUrl = `https://api.twitter.com/2/tweets/search/recent?query=from:${account}&max_results=10&tweet.fields=created_at,author_id,public_metrics,text,conversation_id,referenced_tweets&expansions=author_id,referenced_tweets.id.author_id&user.fields=name,username`;
               
               const accountResponse = await fetch(accountUrl, {
                 headers: {
@@ -5544,6 +5607,31 @@ app.post('/api/insights/enhanced', async (req, res) => {
                   const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
                   const formattedDate = `${months[dateObj.getMonth()]} ${dateObj.getDate()}, ${dateObj.getFullYear()}`;
                   
+                  // Extract engagement metrics from public_metrics
+                  const publicMetrics = tweet.public_metrics || {};
+                  const engagement = {
+                    likes: publicMetrics.like_count || 0,
+                    retweets: publicMetrics.retweet_count || 0,
+                    replies: publicMetrics.reply_count || 0,
+                    quotes: publicMetrics.quote_count || 0
+                  };
+                  
+                  // Debug: Log first tweet's metrics to verify extraction
+                  if (builderTweets.length === 0 && (engagement.likes > 0 || engagement.retweets > 0 || engagement.replies > 0 || engagement.quotes > 0)) {
+                    console.log(`[Twitter API] Sample tweet metrics for ${username}:`, {
+                      tweetId: tweet.id,
+                      publicMetrics: tweet.public_metrics,
+                      extractedEngagement: engagement
+                    });
+                  }
+                  
+                  // Extract conversation context
+                  const conversationId = tweet.conversation_id || tweet.id;
+                  const referencedTweets = tweet.referenced_tweets || [];
+                  const isReply = referencedTweets.some(ref => ref.type === 'replied_to');
+                  const isRetweet = referencedTweets.some(ref => ref.type === 'retweeted');
+                  const isQuote = referencedTweets.some(ref => ref.type === 'quoted');
+                  
                   builderTweets.push({
                     account: `@${username}`,
                     content: tweet.text,
@@ -5552,6 +5640,13 @@ app.post('/api/insights/enhanced', async (req, res) => {
                     date: formattedDate,
                     timestamp: tweet.created_at,
                     url: `https://twitter.com/${username}/status/${tweet.id}`,
+                    tweetId: tweet.id,
+                    conversationId: conversationId,
+                    isReply: isReply,
+                    isRetweet: isRetweet,
+                    isQuote: isQuote,
+                    referencedTweets: referencedTweets,
+                    engagement: engagement,
                     relevanceScore: isRelevant ? 3 : 2 // Higher score if relevant, but always include
                   });
                 });
@@ -5561,10 +5656,10 @@ app.post('/api/insights/enhanced', async (req, res) => {
             }
           }
           
-          // Fetch tweets from partners (Cathie Wood)
+          // Fetch tweets from partners
           for (const account of partnerAccounts) {
             try {
-              const accountUrl = `https://api.twitter.com/2/tweets/search/recent?query=from:${account}&max_results=10&tweet.fields=created_at,author_id,public_metrics,text&expansions=author_id&user.fields=name,username`;
+              const accountUrl = `https://api.twitter.com/2/tweets/search/recent?query=from:${account}&max_results=10&tweet.fields=created_at,author_id,public_metrics,text,conversation_id,referenced_tweets&expansions=author_id,referenced_tweets.id.author_id&user.fields=name,username`;
               
               const accountResponse = await fetch(accountUrl, {
                 headers: {
@@ -5610,6 +5705,22 @@ app.post('/api/insights/enhanced', async (req, res) => {
                   const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
                   const formattedDate = `${months[dateObj.getMonth()]} ${dateObj.getDate()}, ${dateObj.getFullYear()}`;
                   
+                  // Extract engagement metrics from public_metrics
+                  const publicMetrics = tweet.public_metrics || {};
+                  const engagement = {
+                    likes: publicMetrics.like_count || 0,
+                    retweets: publicMetrics.retweet_count || 0,
+                    replies: publicMetrics.reply_count || 0,
+                    quotes: publicMetrics.quote_count || 0
+                  };
+                  
+                  // Extract conversation context
+                  const conversationId = tweet.conversation_id || tweet.id;
+                  const referencedTweets = tweet.referenced_tweets || [];
+                  const isReply = referencedTweets.some(ref => ref.type === 'replied_to');
+                  const isRetweet = referencedTweets.some(ref => ref.type === 'retweeted');
+                  const isQuote = referencedTweets.some(ref => ref.type === 'quoted');
+                  
                   partnerTweets.push({
                     account: `@${username}`,
                     content: tweet.text,
@@ -5618,6 +5729,13 @@ app.post('/api/insights/enhanced', async (req, res) => {
                     date: formattedDate,
                     timestamp: tweet.created_at,
                     url: `https://twitter.com/${username}/status/${tweet.id}`,
+                    tweetId: tweet.id,
+                    conversationId: conversationId,
+                    isReply: isReply,
+                    isRetweet: isRetweet,
+                    isQuote: isQuote,
+                    referencedTweets: referencedTweets,
+                    engagement: engagement,
                     relevanceScore: isRelevant ? 3 : 2 // Higher score if relevant, but always include
                   });
                 });
@@ -5627,10 +5745,12 @@ app.post('/api/insights/enhanced', async (req, res) => {
             }
           }
           
-          // Also search for SpaceX-related tweets from all key accounts (including Elon and SpaceX)
+          // Also search for SpaceX-related tweets from all key accounts
           try {
-            const searchQuery = encodeURIComponent('(SpaceX OR Starlink OR Starship) (from:elonmusk OR from:SpaceX)');
-            const twitterUrl = `https://api.twitter.com/2/tweets/search/recent?query=${searchQuery}&max_results=10&tweet.fields=created_at,author_id,public_metrics,text&expansions=author_id&user.fields=name,username`;
+            // Build search query from key accounts in settings
+            const keyAccountsQuery = handlesConfig.keys.map(handle => `from:${handle}`).join(' OR ');
+            const searchQuery = encodeURIComponent(`(SpaceX OR Starlink OR Starship) (${keyAccountsQuery})`);
+            const twitterUrl = `https://api.twitter.com/2/tweets/search/recent?query=${searchQuery}&max_results=10&tweet.fields=created_at,author_id,public_metrics,text,conversation_id,referenced_tweets&expansions=author_id,referenced_tweets.id.author_id&user.fields=name,username`;
             
             const twitterResponse = await fetch(twitterUrl, {
               headers: {
@@ -5657,17 +5777,34 @@ app.post('/api/insights/enhanced', async (req, res) => {
                   const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
                   const formattedDate = `${months[dateObj.getMonth()]} ${dateObj.getDate()}, ${dateObj.getFullYear()}`;
                   
-                  // Map usernames to display names
+                  // Map usernames to display names (extend as needed)
                   const displayNames = {
                     'elonmusk': 'Elon Musk',
                     'spacex': 'SpaceX',
                     'cathiedwood': 'Cathie Wood',
                     'aaronburnett': 'Aaron Burnett',
-                    'vladsaigau': 'Vlad Saigau'
+                    'vladsaigau': 'Vlad Saigau',
+                    'tmfassociates': 'TMF Associates'
                   };
                   
                   const normalizedUsername = username.toLowerCase();
                   const displayName = displayNames[normalizedUsername] || accountName;
+                  
+                  // Extract engagement metrics from public_metrics
+                  const publicMetrics = tweet.public_metrics || {};
+                  const engagement = {
+                    likes: publicMetrics.like_count || 0,
+                    retweets: publicMetrics.retweet_count || 0,
+                    replies: publicMetrics.reply_count || 0,
+                    quotes: publicMetrics.quote_count || 0
+                  };
+                  
+                  // Extract conversation context
+                  const conversationId = tweet.conversation_id || tweet.id;
+                  const referencedTweets = tweet.referenced_tweets || [];
+                  const isReply = referencedTweets.some(ref => ref.type === 'replied_to');
+                  const isRetweet = referencedTweets.some(ref => ref.type === 'retweeted');
+                  const isQuote = referencedTweets.some(ref => ref.type === 'quoted');
                   
                   allTweets.push({
                     account: `@${username}`,
@@ -5677,6 +5814,13 @@ app.post('/api/insights/enhanced', async (req, res) => {
                     date: formattedDate,
                     timestamp: tweet.created_at,
                     url: `https://twitter.com/${username}/status/${tweet.id}`,
+                    tweetId: tweet.id,
+                    conversationId: conversationId,
+                    isReply: isReply,
+                    isRetweet: isRetweet,
+                    isQuote: isQuote,
+                    referencedTweets: referencedTweets,
+                    engagement: engagement,
                     relevanceScore: 3 // High relevance for SpaceX-specific tweets
                   });
                 });
@@ -5687,6 +5831,127 @@ app.post('/api/insights/enhanced', async (req, res) => {
             } catch (error) {
               console.error(`[Enhanced Insights] Error fetching tweets:`, error);
             }
+          
+          // Helper function to fetch conversation thread
+          const fetchConversationThread = async (conversationId, rootTweetId) => {
+            try {
+              // Fetch all tweets in the conversation thread
+              const threadUrl = `https://api.twitter.com/2/tweets/search/recent?query=conversation_id:${conversationId}&max_results=100&tweet.fields=created_at,author_id,public_metrics,text,conversation_id,referenced_tweets,in_reply_to_user_id&expansions=author_id,in_reply_to_user_id&user.fields=name,username`;
+              
+              const threadResponse = await fetch(threadUrl, {
+                headers: {
+                  'Authorization': `Bearer ${twitterBearerToken}`,
+                  'Content-Type': 'application/json'
+                }
+              });
+              
+              if (threadResponse.ok) {
+                const threadData = await threadResponse.json();
+                const threadTweets = threadData.data || [];
+                const threadUsers = threadData.includes?.users || [];
+                
+                // Build conversation chain
+                const conversationChain = [];
+                threadTweets.forEach(tweet => {
+                  const user = threadUsers.find(u => u.id === tweet.author_id);
+                  if (!user) return;
+                  
+                  const dateObj = new Date(tweet.created_at);
+                  if (isNaN(dateObj.getTime())) return;
+                  
+                  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+                  const formattedDate = `${months[dateObj.getMonth()]} ${dateObj.getDate()}, ${dateObj.getFullYear()}`;
+                  
+                  const publicMetrics = tweet.public_metrics || {};
+                  const engagement = {
+                    likes: publicMetrics.like_count || 0,
+                    retweets: publicMetrics.retweet_count || 0,
+                    replies: publicMetrics.reply_count || 0,
+                    quotes: publicMetrics.quote_count || 0
+                  };
+                  
+                  const referencedTweets = tweet.referenced_tweets || [];
+                  const isReply = referencedTweets.some(ref => ref.type === 'replied_to');
+                  const isRetweet = referencedTweets.some(ref => ref.type === 'retweeted');
+                  const isQuote = referencedTweets.some(ref => ref.type === 'quoted');
+                  
+                  conversationChain.push({
+                    account: `@${user.username}`,
+                    accountName: user.name || user.username,
+                    content: tweet.text,
+                    date: formattedDate,
+                    timestamp: tweet.created_at,
+                    url: `https://twitter.com/${user.username}/status/${tweet.id}`,
+                    tweetId: tweet.id,
+                    conversationId: tweet.conversation_id || tweet.id,
+                    isReply: isReply,
+                    isRetweet: isRetweet,
+                    isQuote: isQuote,
+                    engagement: engagement,
+                    // Include referenced tweets for graph edge building
+                    referencedTweets: referencedTweets.map(ref => ({
+                      id: ref.id,
+                      type: ref.type
+                    }))
+                  });
+                });
+                
+                // Sort by timestamp (oldest first to show conversation flow)
+                conversationChain.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+                
+                return conversationChain;
+              }
+            } catch (error) {
+              console.error(`[Enhanced Insights] Error fetching conversation thread ${conversationId}:`, error);
+            }
+            return [];
+          };
+          
+          // Fetch conversation threads for tweets with replies
+          const tweetsWithReplies = [...builderTweets, ...partnerTweets, ...allTweets].filter(t => 
+            t.engagement && t.engagement.replies > 0 && t.conversationId
+          );
+          
+          // Fetch threads for up to 5 most engaging conversations (to avoid rate limits)
+          // BUT: Also prioritize key accounts (TMFAssociates, etc.) even if not top 5
+          const priorityAccounts = ['TMFAssociates', '@TMFAssociates', 'Tim Farrar'];
+          const keyAccountTweets = tweetsWithReplies.filter(t => 
+            priorityAccounts.some(key => (t.account || t.accountName || '').includes(key))
+          );
+          
+          const topConversations = tweetsWithReplies
+            .sort((a, b) => (b.engagement.replies + b.engagement.likes) - (a.engagement.replies + a.engagement.likes))
+            .slice(0, 5);
+          
+          // Combine top conversations with key account tweets (avoid duplicates)
+          const conversationsToFetch = [...topConversations];
+          keyAccountTweets.forEach(tweet => {
+            if (!conversationsToFetch.find(t => t.conversationId === tweet.conversationId)) {
+              conversationsToFetch.push(tweet);
+            }
+          });
+          
+          console.log(`[Enhanced Insights] Fetching ${conversationsToFetch.length} conversation threads (${topConversations.length} top + ${keyAccountTweets.length} key accounts)`);
+          
+          const conversationThreads = {};
+          for (const tweet of conversationsToFetch) {
+            if (!conversationThreads[tweet.conversationId]) {
+              const thread = await fetchConversationThread(tweet.conversationId, tweet.tweetId);
+              if (thread.length > 1) { // Only store if there are multiple tweets in thread
+                conversationThreads[tweet.conversationId] = thread;
+                console.log(`[Enhanced Insights] ✅ Fetched conversation thread for ${tweet.account || tweet.accountName}: ${thread.length} tweets`);
+              } else {
+                console.log(`[Enhanced Insights] ⚠️ Conversation thread for ${tweet.account || tweet.accountName} has only ${thread.length} tweet(s), skipping`);
+              }
+            }
+          }
+          
+          // Attach conversation threads to tweets
+          [...builderTweets, ...partnerTweets, ...allTweets].forEach(tweet => {
+            if (conversationThreads[tweet.conversationId]) {
+              tweet.conversationThread = conversationThreads[tweet.conversationId];
+            }
+          });
           
           // Combine builder tweets, partner tweets, and SpaceX-specific tweets
           const combinedTweets = [...builderTweets, ...partnerTweets, ...allTweets];
@@ -6861,10 +7126,49 @@ app.post('/api/agent/chat', async (req, res) => {
     const userInfo = '\n\nUSER CONTEXT: You are assisting Vlad Saigau (@VladSaigau) and Aaron Burnett (@aaronburnett), who built and are using this SpaceX valuation tool at Mach33. Cathie Wood (@CathieDWood) is a partner.';
     
     // Add instructions for shorter responses with "Learn more" options
+    // IMPORTANT: When user types a question, acknowledge it conversationally before responding
     if (finalSystemPrompt) {
-      finalSystemPrompt += userInfo + '\n\nCRITICAL: Keep responses concise (2-3 sentences max). End each response with "Learn more: [topic1], [topic2], [topic3]" for deeper dives.';
+      finalSystemPrompt += userInfo + '\n\nCRITICAL: Keep responses concise (2-3 sentences max). End each response with "Learn more: [topic1], [topic2], [topic3]" for deeper dives. When a user types a question or message, acknowledge it naturally and conversationally - briefly reference what they asked about or acknowledge their question before providing your answer. This makes the conversation feel more natural and engaged.';
+      
+      // Add discourse graph definition and analysis instructions
+      finalSystemPrompt += '\n\nWHAT IS A DISCOURSE GRAPH: A discourse graph is a network representation of a Twitter/X conversation that models how tweets relate to each other. Think of it like a conversation map:';
+      finalSystemPrompt += '\n- NODES = Individual tweets (like points on a map). Each node has properties: content (what was said), engagement metrics (likes, retweets, replies), centrality (how important/connected), discourse role (their function), and depth (how deep in the conversation tree).';
+      finalSystemPrompt += '\n- EDGES = Relationships between tweets (like roads connecting points). Edges show: reply (responds to), retweet (shares), quote (quotes and comments). Edges show conversation flow - who responded to whom.';
+      finalSystemPrompt += '\n- CENTRALITY = A score (0-1) showing how important/connected a tweet is. >0.5 = central/highly connected (many replies/engagement), <0.3 = peripheral (few connections).';
+      finalSystemPrompt += '\n- DEPTH = Position in conversation tree. 0 = root tweet (starts conversation), higher numbers = deeper in thread (further from root).';
+      finalSystemPrompt += '\n- DISCOURSE ROLES = The function each tweet plays: initiator (starts conversation), responder (replies), amplifier (retweets/shares), elaborator (extends discussion), challenger (quotes to disagree/question).';
+      finalSystemPrompt += '\n- SKEPTICISM DETECTION: Tweets may be flagged as skeptical if they contain: "But", "However", "If", conditional language ("I\'d sign up IF..."), contradiction indicators, or questioning language. Skeptical tweets indicate CHALLENGING/QUESTIONING, not endorsing.';
+      finalSystemPrompt += '\n\nCRITICAL: HOW TO ANALYZE USING DISCOURSE GRAPHS: When analyzing an account\'s commentary from a discourse graph:';
+      finalSystemPrompt += '\n1. CHECK DISCOURSE ROLE FIRST: If role is "challenger" or skepticism is detected, the account is QUESTIONING/CHALLENGING, not endorsing. Analyze what they\'re challenging, not what they\'re amplifying.';
+      finalSystemPrompt += '\n2. IDENTIFY SKEPTICAL LANGUAGE: Look for "But", "However", "If", conditional statements ("I\'d sign up IF..."), contradiction indicators. These indicate SKEPTICISM, not endorsement.';
+      finalSystemPrompt += '\n3. UNDERSTAND INTENT: Challenger role + skeptical language = questioning claims, cautioning about context, or challenging assumptions. Do NOT interpret as positive amplification.';
+      finalSystemPrompt += '\n4. FOCUS ON THEIR COMMENTARY: Analyze their ACTUAL tweets/comments. If they retweet, the retweet is CONTEXT - their COMMENTS reveal their actual perspective.';
+      finalSystemPrompt += '\n5. CONSIDER CONTEXT: Conditional statements ("if war zone", "if free") reveal skepticism about normal market conditions. This suggests caution, not bullishness.';
+      finalSystemPrompt += '\n6. ANALYZE DISCOURSE FLOW: Read their tweets chronologically to see how their perspective evolves. Early skepticism often sets tone for later comments.';
+      finalSystemPrompt += '\n7. ENGAGEMENT PATTERNS: High replies on skeptical tweets often indicate controversial/challenging viewpoints that generate discussion, not agreement.';
+      finalSystemPrompt += '\n8. CONSIDER CENTRALITY: High centrality (>0.5) means they\'re central to the conversation, low (<0.3) means peripheral.';
+      finalSystemPrompt += '\n\nGRAPH-BASED ANALYSIS EXAMPLE:';
+      finalSystemPrompt += '\nIf the discourse graph shows an account with:';
+      finalSystemPrompt += '\n- 2 CHALLENGER tweets vs 1 AMPLIFIER tweet';
+      finalSystemPrompt += '\n- Centrality > 0.5 (CENTRAL to conversation)';
+      finalSystemPrompt += '\n- Reply edges showing CHALLENGE to root tweet';
+      finalSystemPrompt += '\n- Retweet edge AFTER skeptical comments';
+      finalSystemPrompt += '\n- Skeptical language (contradiction + conditional)';
+      finalSystemPrompt += '\n\nThen the account is SKEPTICAL, not bullish. Their tweets like "But 1.2M messages indicates most haven\'t used it" and "I\'d sign up IF in war zone AND free" mean:';
+      finalSystemPrompt += '\n- CHALLENGING subscriber claims (not amplifying)';
+      finalSystemPrompt += '\n- QUESTIONING actual usage (not celebrating)';
+      finalSystemPrompt += '\n- CAUTIONING about market context (not bullish)';
+      finalSystemPrompt += '\n- IMPLYING peacetime markets won\'t see same adoption (not suggesting upward revision)';
+      finalSystemPrompt += '\n- Retweet AFTER comments = sharing for DISCUSSION, not ENDORSEMENT';
+      finalSystemPrompt += '\n\nDO NOT interpret this as "extraordinary adoption velocity" or "suggesting upward revision" - interpret as SKEPTICISM and CAUTION.';
+      finalSystemPrompt += '\n\nUSE THE GRAPH STRUCTURE:';
+      finalSystemPrompt += '\n- Count challenger vs amplifier roles (challenger > amplifier = skeptical)';
+      finalSystemPrompt += '\n- Check centrality (high = central to conversation, their view matters)';
+      finalSystemPrompt += '\n- Analyze edge types (reply = challenge, retweet after comments = discussion)';
+      finalSystemPrompt += '\n- Follow discourse flow chronologically (challenge → elaborate → share)';
+      finalSystemPrompt += '\n- Identify skeptical language patterns (contradiction, conditional)';
     } else {
-      finalSystemPrompt = userInfo + '\n\nKeep responses concise (2-3 sentences max). End each response with "Learn more: [topic1], [topic2], [topic3]" for deeper dives.';
+      finalSystemPrompt = userInfo + '\n\nKeep responses concise (2-3 sentences max). End each response with "Learn more: [topic1], [topic2], [topic3]" for deeper dives. When a user types a question or message, acknowledge it naturally and conversationally - briefly reference what they asked about or acknowledge their question before providing your answer. This makes the conversation feel more natural and engaged.';
     }
     
     if (finalSystemPrompt) {
@@ -7003,8 +7307,6 @@ app.post('/api/agent/chat', async (req, res) => {
     // Build user message - if vision is needed, include image
     let userMessageContent;
     if (needsVision) {
-      // Vision mode: build message with image and text
-      // Format depends on provider, but we'll use OpenAI format (works for both with conversion)
       userMessageContent = [
         {
           type: 'image_url',
@@ -7018,7 +7320,6 @@ app.post('/api/agent/chat', async (req, res) => {
         }
       ];
     } else {
-      // Text-only mode: use contextMessage
       userMessageContent = contextMessage;
     }
     
@@ -7060,6 +7361,7 @@ app.post('/api/agent/chat', async (req, res) => {
         // Use GPT-4o for vision if needed
         const visionModel = needsVision ? 'gpt-4o' : (actualModel || 'gpt-4o');
         console.log(`[Agent Chat] 📤 Sending to OpenAI: model=${visionModel}, hasImage=${needsVision}, messageCount=${messages.length}`);
+        console.log(`[Agent Chat] 🔑 API Key present: ${apiKey ? 'YES' : 'NO'}, length: ${apiKey?.length || 0}`);
 
         const response = await fetch('https://api.openai.com/v1/chat/completions', {
           method: 'POST',
@@ -7075,9 +7377,34 @@ app.post('/api/agent/chat', async (req, res) => {
           })
         });
 
+        console.log(`[Agent Chat] 📥 OpenAI Response Status: ${response.status} ${response.statusText}`);
+        
         if (!response.ok) {
           const errorText = await response.text();
-          throw new Error(`OpenAI API error: ${response.status} - ${errorText}`);
+          console.error(`[Agent Chat] ❌ OpenAI API Error Details:`);
+          console.error(`[Agent Chat] ❌ Status: ${response.status}`);
+          console.error(`[Agent Chat] ❌ Status Text: ${response.statusText}`);
+          console.error(`[Agent Chat] ❌ Error Body: ${errorText}`);
+          
+          // Check for payment/billing issues
+          let errorMessage = `OpenAI API error: ${response.status} - ${errorText}`;
+          if (response.status === 401) {
+            errorMessage += '\n\n🔑 ISSUE: Authentication failed - check API key';
+          } else if (response.status === 402 || response.status === 429) {
+            errorMessage += '\n\n💳 ISSUE: Payment/Billing problem - check OpenAI account billing';
+            try {
+              const errorJson = JSON.parse(errorText);
+              if (errorJson.error?.message) {
+                errorMessage += `\n\nError details: ${errorJson.error.message}`;
+              }
+            } catch (e) {
+              // Not JSON, use raw text
+            }
+          } else if (response.status === 429) {
+            errorMessage += '\n\n⏱️ ISSUE: Rate limit exceeded - too many requests';
+          }
+          
+          throw new Error(errorMessage);
         }
 
         const data = await response.json();
@@ -7089,15 +7416,32 @@ app.post('/api/agent/chat', async (req, res) => {
           throw new Error('ANTHROPIC_API_KEY not configured');
         }
 
+        console.log(`[Agent Chat] 🔑 Anthropic API Key present: ${apiKey ? 'YES' : 'NO'}, length: ${apiKey?.length || 0}`);
+
         // Convert messages format for Anthropic
         const anthropicMessages = messages
           .filter(m => m.role !== 'system')
           .map(m => {
-            // If this is the last user message and it has image content, use the structured content
+            // If this is the last user message and it has image content, convert format for Anthropic
             if (m.role === 'user' && Array.isArray(m.content) && m === messages.filter(msg => msg.role !== 'system').slice(-1)[0]) {
+              // Convert OpenAI format (image_url) to Anthropic format (image)
+              const convertedContent = m.content.map(item => {
+                if (item.type === 'image_url') {
+                  // Convert OpenAI format to Anthropic format
+                  return {
+                    type: 'image',
+                    source: {
+                      type: 'url',
+                      url: item.image_url.url
+                    }
+                  };
+                }
+                // Keep text items as-is
+                return item;
+              });
               return {
                 role: 'user',
-                content: m.content // Already formatted with image blocks
+                content: convertedContent
               };
             }
             return {
@@ -7112,6 +7456,8 @@ app.post('/api/agent/chat', async (req, res) => {
         const visionModel = needsVision ? 'claude-sonnet-3-5-20241022' : (actualModel || 'claude-opus-4-1-20250805');
         
         console.log(`[Agent Chat] 📤 Sending to Anthropic: model=${visionModel}, hasImage=${needsVision}, messageCount=${anthropicMessages.length}`);
+        console.log(`[Agent Chat] 📤 System message length: ${systemMessage.length} chars`);
+        console.log(`[Agent Chat] 📤 User message length: ${anthropicMessages[anthropicMessages.length - 1]?.content?.length || 0} chars`);
 
         const response = await fetch('https://api.anthropic.com/v1/messages', {
           method: 'POST',
@@ -7129,13 +7475,44 @@ app.post('/api/agent/chat', async (req, res) => {
           })
         });
 
+        console.log(`[Agent Chat] 📥 Anthropic Response Status: ${response.status} ${response.statusText}`);
+        
         if (!response.ok) {
           const errorText = await response.text();
-          throw new Error(`Anthropic API error: ${response.status} - ${errorText}`);
+          console.error(`[Agent Chat] ❌ Anthropic API Error Details:`);
+          console.error(`[Agent Chat] ❌ Status: ${response.status}`);
+          console.error(`[Agent Chat] ❌ Status Text: ${response.statusText}`);
+          console.error(`[Agent Chat] ❌ Error Body: ${errorText}`);
+          
+          // Check for payment/billing issues
+          let errorMessage = `Anthropic API error: ${response.status} - ${errorText}`;
+          if (response.status === 401) {
+            errorMessage += '\n\n🔑 ISSUE: Authentication failed - check API key';
+          } else if (response.status === 402 || response.status === 403) {
+            errorMessage += '\n\n💳 ISSUE: Payment/Billing problem - check Anthropic account billing';
+            try {
+              const errorJson = JSON.parse(errorText);
+              if (errorJson.error?.message) {
+                errorMessage += `\n\nError details: ${errorJson.error.message}`;
+              }
+              if (errorJson.error?.type) {
+                errorMessage += `\n\nError type: ${errorJson.error.type}`;
+              }
+            } catch (e) {
+              // Not JSON, use raw text
+            }
+          } else if (response.status === 429) {
+            errorMessage += '\n\n⏱️ ISSUE: Rate limit exceeded - too many requests';
+          } else if (response.status === 500 || response.status === 503) {
+            errorMessage += '\n\n🔧 ISSUE: Anthropic API server error - service may be down';
+          }
+          
+          throw new Error(errorMessage);
         }
 
         const data = await response.json();
         aiResponse = data.content?.[0]?.text || 'Sorry, I could not generate a response.';
+        console.log(`[Agent Chat] ✅ Anthropic response received, length: ${aiResponse.length} chars`);
       }
 
       res.json({
@@ -7143,14 +7520,34 @@ app.post('/api/agent/chat', async (req, res) => {
         response: aiResponse
       });
     } catch (error) {
-      console.error('Agent chat API error:', error);
-      res.json({
+      console.error('❌ Agent chat API error:', error);
+      console.error('❌ Error stack:', error.stack);
+      console.error('❌ Error message:', error.message);
+      
+      // Check if it's a payment/billing issue
+      const isPaymentIssue = error.message?.includes('Payment') || 
+                            error.message?.includes('Billing') || 
+                            error.message?.includes('402') ||
+                            error.message?.includes('quota') ||
+                            error.message?.includes('exceeded');
+      
+      if (isPaymentIssue) {
+        console.error('💳💳💳 PAYMENT/BILLING ISSUE DETECTED 💳💳💳');
+        console.error('💳 Check your API account billing status');
+        console.error('💳 Verify payment method is valid');
+        console.error('💳 Check account has sufficient credits/quota');
+      }
+      
+      res.status(500).json({
         success: false,
-        error: error.message || 'Failed to generate response'
+        error: error.message || 'Failed to generate response',
+        isPaymentIssue: isPaymentIssue,
+        errorType: isPaymentIssue ? 'payment' : 'api_error'
       });
     }
   } catch (error) {
-    console.error('Agent chat endpoint error:', error);
+    console.error('❌ Agent chat endpoint error:', error);
+    console.error('❌ Error stack:', error.stack);
     res.status(500).json({
       success: false,
       error: error.message || 'Internal server error'
@@ -7169,7 +7566,7 @@ app.get('/api/analyst/browser/voice-health', (req, res) => {
   
   return res.json({
     status: status.grokConnected ? 'connected' : 'disconnected',
-    websocketPath: '/api/analyst/ws/grok-voice',
+    websocketPath: 'N/A - Using Socket.io only',
     grokApiKeyConfigured: !!grokApiKey,
     grokConnected: status.grokConnected,
     websocketState: wsState === 0 ? 'CONNECTING' : wsState === 1 ? 'OPEN' : wsState === 2 ? 'CLOSING' : wsState === 3 ? 'CLOSED' : 'NULL',
@@ -7261,6 +7658,14 @@ app.post('/api/analyst/browser/voice-token', async (req, res) => {
  * GrokVoiceWebSocketProxy - Manages shared Grok Voice API connection
  * Follows the working implementation pattern with proper connection reuse,
  * singleton pattern, and rate limiting prevention
+ * 
+ * IMPORTANT VERBATIM READING NOTE:
+ * - This proxy connects to Grok Voice API (wss://api.x.ai/v1/realtime)
+ * - Session.update is sent ONCE during connection (minimal instructions)
+ * - Do NOT send session.update before each text message (causes unwanted responses)
+ * - Verbatim reading is achieved via prefix "Read this aloud exactly as written:" in text
+ * - See socket.on('grok-voice:text') handler for verbatim reading implementation
+ * - See documentation/VERBATIM_READING_SOLUTION.md for details
  */
 class GrokVoiceWebSocketProxy extends EventEmitter {
   constructor() {
@@ -7354,7 +7759,7 @@ class GrokVoiceWebSocketProxy extends EventEmitter {
         this.connectionPromise = null;
         this.retryCount = 0; // Reset retry count on success
         
-        // Emit session-ready event
+        // Emit session-ready event - Socket.io handlers will send session.update
         this.emit('session-ready');
         
         // Process queued messages
@@ -7586,13 +7991,57 @@ io.on('connection', (socket) => {
   
   // Connect to Grok Voice
   socket.on('grok-voice:connect', async (data) => {
-    const { sessionId: clientSessionId, voice = 'ara' } = data || {};
+    const { sessionId: clientSessionId, voice = 'eve' } = data || {};
     const actualSessionId = clientSessionId || sessionId;
     
     console.log(`[socket.io] 📨 Received grok-voice:connect event (sessionId: ${actualSessionId}, voice: ${voice})`);
     
     // Set up session-ready handler
-    const sessionReadyHandler = () => {
+    const sessionReadyHandler = async () => {
+      // CRITICAL: Send session.update IMMEDIATELY after Grok connects to configure Ada's identity
+      // This MUST be sent before any text messages to prevent Grok from misidentifying
+      // 
+      // IMPORTANT VERBATIM READING NOTE:
+      // - Keep instructions MINIMAL (just identity + voice)
+      // - Do NOT include complex verbatim instructions here
+      // - Do NOT send session.update before each text message (causes unwanted responses)
+      // - Verbatim reading is achieved via prefix in the text itself: "Read this aloud exactly as written:"
+      // - See socket.on('grok-voice:text') handler for verbatim reading implementation
+      //
+      const sessionConfig = {
+        type: 'session.update',
+        session: {
+          instructions: 'You are Ada, the Mach33 Assistant. You are NOT Grok. You are Ada, a helpful voice assistant with a British accent. You are speaking with Aaron Burnett.',
+          voice: 'eve', // Ada uses Eve voice (British accent)
+          turn_detection: {
+            type: 'server_vad'
+          },
+          audio: {
+            input: {
+              format: {
+                type: 'audio/pcm',
+                rate: 24000
+              }
+            },
+            output: {
+              format: {
+                type: 'audio/pcm',
+                rate: 24000
+              }
+            }
+          }
+        }
+      };
+      
+      console.log(`[socket.io] 📤 Sending session.update to configure Ada identity (sessionId: ${actualSessionId})`);
+      grokVoiceProxy.sendToGrok(JSON.stringify(sessionConfig));
+      
+      // Wait a moment for session.update to be processed
+      // IMPORTANT: Do NOT send response.create here - session.update should not trigger audio
+      // IMPORTANT: Do NOT add verbatim instructions here - they cause unwanted responses
+      // Verbatim reading is handled via prefix in the text message itself
+      await new Promise(resolve => setTimeout(resolve, 300));
+      
       socket.emit('grok-voice:connected', { sessionId: actualSessionId, voice });
       console.log(`[socket.io] ✅ Emitted grok-voice:connected (sessionId: ${actualSessionId})`);
     };
@@ -7602,7 +8051,7 @@ io.on('connection', (socket) => {
     // Connect to Grok
     try {
       await grokVoiceProxy.connectToGrok();
-      // Session-ready event will be emitted when Grok connects
+      // Session-ready event will be emitted when Grok connects, which triggers session.update
     } catch (error) {
       console.error(`[socket.io] ❌ Failed to connect to Grok:`, error.message);
       socket.emit('grok-voice:error', { sessionId: actualSessionId, error: error.message });
@@ -7659,7 +8108,7 @@ io.on('connection', (socket) => {
   });
   
   // Send text to Grok Voice
-  socket.on('grok-voice:text', (data) => {
+  socket.on('grok-voice:text', async (data) => {
     const { sessionId: clientSessionId, text } = data || {};
     const actualSessionId = clientSessionId || sessionId;
     
@@ -7670,26 +8119,59 @@ io.on('connection', (socket) => {
       return;
     }
     
-    // Send text to Grok via proxy
+    // CRITICAL VERBATIM READING IMPLEMENTATION:
+    // 
+    // DO NOT send session.update before each message - this causes unwanted responses
+    // Instead, use a simple prefix approach that signals verbatim reading
+    //
+    // Why this works:
+    // 1. Initial session.update (during connection) sets identity only (minimal)
+    // 2. Prefix "Read this aloud exactly as written:" signals verbatim reading
+    // 3. No extra session.update calls = no unwanted responses
+    // 4. Simple prefix is more effective than complex instructions
+    //
+    // See documentation/VERBATIM_READING_SOLUTION.md for details
+    //
+    console.log(`[socket.io] 📤 PREPARING TO SEND TEXT TO GROK FOR VERBATIM READING:`);
+    console.log(`[socket.io] 📤 Text length: ${text.length} characters`);
+    console.log(`[socket.io] 📤 Text preview: "${text.substring(0, 100)}..."`);
+    
+    // Format text to signal verbatim reading - use a prefix that Grok understands
+    // The prefix tells Grok this is text to read, not a conversation starter
+    // This simple prefix approach works better than complex session.update instructions
+    const verbatimText = `Read this aloud exactly as written:\n\n${text}`;
+    
+    // Send text directly WITHOUT session.update before it
+    // The initial session.update (during connection) is sufficient
+    // Sending session.update before each message causes unwanted responses
     const conversationItem = {
       type: 'conversation.item.create',
       item: {
         type: 'message',
         role: 'user',
-        content: [{ type: 'input_text', text: text }]
+        content: [{ 
+          type: 'input_text', 
+          text: verbatimText
+        }]
       }
     };
     
-    grokVoiceProxy.sendToGrok(JSON.stringify(conversationItem));
+    console.log(`[socket.io] 📤 Sending conversation.item.create (with verbatim prefix)`);
+    console.log(`[socket.io] 📤 Text: "${verbatimText.substring(0, 150)}..."`);
     
-    // Wait 500ms, then send response.create
+    grokVoiceProxy.sendToGrok(JSON.stringify(conversationItem));
+    console.log(`[socket.io] ✅ Sent conversation.item.create`);
+    
+    // Wait 500ms, then send response.create to trigger audio
     setTimeout(() => {
       const responseCreate = {
         type: 'response.create',
-        response: { modalities: ['audio', 'text'] }
+        response: { 
+          modalities: ['audio', 'text']
+        }
       };
       grokVoiceProxy.sendToGrok(JSON.stringify(responseCreate));
-      console.log(`[socket.io] 📤 Sent response.create to Grok`);
+      console.log(`[socket.io] ✅ Sent response.create`);
     }, 500);
   });
 });
@@ -7698,59 +8180,1018 @@ io.on('connection', (socket) => {
 // Raw WebSocket Server (for backward compatibility)
 // ============================================================================
 
-const wss = new WebSocket.Server({ 
-  server: server,
-  path: '/api/analyst/ws/grok-voice'
-});
-
-// Raw WebSocket connection handler (backward compatibility)
-wss.on('connection', (clientWs, req) => {
-  const connectTimestamp = new Date().toISOString();
-  const clientId = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-  console.log(`[${connectTimestamp}] [raw-ws] 🔌 Client WebSocket connected (ID: ${clientId})`);
-  addLog('info', `Raw WebSocket client connected (ID: ${clientId})`);
-  
-  // Add client to proxy
-  grokVoiceProxy.addClient(clientWs, clientId);
-  
-  // Forward messages from client to Grok
-  clientWs.on('message', (data) => {
-    // Log message type for debugging
-    try {
-      if (Buffer.isBuffer(data) || data instanceof ArrayBuffer) {
-        console.log('[raw-ws] 📤 Client → Grok: Binary message (audio data)');
-      } else if (typeof data === 'string') {
-        const message = JSON.parse(data);
-        const timestamp = new Date().toISOString();
-        console.log(`[${timestamp}] [raw-ws] 📤 Client → Grok:`, message.type || 'unknown');
-        addLog('client_to_grok', `Client → Grok: ${message.type || 'unknown'}`, message);
-      }
-    } catch (e) {
-      console.log('[raw-ws] 📤 Client → Grok: Non-JSON message');
-    }
-    
-    // Send to Grok via proxy
-    grokVoiceProxy.sendToGrok(data);
-  });
-  
-  // Handle client errors
-  clientWs.on('error', (error) => {
-    const timestamp = new Date().toISOString();
-    console.error(`[${timestamp}] [raw-ws] Client WebSocket error:`, error.message);
-    grokVoiceProxy.removeClient(clientWs);
-  });
-  
-  // Handle client disconnections
-  clientWs.on('close', (code, reason) => {
-    const timestamp = new Date().toISOString();
-    console.log(`[${timestamp}] [raw-ws] 🔌 Client WebSocket closed: ${code}`);
-    grokVoiceProxy.removeClient(clientWs);
-  });
-});
+// ============================================================================
+// Raw WebSocket Server REMOVED - Using Socket.io ONLY
+// ============================================================================
+// The frontend now uses Socket.io exclusively for Grok Voice communication.
+// Architecture: Frontend (Socket.io) ↔ Backend (Socket.io) ↔ Grok (Raw WebSocket - required by Grok API)
+// The raw WebSocket server was removed to simplify the architecture.
 
 // Legacy function for backward compatibility (now uses singleton)
 function initializeSharedGrokConnection() {
   return grokVoiceProxy.connectToGrok();
+}
+
+// Conversation Report Endpoint
+app.post('/api/agent/conversation-report', async (req, res) => {
+  try {
+    const { conversation, context, history } = req.body;
+    
+    if (!conversation) {
+      return res.status(400).json({
+        success: false,
+        error: 'Conversation text is required'
+      });
+    }
+    
+    // Calculate session duration
+    const sessionStart = context?.sessionStart ? new Date(context.sessionStart) : new Date();
+    const sessionDuration = Math.round((Date.now() - sessionStart.getTime()) / 1000 / 60); // minutes
+    
+    // Build stimulus statistics section
+    let stimulusStats = '';
+    if (context?.stimulusCounts) {
+      const total = (context.stimulusCounts.click || 0) + (context.stimulusCounts.type || 0) + (context.stimulusCounts.voice || 0);
+      stimulusStats = `## Input Statistics\n\n` +
+        `- **Total Interactions:** ${total}\n` +
+        `- **Clicks:** ${context.stimulusCounts.click || 0} (${total > 0 ? Math.round((context.stimulusCounts.click || 0) / total * 100) : 0}%)\n` +
+        `- **Text Input:** ${context.stimulusCounts.type || 0} (${total > 0 ? Math.round((context.stimulusCounts.type || 0) / total * 100) : 0}%)\n` +
+        `- **Voice Input:** ${context.stimulusCounts.voice || 0} (${total > 0 ? Math.round((context.stimulusCounts.voice || 0) / total * 100) : 0}%)\n\n`;
+    }
+    
+    // Generate a comprehensive text report from the conversation
+    const reportText = `# Conversation Report\n\n` +
+      `**Generated:** ${new Date().toLocaleString()}\n` +
+      `**Session Start:** ${context?.sessionStart ? new Date(context.sessionStart).toLocaleString() : 'Unknown'}\n` +
+      `**Session Duration:** ${sessionDuration} minutes\n` +
+      `**Message Count:** ${context?.messageCount || 0}\n` +
+      `**Current View:** ${context?.currentView || 'Unknown'}\n` +
+      `**Current Model:** ${context?.currentModel || 'None'}\n\n` +
+      stimulusStats +
+      `## Topics Discussed\n\n${(context?.topicsDiscussed && context.topicsDiscussed.length > 0) ? context.topicsDiscussed.map(t => `- ${t}`).join('\n') : 'No specific topics identified.'}\n\n` +
+      `## Conversation Transcript\n\n${conversation}\n\n` +
+      `## Full History (Structured Data)\n\n${JSON.stringify(history || [], null, 2)}\n`;
+    
+    res.json({
+      success: true,
+      report: reportText,
+      pdfUrl: null, // PDF generation can be added later
+      metadata: {
+        generatedAt: new Date().toISOString(),
+        messageCount: context?.messageCount || 0,
+        topicsCount: (context?.topicsDiscussed || []).length,
+        sessionDuration: sessionDuration,
+        stimulusCounts: context?.stimulusCounts || {}
+      }
+    });
+  } catch (error) {
+    console.error('❌ Error generating conversation report:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to generate report'
+    });
+  }
+});
+
+// History Analytics Endpoint
+app.get('/api/agent/analytics/history', async (req, res) => {
+  try {
+    const redisService = getRedisService();
+    const HistoryAnalytics = require('./js/agent/analytics/HistoryAnalytics');
+    
+    const analytics = new HistoryAnalytics(redisService);
+    
+    const metrics = analytics.getMetrics();
+    
+    res.json({
+      success: true,
+      metrics: metrics
+    });
+  } catch (error) {
+    console.error('❌ Error getting analytics:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// Enhanced AI Agent Chat Endpoint with Relationship Detection
+app.post('/api/agent/chat-enhanced', async (req, res) => {
+  try {
+    const { message, systemPrompt, context, history, imageUrl, adaSettings, useRelationshipDetection } = req.body;
+    
+    // Get Ada persona parameters from request or use defaults
+    const responseStyle = adaSettings?.responseStyle || 'conversational';
+    const formality = adaSettings?.formality || 3;
+    const detailLevel = adaSettings?.detailLevel || 3;
+    
+    // Build persona instructions
+    const buildPersonaInstructions = (style, formality, detail) => {
+      const styles = {
+        conversational: 'Use a conversational, friendly tone.',
+        professional: 'Use a professional, formal tone.',
+        technical: 'Use a technical, precise tone.'
+      };
+      return styles[style] || styles.conversational;
+    };
+    const personaInstructions = buildPersonaInstructions(responseStyle, formality, detailLevel);
+    let requestedModel = req.headers['x-ai-model'] || process.env.DEFAULT_AI_MODEL || 'grok:grok-4-1-fast-reasoning';
+    
+    if (!message) {
+      return res.json({ success: false, error: 'Message is required' });
+    }
+
+    // Initialize agent communication system if available
+    let relationship = null;
+    let enhancedMessage = message;
+    let enhancedSystemPrompt = systemPrompt || '';
+    
+    // Try to load relationship detection modules (optional)
+    let RelationshipDetector, ResponseBuilder, AgentCommunicationSystem, embeddingService;
+    try {
+      RelationshipDetector = require('./js/agent/relationship/RelationshipDetector');
+      ResponseBuilder = require('./js/agent/response/ResponseBuilder');
+      AgentCommunicationSystem = require('./js/agent/AgentCommunicationSystem');
+      
+      // Initialize embedding service if available
+      try {
+        const EmbeddingService = require('./js/agent/services/EmbeddingService');
+        embeddingService = new EmbeddingService({
+          provider: 'openai',
+          apiKey: process.env.OPENAI_API_KEY
+        });
+      } catch (e) {
+        console.warn('⚠️ EmbeddingService not available:', e.message);
+        embeddingService = null;
+      }
+    } catch (e) {
+      // Modules not available, skip relationship detection
+      console.warn('⚠️ Relationship detection modules not available:', e.message);
+      RelationshipDetector = null;
+      ResponseBuilder = null;
+      AgentCommunicationSystem = null;
+      embeddingService = null;
+    }
+    
+    if (useRelationshipDetection && AgentCommunicationSystem && RelationshipDetector && ResponseBuilder) {
+      try {
+        const redisService = getRedisService();
+        
+        // Get current state from Redis
+        const currentState = redisService.isReady() ? await redisService.getAllState() : {};
+        const currentSentence = currentState.currentSentence || null;
+        const recentTurns = currentState.recentTurns || [];
+        
+        // Load history
+        const fullHistory = redisService.isReady() 
+          ? await redisService.getAllInteractions(100)
+          : (history || []);
+        
+        // Detect relationship (with embedding service if available)
+        const relationshipDetector = new RelationshipDetector(redisService, embeddingService);
+        relationship = await relationshipDetector.detectRelationship(message, {
+          currentSentence,
+          recentTurns,
+          fullHistory,
+          currentStock: currentState.currentStock || null,
+          newStock: context?.stockInfo?.ticker || null,
+          isFirstInteraction: !history || history.length === 0
+        });
+        
+        console.log(`[Enhanced Agent] Relationship detected: Category ${relationship.category}, Confidence: ${relationship.confidence.toFixed(2)}`);
+        
+        // Build enhanced response using ResponseBuilder
+        const stateManager = { 
+          getAll: async () => currentState,
+          getRecentTurns: async () => recentTurns 
+        };
+        const memory = { 
+          loadAllHistory: async () => fullHistory,
+          detectPatterns: async () => ({})
+        };
+        const responseBuilder = new ResponseBuilder(memory, stateManager);
+        
+        const responseData = await responseBuilder.buildAgentMessage(
+          message,
+          relationship,
+          context,
+          enhancedSystemPrompt
+        );
+        
+        enhancedMessage = responseData.message;
+        enhancedSystemPrompt = responseData.systemPrompt;
+        
+      } catch (error) {
+        console.error('❌ Error in relationship detection:', error);
+        // Continue with original message if detection fails
+      }
+    }
+    
+    // Continue with standard agent chat logic (reuse existing endpoint logic)
+    // Check if we need vision capabilities
+    const needsVision = !!(context && context.imageAnalysis && context.imageAnalysis.imageUrl);
+    const actualImageUrl = context && context.imageAnalysis && context.imageAnalysis.imageUrl;
+    
+    if (needsVision) {
+      if (!requestedModel.startsWith('openai:') && !requestedModel.startsWith('grok:')) {
+        requestedModel = 'claude-sonnet-3-5-20241022';
+      } else if (requestedModel.startsWith('openai:')) {
+        requestedModel = 'openai:gpt-4o';
+      }
+      console.log(`[Enhanced Agent Chat] 🖼️ Vision required, using model: ${requestedModel}`);
+    }
+
+    // Build conversation history
+    const messages = [];
+    
+    // Add enhanced system prompt with persona instructions
+    // CRITICAL: Always clarify Ada's identity - she is NOT Grok, she is Ada speaking to Aaron
+    const userInfo = '\n\nUSER CONTEXT - CRITICAL (APPLIES TO EVERY RESPONSE): You are Ada, the Mach33 Assistant. You are NOT Grok. You are Ada, a helpful voice assistant with a British accent. You are speaking with Aaron (pronounced "air-in") Burnett (@aaronburnett), who built and is using this SpaceX valuation tool at Mach33. Vlad Saigau (@VladSaigau) also built this tool, and Cathie Wood (@CathieDWood) is a partner. You work at Mach33, a space industry investment and analysis firm. IMPORTANT: Never say "I am Grok" or "This is Grok" - you are Ada. Remember this context in EVERY response - it is part of your identity.';
+    
+    // Add persona instructions to enhanced system prompt
+    enhancedSystemPrompt += personaInstructions;
+    
+    if (enhancedSystemPrompt) {
+      messages.push({
+        role: 'system',
+        content: enhancedSystemPrompt + userInfo
+      });
+    }
+
+    // Add conversation history (last 20 messages for context)
+    if (history && Array.isArray(history) && history.length > 0) {
+      console.log(`[Enhanced Agent] Including ${history.length} messages from conversation history`);
+      const recentHistory = history.slice(-20); // Last 20 messages
+      recentHistory.forEach((msg, index) => {
+        if (msg.role && msg.content) {
+          messages.push({
+            role: msg.role === 'assistant' ? 'assistant' : 'user',
+            content: msg.content
+          });
+        }
+      });
+      console.log(`[Enhanced Agent] Added ${recentHistory.length} messages to context`);
+    }
+
+    // Add user message
+    messages.push({
+      role: 'user',
+      content: enhancedMessage
+    });
+
+    // Call AI API with conversation history (reuse logic from /api/agent/chat)
+    let aiResponse;
+    try {
+      // Determine provider from model string
+      let provider = 'anthropic';
+      let actualModel = requestedModel;
+      
+      if (requestedModel.startsWith('openai:')) {
+        provider = 'openai';
+        actualModel = requestedModel.replace('openai:', '');
+      } else if (requestedModel.startsWith('grok:')) {
+        provider = 'grok';
+        actualModel = requestedModel.replace('grok:', '');
+      }
+
+      if (provider === 'grok') {
+        // GROK HTTP API DISABLED - Grok is ONLY used for WebSocket voice
+        console.warn('⚠️ Grok HTTP API disabled - Grok is ONLY for voice (WebSocket). Using Claude instead.');
+        provider = 'anthropic';
+        actualModel = 'claude-opus-4-1-20250805';
+      }
+      
+      if (provider === 'openai') {
+        const apiKey = process.env.OPENAI_API_KEY;
+        if (!apiKey) {
+          throw new Error('OPENAI_API_KEY not configured');
+        }
+        
+        const visionModel = needsVision ? 'gpt-4o' : (actualModel || 'gpt-4o');
+        console.log(`[Enhanced Agent Chat] 📤 Sending to OpenAI: model=${visionModel}, hasImage=${needsVision}, messageCount=${messages.length}`);
+
+        const response = await fetch('https://api.openai.com/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiKey}`
+          },
+          body: JSON.stringify({
+            model: visionModel,
+            messages: messages,
+            max_tokens: 2000,
+            temperature: 0.7
+          })
+        });
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(`OpenAI API error: ${response.status} - ${errorText}`);
+        }
+
+        const data = await response.json();
+        aiResponse = data.choices?.[0]?.message?.content || 'Sorry, I could not generate a response.';
+      } else {
+        // Use Anthropic (Claude)
+        const apiKey = process.env.ANTHROPIC_API_KEY;
+        if (!apiKey) {
+          throw new Error('ANTHROPIC_API_KEY not configured');
+        }
+
+        // Convert messages format for Anthropic
+        const anthropicMessages = messages
+          .filter(m => m.role !== 'system')
+          .map(m => {
+            if (m.role === 'user' && Array.isArray(m.content) && m === messages.filter(msg => msg.role !== 'system').slice(-1)[0]) {
+              // Convert OpenAI format (image_url) to Anthropic format (image)
+              const convertedContent = m.content.map(item => {
+                if (item.type === 'image_url') {
+                  // Convert OpenAI format to Anthropic format
+                  return {
+                    type: 'image',
+                    source: {
+                      type: 'url',
+                      url: item.image_url.url
+                    }
+                  };
+                }
+                // Keep text items as-is
+                return item;
+              });
+              return {
+                role: 'user',
+                content: convertedContent
+              };
+            }
+            return {
+              role: m.role === 'assistant' ? 'assistant' : 'user',
+              content: typeof m.content === 'string' ? m.content : (Array.isArray(m.content) ? m.content : JSON.stringify(m.content))
+            };
+          });
+
+        const systemMessage = messages.find(m => m.role === 'system')?.content || '';
+        
+        const visionModel = needsVision ? 'claude-sonnet-3-5-20241022' : (actualModel || 'claude-opus-4-1-20250805');
+        
+        console.log(`[Enhanced Agent Chat] 📤 Sending to Anthropic: model=${visionModel}, hasImage=${needsVision}, messageCount=${anthropicMessages.length}`);
+
+        const response = await fetch('https://api.anthropic.com/v1/messages', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': apiKey,
+            'anthropic-version': '2023-06-01'
+          },
+          body: JSON.stringify({
+            model: visionModel,
+            max_tokens: 2000,
+            system: systemMessage,
+            messages: anthropicMessages,
+            temperature: 0.7
+          })
+        });
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(`Anthropic API error: ${response.status} - ${errorText}`);
+        }
+
+        const data = await response.json();
+        aiResponse = data.content?.[0]?.text || 'Sorry, I could not generate a response.';
+      }
+
+      // Save interaction if relationship detection was used
+      if (relationship && AgentCommunicationSystem) {
+        try {
+          const redisService = getRedisService();
+          const agentSystem = new AgentCommunicationSystem(redisService, null, null, {
+            enableEmbeddings: true,
+            embeddingConfig: {
+              provider: 'openai',
+              apiKey: process.env.OPENAI_API_KEY
+            }
+          });
+          
+          await agentSystem.saveInteraction(message, aiResponse, relationship, [], {
+            userId: null
+          });
+        } catch (saveError) {
+          console.warn('⚠️ Failed to save interaction:', saveError.message);
+        }
+      }
+
+      res.json({
+        success: true,
+        response: aiResponse,
+        relationship: relationship || null
+      });
+    } catch (error) {
+      console.error('❌ Error in AI API call:', error);
+      console.error('❌ Error stack:', error.stack);
+      res.status(500).json({
+        success: false,
+        error: error.message || 'Failed to generate response'
+      });
+    }
+  } catch (error) {
+    console.error('❌ Error in chat-enhanced endpoint:', error);
+    console.error('❌ Error stack:', error.stack);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Internal server error'
+    });
+  }
+});
+
+// ============================================================================
+// Agent Prompts CRUD API Endpoints
+// ============================================================================
+
+// GET /api/agent/prompts - Get prompts for user (or default if no userId)
+app.get('/api/agent/prompts', async (req, res) => {
+  try {
+    const userId = req.query.userId || req.headers['x-user-id'] || 'default';
+    const name = req.query.name || 'default';
+    
+    let prompts = await AgentPrompts.findOne({ 
+      userId: userId, 
+      name: name,
+      isActive: true 
+    }).lean();
+    
+    // If not found, try to get default
+    if (!prompts) {
+      prompts = await AgentPrompts.findOne({ 
+        userId: userId, 
+        isDefault: true,
+        isActive: true 
+      }).lean();
+    }
+    
+    // If still not found, return null (frontend will use defaults)
+    if (!prompts) {
+      return res.json({ 
+        success: true, 
+        data: null,
+        message: 'No prompts found, using defaults'
+      });
+    }
+    
+    res.json({ 
+      success: true, 
+      data: {
+        id: prompts._id,
+        userId: prompts.userId,
+        name: prompts.name,
+        prompts: prompts.prompts,
+        isDefault: prompts.isDefault,
+        createdAt: prompts.createdAt,
+        updatedAt: prompts.updatedAt
+      }
+    });
+  } catch (error) {
+    console.error('❌ Error getting agent prompts:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message 
+    });
+  }
+});
+
+// GET /api/agent/prompts/list - List all prompt sets for a user
+app.get('/api/agent/prompts/list', async (req, res) => {
+  try {
+    const userId = req.query.userId || req.headers['x-user-id'] || 'default';
+    
+    const promptsList = await AgentPrompts.find({ 
+      userId: userId,
+      isActive: true 
+    })
+    .select('_id name isDefault createdAt updatedAt')
+    .sort({ isDefault: -1, updatedAt: -1 })
+    .lean();
+    
+    res.json({ 
+      success: true, 
+      data: promptsList.map(p => ({
+        id: p._id,
+        name: p.name,
+        isDefault: p.isDefault,
+        createdAt: p.createdAt,
+        updatedAt: p.updatedAt
+      }))
+    });
+  } catch (error) {
+    console.error('❌ Error listing agent prompts:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message 
+    });
+  }
+});
+
+// POST /api/agent/prompts - Create new prompt set
+app.post('/api/agent/prompts', async (req, res) => {
+  try {
+    const { userId, name, prompts, isDefault } = req.body;
+    const actualUserId = userId || req.headers['x-user-id'] || 'default';
+    const actualName = name || 'default';
+    
+    if (!prompts || typeof prompts !== 'object') {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Prompts object is required' 
+      });
+    }
+    
+    // If setting as default, unset other defaults for this user
+    if (isDefault) {
+      await AgentPrompts.updateMany(
+        { userId: actualUserId, isDefault: true },
+        { isDefault: false }
+      );
+    }
+    
+    // Check if prompt set already exists
+    const existing = await AgentPrompts.findOne({ 
+      userId: actualUserId, 
+      name: actualName 
+    });
+    
+    if (existing) {
+      return res.status(409).json({ 
+        success: false, 
+        error: `Prompt set "${actualName}" already exists for this user. Use PUT to update.` 
+      });
+    }
+    
+    const newPrompts = new AgentPrompts({
+      userId: actualUserId,
+      name: actualName,
+      prompts: prompts,
+      isDefault: isDefault || false,
+      isActive: true,
+      createdBy: actualUserId,
+      updatedBy: actualUserId
+    });
+    
+    await newPrompts.save();
+    
+    res.json({ 
+      success: true, 
+      data: {
+        id: newPrompts._id,
+        userId: newPrompts.userId,
+        name: newPrompts.name,
+        prompts: newPrompts.prompts,
+        isDefault: newPrompts.isDefault,
+        createdAt: newPrompts.createdAt,
+        updatedAt: newPrompts.updatedAt
+      },
+      message: 'Prompt set created successfully'
+    });
+  } catch (error) {
+    console.error('❌ Error creating agent prompts:', error);
+    
+    // Handle duplicate key error
+    if (error.code === 11000) {
+      return res.status(409).json({ 
+        success: false, 
+        error: 'Prompt set with this name already exists for this user' 
+      });
+    }
+    
+    res.status(500).json({ 
+      success: false, 
+      error: error.message 
+    });
+  }
+});
+
+// PUT /api/agent/prompts/:id - Update existing prompt set
+app.put('/api/agent/prompts/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { prompts, name, isDefault } = req.body;
+    const userId = req.query.userId || req.headers['x-user-id'] || 'default';
+    
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Invalid prompt set ID' 
+      });
+    }
+    
+    const update = { updatedAt: new Date() };
+    if (prompts) update.prompts = prompts;
+    if (name) update.name = name;
+    if (isDefault !== undefined) {
+      update.isDefault = isDefault;
+      
+      // If setting as default, unset other defaults for this user
+      if (isDefault) {
+        await AgentPrompts.updateMany(
+          { userId: userId, isDefault: true, _id: { $ne: id } },
+          { isDefault: false }
+        );
+      }
+    }
+    update.updatedBy = userId;
+    
+    const updated = await AgentPrompts.findOneAndUpdate(
+      { _id: id, userId: userId }, // Ensure user owns this prompt set
+      { $set: update },
+      { new: true, runValidators: true }
+    ).lean();
+    
+    if (!updated) {
+      return res.status(404).json({ 
+        success: false, 
+        error: 'Prompt set not found or you do not have permission to update it' 
+      });
+    }
+    
+    res.json({ 
+      success: true, 
+      data: {
+        id: updated._id,
+        userId: updated.userId,
+        name: updated.name,
+        prompts: updated.prompts,
+        isDefault: updated.isDefault,
+        createdAt: updated.createdAt,
+        updatedAt: updated.updatedAt
+      },
+      message: 'Prompt set updated successfully'
+    });
+  } catch (error) {
+    console.error('❌ Error updating agent prompts:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message 
+    });
+  }
+});
+
+// PUT /api/agent/prompts - Update or create prompt set by userId and name
+app.put('/api/agent/prompts', async (req, res) => {
+  try {
+    const { userId, name, prompts, isDefault } = req.body;
+    const actualUserId = userId || req.headers['x-user-id'] || 'default';
+    const actualName = name || 'default';
+    
+    if (!prompts || typeof prompts !== 'object') {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Prompts object is required' 
+      });
+    }
+    
+    // If setting as default, unset other defaults for this user
+    if (isDefault) {
+      await AgentPrompts.updateMany(
+        { userId: actualUserId, isDefault: true },
+        { isDefault: false }
+      );
+    }
+    
+    const update = {
+      prompts: prompts,
+      updatedAt: new Date(),
+      updatedBy: actualUserId
+    };
+    if (isDefault !== undefined) update.isDefault = isDefault;
+    
+    const updated = await AgentPrompts.findOneAndUpdate(
+      { userId: actualUserId, name: actualName },
+      { $set: update },
+      { new: true, upsert: true, runValidators: true }
+    ).lean();
+    
+    res.json({ 
+      success: true, 
+      data: {
+        id: updated._id,
+        userId: updated.userId,
+        name: updated.name,
+        prompts: updated.prompts,
+        isDefault: updated.isDefault,
+        createdAt: updated.createdAt,
+        updatedAt: updated.updatedAt
+      },
+      message: 'Prompt set saved successfully'
+    });
+  } catch (error) {
+    console.error('❌ Error saving agent prompts:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message 
+    });
+  }
+});
+
+// DELETE /api/agent/prompts/:id - Delete prompt set
+app.delete('/api/agent/prompts/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.query.userId || req.headers['x-user-id'] || 'default';
+    
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Invalid prompt set ID' 
+      });
+    }
+    
+    // Soft delete (set isActive to false) instead of hard delete
+    const deleted = await AgentPrompts.findOneAndUpdate(
+      { _id: id, userId: userId },
+      { $set: { isActive: false, updatedAt: new Date() } },
+      { new: true }
+    ).lean();
+    
+    if (!deleted) {
+      return res.status(404).json({ 
+        success: false, 
+        error: 'Prompt set not found or you do not have permission to delete it' 
+      });
+    }
+    
+    res.json({ 
+      success: true, 
+      message: 'Prompt set deleted successfully' 
+    });
+  } catch (error) {
+    console.error('❌ Error deleting agent prompts:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message 
+    });
+  }
+});
+
+// ============================================================================
+// Twitter Handles Settings CRUD API
+// ============================================================================
+
+// GET /api/settings/twitter-handles - Get Twitter handles for user
+app.get('/api/settings/twitter-handles', async (req, res) => {
+  try {
+    const userId = req.query.userId || req.headers['x-user-id'] || 'default';
+    
+    let settings = await TwitterHandles.findOne({ 
+      userId: userId,
+      isActive: true 
+    }).lean();
+    
+    // If not found, initialize with defaults
+    if (!settings) {
+      const defaultHandles = [
+        { handle: 'elonmusk', category: 'key', isActive: true },
+        { handle: 'SpaceX', category: 'key', isActive: true },
+        { handle: 'CathieDWood', category: 'partner', isActive: true },
+        { handle: 'aaronburnett', category: 'builder', isActive: true },
+        { handle: 'VladSaigau', category: 'builder', isActive: true },
+        { handle: 'TMFAssociates', category: 'key', isActive: true }
+      ];
+      
+      settings = new TwitterHandles({
+        userId: userId,
+        handles: defaultHandles,
+        isDefault: true,
+        isActive: true,
+        createdBy: userId,
+        updatedBy: userId
+      });
+      await settings.save();
+      settings = settings.toObject();
+    }
+    
+    res.json({ 
+      success: true, 
+      data: {
+        id: settings._id,
+        userId: settings.userId,
+        handles: settings.handles,
+        isDefault: settings.isDefault,
+        createdAt: settings.createdAt,
+        updatedAt: settings.updatedAt
+      }
+    });
+  } catch (error) {
+    console.error('❌ Error getting Twitter handles:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message 
+    });
+  }
+});
+
+// POST /api/settings/twitter-handles - Create/Update Twitter handles
+app.post('/api/settings/twitter-handles', async (req, res) => {
+  try {
+    const userId = req.body.userId || req.headers['x-user-id'] || 'default';
+    const { handles } = req.body;
+    
+    if (!handles || !Array.isArray(handles)) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'handles must be an array' 
+      });
+    }
+    
+    // Validate handles format
+    for (const handleObj of handles) {
+      if (!handleObj.handle || typeof handleObj.handle !== 'string') {
+        return res.status(400).json({ 
+          success: false, 
+          error: 'Each handle must have a "handle" string property' 
+        });
+      }
+      // Remove @ if present
+      handleObj.handle = handleObj.handle.replace('@', '');
+      handleObj.category = handleObj.category || 'key';
+      handleObj.isActive = handleObj.isActive !== undefined ? handleObj.isActive : true;
+      if (!handleObj.addedAt) {
+        handleObj.addedAt = new Date();
+      }
+    }
+    
+    const updated = await TwitterHandles.findOneAndUpdate(
+      { userId: userId },
+      { 
+        $set: { 
+          handles: handles,
+          updatedAt: new Date(),
+          updatedBy: userId
+        }
+      },
+      { new: true, upsert: true, runValidators: true }
+    ).lean();
+    
+    res.json({ 
+      success: true, 
+      data: {
+        id: updated._id,
+        userId: updated.userId,
+        handles: updated.handles,
+        isDefault: updated.isDefault,
+        createdAt: updated.createdAt,
+        updatedAt: updated.updatedAt
+      },
+      message: 'Twitter handles saved successfully'
+    });
+  } catch (error) {
+    console.error('❌ Error saving Twitter handles:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message 
+    });
+  }
+});
+
+// PUT /api/settings/twitter-handles/:handleId - Update specific handle
+app.put('/api/settings/twitter-handles/:handleId', async (req, res) => {
+  try {
+    const userId = req.query.userId || req.headers['x-user-id'] || 'default';
+    const handleId = req.params.handleId;
+    const { handle, category, isActive } = req.body;
+    
+    const settings = await TwitterHandles.findOne({ userId: userId, isActive: true });
+    if (!settings) {
+      return res.status(404).json({ 
+        success: false, 
+        error: 'Twitter handles settings not found' 
+      });
+    }
+    
+    const handleIndex = settings.handles.findIndex(h => h._id.toString() === handleId);
+    if (handleIndex === -1) {
+      return res.status(404).json({ 
+        success: false, 
+        error: 'Handle not found' 
+      });
+    }
+    
+    if (handle !== undefined) {
+      settings.handles[handleIndex].handle = handle.replace('@', '');
+    }
+    if (category !== undefined) {
+      settings.handles[handleIndex].category = category;
+    }
+    if (isActive !== undefined) {
+      settings.handles[handleIndex].isActive = isActive;
+    }
+    
+    settings.updatedAt = new Date();
+    settings.updatedBy = userId;
+    await settings.save();
+    
+    res.json({ 
+      success: true, 
+      data: {
+        id: settings._id,
+        userId: settings.userId,
+        handles: settings.handles,
+        updatedAt: settings.updatedAt
+      },
+      message: 'Handle updated successfully'
+    });
+  } catch (error) {
+    console.error('❌ Error updating Twitter handle:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message 
+    });
+  }
+});
+
+// DELETE /api/settings/twitter-handles/:handleId - Delete specific handle
+app.delete('/api/settings/twitter-handles/:handleId', async (req, res) => {
+  try {
+    const userId = req.query.userId || req.headers['x-user-id'] || 'default';
+    const handleId = req.params.handleId;
+    
+    const settings = await TwitterHandles.findOne({ userId: userId, isActive: true });
+    if (!settings) {
+      return res.status(404).json({ 
+        success: false, 
+        error: 'Twitter handles settings not found' 
+      });
+    }
+    
+    settings.handles = settings.handles.filter(h => h._id.toString() !== handleId);
+    settings.updatedAt = new Date();
+    settings.updatedBy = userId;
+    await settings.save();
+    
+    res.json({ 
+      success: true, 
+      message: 'Handle deleted successfully',
+      data: {
+        id: settings._id,
+        handles: settings.handles
+      }
+    });
+  } catch (error) {
+    console.error('❌ Error deleting Twitter handle:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message 
+    });
+  }
+});
+
+// Helper function to get Twitter handles from settings
+async function getTwitterHandlesFromSettings(userId = 'default') {
+  try {
+    let settings = await TwitterHandles.findOne({ 
+      userId: userId,
+      isActive: true 
+    }).lean();
+    
+    // If not found, initialize with defaults
+    if (!settings) {
+      const defaultHandles = [
+        { handle: 'elonmusk', category: 'key', isActive: true },
+        { handle: 'SpaceX', category: 'key', isActive: true },
+        { handle: 'CathieDWood', category: 'partner', isActive: true },
+        { handle: 'aaronburnett', category: 'builder', isActive: true },
+        { handle: 'VladSaigau', category: 'builder', isActive: true },
+        { handle: 'TMFAssociates', category: 'key', isActive: true }
+      ];
+      
+      const newSettings = new TwitterHandles({
+        userId: userId,
+        handles: defaultHandles,
+        isDefault: true,
+        isActive: true,
+        createdBy: userId,
+        updatedBy: userId
+      });
+      await newSettings.save();
+      settings = newSettings.toObject();
+    }
+    
+    // Return active handles grouped by category
+    const activeHandles = settings.handles.filter(h => h.isActive);
+    return {
+      all: activeHandles.map(h => h.handle),
+      builders: activeHandles.filter(h => h.category === 'builder').map(h => h.handle),
+      partners: activeHandles.filter(h => h.category === 'partner').map(h => h.handle),
+      keys: activeHandles.filter(h => h.category === 'key').map(h => h.handle)
+    };
+  } catch (error) {
+    console.error('❌ Error getting Twitter handles from settings:', error);
+    // Fallback to hardcoded defaults
+    return {
+      all: ['elonmusk', 'SpaceX', 'CathieDWood', 'aaronburnett', 'VladSaigau', 'TMFAssociates'],
+      builders: ['aaronburnett', 'VladSaigau'],
+      partners: ['CathieDWood'],
+      keys: ['elonmusk', 'SpaceX', 'TMFAssociates']
+    };
+  }
 }
 
 server.listen(PORT, HOST, () => {
@@ -7763,12 +9204,11 @@ server.listen(PORT, HOST, () => {
   }
   console.log(`\n🔌 WebSocket servers ready for Grok Voice:`);
   console.log(`   Socket.io:  http://localhost:${PORT}/api/analyst/socket.io`);
-  console.log(`   Raw WebSocket:  ws://localhost:${PORT}/api/analyst/ws/grok-voice`);
+  console.log(`   Socket.io:  http://localhost:${PORT}/api/analyst/socket.io`);
   if (publicUrl !== localUrl) {
-    const wsPublicUrl = publicUrl.replace(/^http/, 'ws');
     console.log(`   Socket.io (Public):  ${publicUrl}/api/analyst/socket.io`);
-    console.log(`   Raw WebSocket (Public):  ${wsPublicUrl}/api/analyst/ws/grok-voice`);
   }
   console.log('');
 });
+
 

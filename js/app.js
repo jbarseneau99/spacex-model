@@ -108,7 +108,12 @@ class ValuationApp {
         this.currentView = 'dashboard';
         this.currentData = null;
         this.currentModelName = null;
-        this.terminalDateTimeInterval = null; // Interval for updating terminal date/time
+        this.currentModelId = null;
+        this.currentModelIsBaseline = false;
+        this.terminalDateTimeInterval = null; // Interval for updating terminal date/time (legacy - now handled by Mach33Terminal module)
+        this.mach33Terminal = null; // Mach33 Terminal module instance
+        this.xFeedsRefreshInterval = null; // Interval for real-time X feeds updates
+        this.xFeedsRefreshIntervalMs = 60000; // Refresh X feeds every 60 seconds (1 minute)
         this.editingModelId = null; // Track which model is being edited
         this.currentGreeksData = null; // Store current Greeks data for micro AI
         this.currentFactorRiskData = null; // Store current factor risk data
@@ -128,7 +133,23 @@ class ValuationApp {
         this.attributionDebounceTimer = null; // Debounce timer for Attribution input changes
         this.currentComparablesData = null; // Store current comparables data for charts
         this.combinedCompetitorsData = null; // Store combined space + telecom competitors for tile
-        this.aiModel = localStorage.getItem('aiModel') || 'claude-opus-4-1-20250805'; // Default AI model
+        
+        // Fallback competitor data (used if API fails)
+        this.fallbackCompetitorData = [
+            // Space companies
+            { name: 'Boeing Company', ticker: 'BA', marketCap: 120e9, evRevenue: 1.8, evEbitda: 12.5, peRatio: 28.5, pegRatio: 1.2, revenueGrowth: 0.08 },
+            { name: 'Lockheed Martin Corporation', ticker: 'LMT', marketCap: 110e9, evRevenue: 2.1, evEbitda: 14.2, peRatio: 18.5, pegRatio: 1.5, revenueGrowth: 0.05 },
+            { name: 'Northrop Grumman Corporation', ticker: 'NOC', marketCap: 75e9, evRevenue: 2.3, evEbitda: 15.8, peRatio: 20.2, pegRatio: 1.8, revenueGrowth: 0.06 },
+            { name: 'Raytheon Technologies Corporation', ticker: 'RTX', marketCap: 140e9, evRevenue: 2.0, evEbitda: 13.5, peRatio: 22.1, pegRatio: 1.4, revenueGrowth: 0.07 },
+            { name: 'Aerojet Rocketdyne Holdings', ticker: 'AJRD', marketCap: 4.5e9, evRevenue: 2.5, evEbitda: 18.0, peRatio: 25.0, pegRatio: 2.0, revenueGrowth: 0.12 },
+            // Telecom/Satellite companies
+            { name: 'Viasat Inc.', ticker: 'VSAT', marketCap: 2.8e9, evRevenue: 3.2, evEbitda: 22.0, peRatio: null, pegRatio: null, revenueGrowth: 0.15 },
+            { name: 'Iridium Communications Inc.', ticker: 'IRDM', marketCap: 5.2e9, evRevenue: 4.5, evEbitda: 28.5, peRatio: 35.0, pegRatio: 2.5, revenueGrowth: 0.20 },
+            { name: 'Globalstar Inc.', ticker: 'GSAT', marketCap: 1.2e9, evRevenue: 5.8, evEbitda: 35.0, peRatio: null, pegRatio: null, revenueGrowth: 0.25 },
+            { name: 'EchoStar Corporation', ticker: 'SATS', marketCap: 1.5e9, evRevenue: 2.8, evEbitda: 15.5, peRatio: 18.0, pegRatio: 1.6, revenueGrowth: 0.10 },
+            { name: 'Telesat Corporation', ticker: 'TSAT', marketCap: 0.8e9, evRevenue: 4.2, evEbitda: 25.0, peRatio: null, pegRatio: null, revenueGrowth: 0.18 }
+        ];
+        this.aiModel = localStorage.getItem('aiModel') || 'grok:grok-4-1-fast-reasoning'; // Latest Grok model with reasoning (2M context, $0.20/$0.50)
         this.financialApiProvider = localStorage.getItem('financialApiProvider') || 'yahoo-finance'; // Default financial API
         this.cachedAIInsights = {}; // Cache AI insights by model ID
         this.generatingAIInsights = false;
@@ -141,22 +162,44 @@ class ValuationApp {
         this.agentCommentaryDebounceTimer = null; // Debounce timer for context change commentary
         this.elementSelectionDebounceTimer = null; // Debounce timer for element selection commentary
         this.lastSelectedElement = null; // Track last selected element to avoid duplicate comments
+        this.lastSelectionTime = null; // Track when last selection occurred
+        this.isProcessingSelection = false; // Flag to prevent concurrent selection processing
         this.elementSelectionHistory = []; // Track element selections for context // Flag to prevent duplicate generation
         this.lastClickedCompetitor = null; // Track last clicked competitor for detecting repeated clicks
+        this.pendingCompetitorPanel = null; // Store competitor data to show panel when ADA starts speaking
+        this.lastClickedElement = null; // Track last clicked element (any type) for detecting repeated clicks
+        this.lastClickedElementType = null; // Track type of last clicked element
+        this.lastClickedElementKey = null; // Track unique key for last clicked element
+        this.lastClickedElementKeyHistory = []; // Track last 5 clicked elements to detect "coming back to topic"
         this.competitorClickHistory = []; // Track competitor click history for episodic memory
         this.agentSystemPrompts = null; // Will be loaded on demand
         this.agentChatHistory = []; // Store chat history for context
+        this.adaHasIntroduced = false; // Track if Ada has introduced herself in this session
+        this.sessionStartTime = new Date().toISOString(); // Track session start time for reports
         // Voice input/output controls (separated for clarity)
         this.agentVoiceInputEnabled = false; // Microphone input enabled (optional)
         this.agentVoiceOutputEnabled = false; // Audio output enabled (optional)
+        this.agentClickInputEnabled = true; // Click input enabled (default: true)
         // Legacy: agentVoiceMode for backward compatibility (maps to voice output)
         this.agentVoiceMode = false; // DEPRECATED: Use agentVoiceOutputEnabled instead
-        this.agentRecognition = null; // Web Speech API recognition instance
-        this.isRecording = false; // Track if currently recording
+        // DEPRECATED: Voice recognition now handled by VoiceSensor/VoiceInputHandler
+        // Keeping for backward compatibility only
+        this.agentRecognition = null; // DEPRECATED: Use adaInputSystem.getVoiceSensor() instead
+        this.isRecording = false; // DEPRECATED: Use voiceSensor.getIsListening() instead
         this.agentSpeechSynthesis = null; // Web Speech Synthesis API instance
         this.isSpeaking = false; // Track if currently speaking
+        this.isStoppingAudio = false; // Flag to prevent new audio while stopping
         this.grokVoiceService = null; // Grok Voice API service instance
         this.useGrokVoice = true; // Use Grok Voice API for audio output (when available)
+        this.audioContextResumeSetup = false; // Track if AudioContext resume handler is setup
+        // Stock click voice management
+        this.currentSpeakingStock = null; // Current stock being spoken about (ticker)
+        this.pausedStocks = []; // Array of paused stocks: [{ticker, companyName, timestamp}]
+        this.pendingStockRequest = null; // Stock request waiting for audio to be ready: {ticker, companyName, message}
+        this.isWaitingForNewAudio = false; // Flag: waiting for new audio to arrive before pausing current
+        this.firstAudioChunkReceived = false; // Track if first chunk of new audio has been received
+        this.audioChunkHandlerSetup = false; // Track if audio chunk handler has been set up
+        this.agentCommunicationSystem = null; // New agent communication system
         this.alphaVantageApiKey = localStorage.getItem('alphaVantageApiKey') || '';
         this.financialModelingPrepApiKey = localStorage.getItem('financialModelingPrepApiKey') || '';
         this.tamData = null; // Earth Bandwidth TAM lookup table
@@ -207,6 +250,24 @@ class ValuationApp {
         this.setupVaRListeners();
         this.setupRatiosListeners();
         this.initSettingsModal();
+        
+        // Initialize Ada Input System (modular architecture)
+        // Note: Initialize after grokVoiceService is created (which happens on first use)
+        // The VoiceOutputHandler will be created lazily when needed
+        if (window.AdaInputSystem) {
+            try {
+                this.adaInputSystem = new window.AdaInputSystem(this);
+                await this.adaInputSystem.initialize();
+                console.log('✅ Ada Input System initialized');
+            } catch (error) {
+                console.error('❌ Error initializing Ada Input System:', error);
+            }
+        } else {
+            console.warn('⚠️ AdaInputSystem not available - ensure scripts are loaded');
+        }
+        
+        // Initialize Ada settings on app startup (CREATE)
+        this.initializeAdaSettings();
         this.loadScenarios();
         
         // Load TAM data
@@ -226,11 +287,11 @@ class ValuationApp {
         
         // Initialize terminal date/time if terminal view is active
         if (this.currentView === 'mach33-terminal') {
-            this.updateTerminalDateTime();
-            if (!this.terminalDateTimeInterval) {
-                this.terminalDateTimeInterval = setInterval(() => {
-                    this.updateTerminalDateTime();
-                }, 1000);
+            // Initialize terminal module if not already initialized
+            if (!this.mach33Terminal) {
+                this.initializeMach33Terminal();
+            } else {
+                this.mach33Terminal.startDateTimeInterval();
             }
         }
         
@@ -243,6 +304,9 @@ class ValuationApp {
         
         // Initialize element selection detection for charts and text
         this.setupElementSelectionDetection();
+        
+        // Initialize new agent communication system (if available)
+        this.initializeAgentCommunicationSystem();
         
         // Initialize ratios dashboard with data
         // Load comparables on startup so ratios dashboard is ready
@@ -690,6 +754,9 @@ class ValuationApp {
         document.getElementById('agentCommentaryToggleBtn')?.addEventListener('click', () => {
             this.toggleAgentCommentary();
         });
+        document.getElementById('agentReportBtn')?.addEventListener('click', () => {
+            this.generateConversationReport();
+        });
         document.getElementById('agentSettingsBtn')?.addEventListener('click', () => {
             this.openAgentSettings();
         });
@@ -698,6 +765,11 @@ class ValuationApp {
         });
         document.getElementById('agentCloseBtn')?.addEventListener('click', () => {
             this.closeAIAgent();
+        });
+        
+        // Click Input Toggle (Disable Clicks)
+        document.getElementById('agentClickToggleBtn')?.addEventListener('click', () => {
+            this.toggleAgentClickInput();
         });
         
         // Voice Input Toggle (Microphone)
@@ -711,8 +783,19 @@ class ValuationApp {
         });
         
         // Voice Record Button (Start/Stop Recording)
+        // CONSOLIDATED: Uses modular VoiceSensor instead of old agentRecognition
         document.getElementById('agentVoiceRecordBtn')?.addEventListener('click', () => {
-            this.toggleVoiceRecording();
+            if (this.adaInputSystem && this.adaInputSystem.getVoiceSensor()) {
+                const voiceSensor = this.adaInputSystem.getVoiceSensor();
+                if (voiceSensor.getIsListening()) {
+                    voiceSensor.stopListening();
+                } else {
+                    voiceSensor.startListening();
+                }
+            } else {
+                console.warn('VoiceSensor not available - falling back to old system');
+                this.toggleVoiceRecording(); // Fallback for backward compatibility
+            }
         });
         
         // Voice Stop Button
@@ -727,25 +810,10 @@ class ValuationApp {
         document.getElementById('resetAgentSettingsBtn')?.addEventListener('click', () => {
             this.resetAgentSystemPrompts();
         });
-        document.getElementById('agentSendBtn')?.addEventListener('click', () => {
-            const input = document.getElementById('agentChatInput') || document.getElementById('agentInput');
-            if (input && input.value.trim()) {
-                this.sendAgentMessage(input.value.trim());
-                input.value = '';
-            }
-        });
-        const agentInput = document.getElementById('agentChatInput') || document.getElementById('agentInput');
-        if (agentInput) {
-            agentInput.addEventListener('keydown', (e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                    e.preventDefault();
-                    if (e.target.value.trim()) {
-                        this.sendAgentMessage(e.target.value.trim());
-                        e.target.value = '';
-                    }
-                }
-            });
-        }
+        // CONSOLIDATED: Text input now handled by TypeSensor via UnifiedInputHandler
+        // TypeSensor listens for Enter key and Send button clicks globally
+        // Old handlers removed - all text input routes through modular system
+        // Note: TypeSensor will emit ada:type events which UnifiedInputHandler processes
         
         // Initialize agent window if AI icon is clicked
         const aiIcon = document.querySelector('[data-view="insights"] .nav-item-icon, .nav-item[data-view="insights"]');
@@ -1428,6 +1496,10 @@ class ValuationApp {
     }
 
     async switchView(viewName) {
+        // Stop X feeds polling when leaving dashboard
+        if (this.currentView === 'dashboard' && viewName !== 'dashboard') {
+            this.stopXFeedsPolling();
+        }
         // Track navigation history
         const tabInfo = this.getCurrentTabInfo();
         const navigationEntry = {
@@ -1466,6 +1538,19 @@ class ValuationApp {
         const previousView = this.currentView;
         this.currentView = viewName;
         
+        // Stop X feeds polling when leaving dashboard
+        if (previousView === 'dashboard' && viewName !== 'dashboard') {
+            this.stopXFeedsPolling();
+        }
+        
+        // Start X feeds polling when entering dashboard
+        if (viewName === 'dashboard' && previousView !== 'dashboard') {
+            // Wait a bit for dashboard to render, then start polling
+            setTimeout(() => {
+                this.startXFeedsPolling();
+            }, 2000);
+        }
+        
         // Save current view to application state
         await this.saveAppState('lastView', viewName);
         
@@ -1484,18 +1569,17 @@ class ValuationApp {
         // Update terminal view elements when switching to terminal
         if (viewName === 'mach33-terminal') {
             this.updateDashboardTitle(this.currentModelName);
-            this.updateTerminalDateTime();
-            // Set up date/time update interval if not already set
-            if (!this.terminalDateTimeInterval) {
-                this.terminalDateTimeInterval = setInterval(() => {
-                    this.updateTerminalDateTime();
-                }, 1000); // Update every second
+            // Initialize terminal module if not already initialized
+            if (!this.mach33Terminal) {
+                this.initializeMach33Terminal();
+            } else {
+                // Terminal already initialized, just start date/time interval
+                this.mach33Terminal.startDateTimeInterval();
             }
         } else {
             // Clear interval when leaving terminal view
-            if (this.terminalDateTimeInterval) {
-                clearInterval(this.terminalDateTimeInterval);
-                this.terminalDateTimeInterval = null;
+            if (this.mach33Terminal) {
+                this.mach33Terminal.stopDateTimeInterval();
             }
         }
 
@@ -1767,20 +1851,51 @@ class ValuationApp {
         }
     }
 
-    updateTerminalDateTime() {
-        const dateTimeElement = document.getElementById('terminalDateTime');
-        if (!dateTimeElement) return;
+    /**
+     * Initialize Mach33 Terminal module
+     */
+    async initializeMach33Terminal() {
+        // Load terminal module script if not already loaded
+        if (typeof Mach33Terminal === 'undefined') {
+            const script = document.createElement('script');
+            script.src = '/js/mach33-terminal/mach33-terminal.js';
+            script.type = 'text/javascript';
+            
+            await new Promise((resolve, reject) => {
+                script.onload = resolve;
+                script.onerror = reject;
+                document.head.appendChild(script);
+            });
+        }
         
-        const now = new Date();
-        const options = { 
-            month: 'short', 
-            day: 'numeric', 
-            hour: '2-digit', 
-            minute: '2-digit',
-            hour12: true
-        };
-        const formatted = now.toLocaleString('en-US', options);
-        dateTimeElement.textContent = formatted;
+        // Initialize terminal instance
+        if (typeof Mach33Terminal !== 'undefined') {
+            this.mach33Terminal = new Mach33Terminal(this);
+            await this.mach33Terminal.init();
+        } else {
+            console.error('Failed to load Mach33Terminal class');
+        }
+    }
+
+    updateTerminalDateTime() {
+        // Legacy method - delegate to terminal module if available
+        if (this.mach33Terminal) {
+            this.mach33Terminal.updateTerminalDateTime();
+        } else {
+            const dateTimeElement = document.getElementById('terminalDateTime');
+            if (!dateTimeElement) return;
+            
+            const now = new Date();
+            const options = { 
+                month: 'short', 
+                day: 'numeric', 
+                hour: '2-digit', 
+                minute: '2-digit',
+                hour12: true
+            };
+            const formatted = now.toLocaleString('en-US', options);
+            dateTimeElement.textContent = formatted;
+        }
     }
 
     updateDashboard(data) {
@@ -1856,12 +1971,242 @@ class ValuationApp {
 
         if (totalEl && data.total.value !== undefined) {
             totalEl.textContent = formatValue(data.total.value);
+            // Attach click handler for metric card
+            if (!totalEl._metricClickHandler) {
+                totalEl._metricClickHandler = async (e) => {
+                    e.stopPropagation();
+                    if (!this.agentCommentaryEnabled) return;
+                    
+                    // Ensure agent window is open
+                    const agentWindow = document.getElementById('aiAgentWindow');
+                    if (agentWindow) {
+                        const isHidden = agentWindow.style.display === 'none' || 
+                                       !agentWindow.style.display || 
+                                       agentWindow.classList.contains('hidden');
+                        if (isHidden) {
+                            agentWindow.style.display = 'flex';
+                            agentWindow.classList.remove('hidden');
+                        }
+                    }
+                    
+                    const chatHistory = this.getAgentChatHistory();
+                    const isFirstInteraction = chatHistory.length === 0;
+                    
+                    // Build natural message
+                    let message = '';
+                    if (isFirstInteraction) {
+                        message = `Total Enterprise Value.`;
+                    } else {
+                        message = `Tell me about the Total Enterprise Value.`;
+                    }
+                    
+                    // Build background context
+                    const backgroundContext = [];
+                    backgroundContext.push(`Metric: Total Enterprise Value`);
+                    backgroundContext.push(`Value: ${formatValue(data.total.value)}`);
+                    if (data.earth?.adjustedValue !== undefined) {
+                        backgroundContext.push(`Earth Operations: ${formatValue(data.earth.adjustedValue)}`);
+                    }
+                    if (data.mars?.adjustedValue !== undefined) {
+                        backgroundContext.push(`Mars Operations: ${formatValue(data.mars.adjustedValue)}`);
+                    }
+                    
+                    // Add conversation history
+                    const recentConversation = chatHistory.slice(-5).map(msg => 
+                        `${msg.role === 'user' ? 'User' : 'Assistant'}: ${msg.content}`
+                    ).join('\n');
+                    if (recentConversation) {
+                        backgroundContext.push(`Recent conversation: ${recentConversation}`);
+                    }
+                    
+                    // Append background context
+                    if (backgroundContext.length > 0) {
+                        message += `\n\n[Background context for reference: ${backgroundContext.join('; ')}]`;
+                    }
+                    
+                    // Handle voice interruption if needed
+                    if (this.agentVoiceOutputEnabled && this.isSpeaking && this.currentSpeakingStock) {
+                        if (this.agentCommunicationSystem && this.agentCommunicationSystem.interruption) {
+                            await this.agentCommunicationSystem.interruption.interruptMidSentence();
+                        } else {
+                            this.stopVoiceAudio();
+                            await new Promise(resolve => setTimeout(resolve, 500));
+                            this.stopVoiceAudio();
+                            await new Promise(resolve => setTimeout(resolve, 200));
+                        }
+                    }
+                    
+                    // Use enhanced endpoint
+                    await this.sendAgentMessageSilent(message, {
+                        metricType: 'total',
+                        metricValue: data.total.value
+                    });
+                };
+                totalEl.addEventListener('click', totalEl._metricClickHandler);
+                totalEl.style.cursor = 'pointer';
+                totalEl.title = 'Click to learn more about Total Enterprise Value';
+            }
         }
         if (earthEl && data.earth && data.earth.adjustedValue !== undefined) {
             earthEl.textContent = formatValue(data.earth.adjustedValue);
+            // Attach click handler for metric card
+            if (!earthEl._metricClickHandler) {
+                earthEl._metricClickHandler = async (e) => {
+                    e.stopPropagation();
+                    if (!this.agentCommentaryEnabled) return;
+                    
+                    // Ensure agent window is open
+                    const agentWindow = document.getElementById('aiAgentWindow');
+                    if (agentWindow) {
+                        const isHidden = agentWindow.style.display === 'none' || 
+                                       !agentWindow.style.display || 
+                                       agentWindow.classList.contains('hidden');
+                        if (isHidden) {
+                            agentWindow.style.display = 'flex';
+                            agentWindow.classList.remove('hidden');
+                        }
+                    }
+                    
+                    const chatHistory = this.getAgentChatHistory();
+                    const isFirstInteraction = chatHistory.length === 0;
+                    
+                    // Build natural message
+                    let message = '';
+                    if (isFirstInteraction) {
+                        message = `Earth Operations value.`;
+                    } else {
+                        message = `Tell me about Earth Operations value.`;
+                    }
+                    
+                    // Build background context
+                    const backgroundContext = [];
+                    backgroundContext.push(`Metric: Earth Operations Value`);
+                    backgroundContext.push(`Value: ${formatValue(data.earth.adjustedValue)}`);
+                    if (data.total?.value !== undefined) {
+                        backgroundContext.push(`Total Enterprise Value: ${formatValue(data.total.value)}`);
+                    }
+                    if (earthPercentEl) {
+                        const percent = earthPercentEl.textContent;
+                        if (percent) backgroundContext.push(`Percentage of Total: ${percent}`);
+                    }
+                    
+                    // Add conversation history
+                    const recentConversation = chatHistory.slice(-5).map(msg => 
+                        `${msg.role === 'user' ? 'User' : 'Assistant'}: ${msg.content}`
+                    ).join('\n');
+                    if (recentConversation) {
+                        backgroundContext.push(`Recent conversation: ${recentConversation}`);
+                    }
+                    
+                    // Append background context
+                    if (backgroundContext.length > 0) {
+                        message += `\n\n[Background context for reference: ${backgroundContext.join('; ')}]`;
+                    }
+                    
+                    // Handle voice interruption if needed
+                    if (this.agentVoiceOutputEnabled && this.isSpeaking && this.currentSpeakingStock) {
+                        if (this.agentCommunicationSystem && this.agentCommunicationSystem.interruption) {
+                            await this.agentCommunicationSystem.interruption.interruptMidSentence();
+                        } else {
+                            this.stopVoiceAudio();
+                            await new Promise(resolve => setTimeout(resolve, 500));
+                            this.stopVoiceAudio();
+                            await new Promise(resolve => setTimeout(resolve, 200));
+                        }
+                    }
+                    
+                    // Use enhanced endpoint
+                    await this.sendAgentMessageSilent(message, {
+                        metricType: 'earth',
+                        metricValue: data.earth.adjustedValue
+                    });
+                };
+                earthEl.addEventListener('click', earthEl._metricClickHandler);
+                earthEl.style.cursor = 'pointer';
+                earthEl.title = 'Click to learn more about Earth Operations Value';
+            }
         }
         if (marsEl && data.mars && data.mars.adjustedValue !== undefined) {
             marsEl.textContent = formatValue(data.mars.adjustedValue);
+            // Attach click handler for metric card
+            if (!marsEl._metricClickHandler) {
+                marsEl._metricClickHandler = async (e) => {
+                    e.stopPropagation();
+                    if (!this.agentCommentaryEnabled) return;
+                    
+                    // Ensure agent window is open
+                    const agentWindow = document.getElementById('aiAgentWindow');
+                    if (agentWindow) {
+                        const isHidden = agentWindow.style.display === 'none' || 
+                                       !agentWindow.style.display || 
+                                       agentWindow.classList.contains('hidden');
+                        if (isHidden) {
+                            agentWindow.style.display = 'flex';
+                            agentWindow.classList.remove('hidden');
+                        }
+                    }
+                    
+                    const chatHistory = this.getAgentChatHistory();
+                    const isFirstInteraction = chatHistory.length === 0;
+                    
+                    // Build natural message
+                    let message = '';
+                    if (isFirstInteraction) {
+                        message = `Mars Operations value.`;
+                    } else {
+                        message = `Tell me about Mars Operations value.`;
+                    }
+                    
+                    // Build background context
+                    const backgroundContext = [];
+                    backgroundContext.push(`Metric: Mars Operations Value`);
+                    backgroundContext.push(`Value: ${formatValue(data.mars.adjustedValue)}`);
+                    if (data.total?.value !== undefined) {
+                        backgroundContext.push(`Total Enterprise Value: ${formatValue(data.total.value)}`);
+                    }
+                    if (marsPercentEl) {
+                        const percent = marsPercentEl.textContent;
+                        if (percent) backgroundContext.push(`Percentage of Total: ${percent}`);
+                    }
+                    if (marsOptionEl && data.mars?.optionValue !== undefined) {
+                        backgroundContext.push(`Mars Option Value: ${formatValue(data.mars.optionValue)}`);
+                    }
+                    
+                    // Add conversation history
+                    const recentConversation = chatHistory.slice(-5).map(msg => 
+                        `${msg.role === 'user' ? 'User' : 'Assistant'}: ${msg.content}`
+                    ).join('\n');
+                    if (recentConversation) {
+                        backgroundContext.push(`Recent conversation: ${recentConversation}`);
+                    }
+                    
+                    // Append background context
+                    if (backgroundContext.length > 0) {
+                        message += `\n\n[Background context for reference: ${backgroundContext.join('; ')}]`;
+                    }
+                    
+                    // Handle voice interruption if needed
+                    if (this.agentVoiceOutputEnabled && this.isSpeaking && this.currentSpeakingStock) {
+                        if (this.agentCommunicationSystem && this.agentCommunicationSystem.interruption) {
+                            await this.agentCommunicationSystem.interruption.interruptMidSentence();
+                        } else {
+                            this.stopVoiceAudio();
+                            await new Promise(resolve => setTimeout(resolve, 500));
+                            this.stopVoiceAudio();
+                            await new Promise(resolve => setTimeout(resolve, 200));
+                        }
+                    }
+                    
+                    // Use enhanced endpoint
+                    await this.sendAgentMessageSilent(message, {
+                        metricType: 'mars',
+                        metricValue: data.mars.adjustedValue
+                    });
+                };
+                marsEl.addEventListener('click', marsEl._metricClickHandler);
+                marsEl.style.cursor = 'pointer';
+                marsEl.title = 'Click to learn more about Mars Operations Value';
+            }
         }
         if (marsOptionEl && data.mars && data.mars.optionValue !== undefined) {
             marsOptionEl.textContent = formatValue(data.mars.optionValue);
@@ -7724,6 +8069,63 @@ class ValuationApp {
         
         const baseInputs = this.getInputs();
         
+        // CRITICAL: Prevent simulations on baseline models - they are reference points
+        if (this.currentModelId) {
+            try {
+                const modelResponse = await fetch(`/api/models/${this.currentModelId}`);
+                const modelResult = await modelResponse.json();
+                if (modelResult.success && modelResult.data.isBaseline) {
+                    // Show error notification
+                    const notification = document.createElement('div');
+                    notification.style.cssText = `
+                        position: fixed;
+                        top: 100px;
+                        right: 20px;
+                        background: var(--error-color, #dc2626);
+                        color: white;
+                        padding: 16px 20px;
+                        border-radius: 8px;
+                        box-shadow: var(--shadow-lg);
+                        z-index: 10000;
+                        display: flex;
+                        align-items: center;
+                        gap: 10px;
+                        font-size: 14px;
+                        max-width: 450px;
+                        line-height: 1.5;
+                    `;
+                    notification.innerHTML = `
+                        <i data-lucide="alert-circle"></i>
+                        <div>
+                            <strong>Baseline Model Protection</strong><br>
+                            Simulations cannot be run on baseline models. They are reference points from the spreadsheet and must remain unchanged.
+                        </div>
+                    `;
+                    document.body.appendChild(notification);
+                    if (window.lucide) window.lucide.createIcons();
+                    setTimeout(() => {
+                        notification.style.transition = 'opacity 0.3s';
+                        notification.style.opacity = '0';
+                        setTimeout(() => notification.remove(), 300);
+                    }, 6000);
+                    
+                    // Re-enable button
+                    const btn = document.getElementById('runMonteCarloBtn');
+                    if (btn) {
+                        btn.disabled = false;
+                        btn.innerHTML = '<i data-lucide="play"></i> Run Monte Carlo';
+                        lucide.createIcons();
+                    }
+                    
+                    console.log('ℹ️ Baseline model detected - simulations are not run on baseline models');
+                    return; // Exit early - don't run simulation
+                }
+            } catch (error) {
+                console.warn('⚠️ Could not check if baseline model:', error);
+                // Continue if check fails (fail open for safety)
+            }
+        }
+        
         // Check if we have a loaded model and if simulations are still valid
         // (Skip validation if auto-running from confirmation modal)
         if (this.currentModelId && !skipValidation && !this.autoRunningMonteCarlo) {
@@ -9269,14 +9671,23 @@ class ValuationApp {
             // Sort by market cap (descending)
             combined.sort((a, b) => (b.marketCap || 0) - (a.marketCap || 0));
             
+            // If API returned no data, use fallback data
+            if (combined.length === 0) {
+                console.warn('[Combined Competitors] API returned no data, using fallback competitor data');
+                this.combinedCompetitorsData = this.fallbackCompetitorData;
+                return this.fallbackCompetitorData;
+            }
+            
             this.combinedCompetitorsData = combined;
             console.log(`✅ Loaded ${combined.length} combined competitors (${spaceResult.data?.length || 0} space + ${telecomResult.data?.length || 0} telecom)`);
             
             return combined;
         } catch (error) {
             console.error('❌ Error loading combined competitors:', error);
-            this.combinedCompetitorsData = [];
-            return [];
+            // Use fallback data if API fails
+            console.log('[Combined Competitors] API failed, using fallback competitor data');
+            this.combinedCompetitorsData = this.fallbackCompetitorData;
+            return this.fallbackCompetitorData;
         }
     }
     
@@ -9830,6 +10241,12 @@ class ValuationApp {
         // Don't run if no model is loaded (for initialization, wait for model)
         if (!this.currentModelId && reason !== 'initialization') {
             console.log('⏸️ No model loaded, skipping auto-run');
+            return;
+        }
+        
+        // Don't run if this is a baseline model - they are reference points
+        if (this.currentModelIsBaseline) {
+            console.log('ℹ️ Baseline model detected - skipping auto-run of simulations');
             return;
         }
         
@@ -11652,6 +12069,9 @@ class ValuationApp {
 
             if (result.success) {
                 const model = result.data;
+                
+                // Store baseline status for later checks
+                this.currentModelIsBaseline = model.isBaseline || false;
 
                 // Load inputs into form
                 if (model.inputs.earth) {
@@ -11758,11 +12178,16 @@ class ValuationApp {
                                 this.simulationsNeedRerun = false;
                                 
                                 // Auto-run simulation if inputs match (to ensure fresh results)
-                                setTimeout(() => {
-                                    this.autoRunMonteCarloIfNeeded('model-load');
-                                    this.autoRunVaRIfNeeded('model-load');
-                                    this.autoRunAttributionIfNeeded('model-load');
-                                }, 500);
+                                // Skip if baseline model - they are reference points
+                                if (!model.isBaseline) {
+                                    setTimeout(() => {
+                                        this.autoRunMonteCarloIfNeeded('model-load');
+                                        this.autoRunVaRIfNeeded('model-load');
+                                        this.autoRunAttributionIfNeeded('model-load');
+                                    }, 500);
+                                } else {
+                                    console.log('ℹ️ Baseline model detected - skipping auto-run of simulations');
+                                }
                             } else {
                                 console.warn(`⚠️ Model "${model.name}" inputs have changed - existing simulations are outdated`);
                                 console.warn('  Differences detected - simulations need rerun');
@@ -11772,11 +12197,16 @@ class ValuationApp {
                                 this.simulationsNeedRerun = true;
                                 
                                 // Auto-run simulation with new inputs
-                                setTimeout(() => {
-                                    this.autoRunMonteCarloIfNeeded('model-change');
-                                    this.autoRunVaRIfNeeded('model-change');
-                                    this.autoRunAttributionIfNeeded('model-change');
-                                }, 1000);
+                                // Skip if baseline model - they are reference points
+                                if (!model.isBaseline) {
+                                    setTimeout(() => {
+                                        this.autoRunMonteCarloIfNeeded('model-change');
+                                        this.autoRunVaRIfNeeded('model-change');
+                                        this.autoRunAttributionIfNeeded('model-change');
+                                    }, 1000);
+                                } else {
+                                    console.log('ℹ️ Baseline model detected - skipping auto-run of simulations');
+                                }
                             }
                         }
                     } catch (error) {
@@ -11785,11 +12215,16 @@ class ValuationApp {
                         this.latestSimulation = null;
                         
                         // If no simulations exist, auto-run
-                        setTimeout(() => {
-                            this.autoRunMonteCarloIfNeeded('model-load-no-sims');
-                            this.autoRunVaRIfNeeded('model-load-no-sims');
-                            this.autoRunAttributionIfNeeded('model-load-no-sims');
-                        }, 500);
+                        // Skip if baseline model - they are reference points
+                        if (!model.isBaseline) {
+                            setTimeout(() => {
+                                this.autoRunMonteCarloIfNeeded('model-load-no-sims');
+                                this.autoRunVaRIfNeeded('model-load-no-sims');
+                                this.autoRunAttributionIfNeeded('model-load-no-sims');
+                            }, 500);
+                        } else {
+                            console.log('ℹ️ Baseline model detected - skipping auto-run of simulations');
+                        }
                     }
                 } else {
                     console.log(`ℹ️ Model "${model.name}" has no simulations - auto-running simulation`);
@@ -11797,11 +12232,16 @@ class ValuationApp {
                     this.latestSimulation = null;
                     
                     // Auto-run simulation for new model
-                    setTimeout(() => {
-                        this.autoRunMonteCarloIfNeeded('model-load-no-sims');
-                        this.autoRunVaRIfNeeded('model-load-no-sims');
-                        this.autoRunAttributionIfNeeded('model-load-no-sims');
-                    }, 1000);
+                    // Skip if baseline model - they are reference points
+                    if (!model.isBaseline) {
+                        setTimeout(() => {
+                            this.autoRunMonteCarloIfNeeded('model-load-no-sims');
+                            this.autoRunVaRIfNeeded('model-load-no-sims');
+                            this.autoRunAttributionIfNeeded('model-load-no-sims');
+                        }, 1000);
+                    } else {
+                        console.log('ℹ️ Baseline model detected - skipping auto-run of simulations');
+                    }
                 }
 
                 // Automatically trigger Monte Carlo simulation (deterministic is disabled)
@@ -12006,6 +12446,7 @@ class ValuationApp {
                 // If we deleted the currently loaded model, clear it
                 if (id === this.currentModelId) {
                     this.currentModelId = null;
+                    this.currentModelIsBaseline = false;
                     this.currentModelName = null;
                     this.currentData = null;
                 }
@@ -13034,6 +13475,242 @@ class ValuationApp {
                 this.updateFinancialApiKeyFields();
             });
         }
+        
+        // Load Ada settings when modal opens
+        this.loadAdaSettings();
+    }
+    
+    // Get default Ada settings (CREATE - default values)
+    getDefaultAdaSettings() {
+        return {
+            voice: 'eve',
+            speechSpeed: 1.0, // Limited to 0.8-1.2 range to preserve audio quality
+            responseStyle: 'conversational',
+            formality: 3,
+            detailLevel: 3
+        };
+    }
+    
+    // Initialize Ada settings if they don't exist (CREATE)
+    initializeAdaSettings() {
+        const defaults = this.getDefaultAdaSettings();
+        
+        // Only create if settings don't exist
+        if (!localStorage.getItem('adaVoice')) {
+            localStorage.setItem('adaVoice', defaults.voice);
+        }
+        if (!localStorage.getItem('adaSpeechSpeed')) {
+            localStorage.setItem('adaSpeechSpeed', defaults.speechSpeed.toString());
+        }
+        if (!localStorage.getItem('adaResponseStyle')) {
+            localStorage.setItem('adaResponseStyle', defaults.responseStyle);
+        }
+        if (!localStorage.getItem('adaFormality')) {
+            localStorage.setItem('adaFormality', defaults.formality.toString());
+        }
+        if (!localStorage.getItem('adaDetailLevel')) {
+            localStorage.setItem('adaDetailLevel', defaults.detailLevel.toString());
+        }
+        
+        console.log('[Ada Settings] Initialized default settings');
+    }
+    
+    // Load Ada settings (READ)
+    loadAdaSettings() {
+        // Initialize defaults if they don't exist
+        this.initializeAdaSettings();
+        
+        const voiceSelect = document.getElementById('adaVoiceSelect');
+        const currentVoiceDisplay = document.getElementById('currentAdaVoiceDisplay');
+        const speechSpeed = document.getElementById('adaSpeechSpeed');
+        const speechSpeedValue = document.getElementById('adaSpeechSpeedValue');
+        const responseStyle = document.getElementById('adaResponseStyle');
+        const formality = document.getElementById('adaFormality');
+        const formalityValue = document.getElementById('adaFormalityValue');
+        const detailLevel = document.getElementById('adaDetailLevel');
+        const detailLevelValue = document.getElementById('adaDetailLevelValue');
+        
+        if (voiceSelect) {
+            // Get current voice from localStorage or default to 'eve'
+            const currentVoice = localStorage.getItem('adaVoice') || 'eve';
+            voiceSelect.value = currentVoice;
+            
+            // Update display
+            if (currentVoiceDisplay) {
+                const voiceNames = {
+                    'eve': 'Eve (British accent)',
+                    'ara': 'Ara (Female, warm, friendly)',
+                    'rex': 'Rex (Male, confident, clear)',
+                    'sal': 'Sal (Neutral, smooth, balanced)',
+                    'leo': 'Leo (Male, authoritative, strong)'
+                };
+                currentVoiceDisplay.textContent = voiceNames[currentVoice] || 'Eve (British accent)';
+            }
+        }
+        
+        // Load persona parameters
+        if (speechSpeed) {
+            const speed = parseFloat(localStorage.getItem('adaSpeechSpeed') || '1.0');
+            // Clamp to valid range (0.7 to 1.5)
+            const clampedSpeed = Math.max(0.7, Math.min(1.5, speed));
+            speechSpeed.value = clampedSpeed;
+            if (speechSpeedValue) {
+                speechSpeedValue.textContent = `${clampedSpeed.toFixed(2)}x`;
+            }
+            speechSpeed.addEventListener('input', (e) => {
+                const value = parseFloat(e.target.value);
+                if (speechSpeedValue) {
+                    speechSpeedValue.textContent = `${value.toFixed(2)}x`;
+                }
+            });
+        }
+        
+        if (responseStyle) {
+            responseStyle.value = localStorage.getItem('adaResponseStyle') || 'conversational';
+        }
+        
+        if (formality) {
+            const formalityLevel = parseInt(localStorage.getItem('adaFormality') || '3');
+            formality.value = formalityLevel;
+            if (formalityValue) {
+                const labels = ['Very Casual', 'Casual', 'Moderate', 'Formal', 'Very Formal'];
+                formalityValue.textContent = labels[formalityLevel - 1] || 'Moderate';
+            }
+            formality.addEventListener('input', (e) => {
+                const level = parseInt(e.target.value);
+                if (formalityValue) {
+                    const labels = ['Very Casual', 'Casual', 'Moderate', 'Formal', 'Very Formal'];
+                    formalityValue.textContent = labels[level - 1] || 'Moderate';
+                }
+            });
+        }
+        
+        if (detailLevel) {
+            const detail = parseInt(localStorage.getItem('adaDetailLevel') || '3');
+            detailLevel.value = detail;
+            if (detailLevelValue) {
+                const labels = ['Very Brief', 'Brief', 'Moderate', 'Detailed', 'Very Detailed'];
+                detailLevelValue.textContent = labels[detail - 1] || 'Moderate';
+            }
+            detailLevel.addEventListener('input', (e) => {
+                const level = parseInt(e.target.value);
+                if (detailLevelValue) {
+                    const labels = ['Very Brief', 'Brief', 'Moderate', 'Detailed', 'Very Detailed'];
+                    detailLevelValue.textContent = labels[level - 1] || 'Moderate';
+                }
+            });
+        }
+    }
+    
+    // Save Ada settings (UPDATE)
+    saveAdaSettings() {
+        const voiceSelect = document.getElementById('adaVoiceSelect');
+        const speechSpeed = document.getElementById('adaSpeechSpeed');
+        const responseStyle = document.getElementById('adaResponseStyle');
+        const formality = document.getElementById('adaFormality');
+        const detailLevel = document.getElementById('adaDetailLevel');
+        
+        const settings = {};
+        
+        if (voiceSelect) {
+            settings.voice = voiceSelect.value;
+            localStorage.setItem('adaVoice', settings.voice);
+            
+            // If Grok Voice service is connected, reconnect with new voice
+            // This ensures the new voice is used for future connections
+            if (this.grokVoiceService && this.grokVoiceService.socket && this.grokVoiceService.socket.connected) {
+                console.log(`🔄 Voice changed to ${settings.voice}, reconnecting Grok Voice...`);
+                // Disconnect and reconnect to apply new voice
+                this.grokVoiceService.socket.disconnect();
+                setTimeout(() => {
+                    this.grokVoiceService.connectSocketIO().catch(console.error);
+                }, 500);
+            }
+        }
+        
+        if (speechSpeed) {
+            const speed = parseFloat(speechSpeed.value);
+            // Clamp to valid range (0.7 to 1.5) - time-stretching preserves pitch
+            settings.speechSpeed = Math.max(0.7, Math.min(1.5, speed));
+            localStorage.setItem('adaSpeechSpeed', settings.speechSpeed.toString());
+        }
+        
+        if (responseStyle) {
+            settings.responseStyle = responseStyle.value;
+            localStorage.setItem('adaResponseStyle', settings.responseStyle);
+        }
+        
+        if (formality) {
+            settings.formality = parseInt(formality.value);
+            localStorage.setItem('adaFormality', settings.formality);
+        }
+        
+        if (detailLevel) {
+            settings.detailLevel = parseInt(detailLevel.value);
+            localStorage.setItem('adaDetailLevel', settings.detailLevel);
+        }
+        
+        // Show success message
+        this.showNotification('Ada settings saved successfully', 'success');
+        
+        // Log settings
+        console.log('[Ada Settings] Updated:', settings);
+        
+        // Note: Voice change will take effect on next Grok Voice connection
+        // Speech speed will be applied to audio playback
+    }
+    
+    // Reset Ada settings to defaults (DELETE)
+    resetAdaSettings() {
+        if (!confirm('Reset Ada settings to default values? This will restore all persona parameters to their defaults.')) {
+            return;
+        }
+        
+        const defaults = this.getDefaultAdaSettings();
+        
+        // Delete all existing settings
+        localStorage.removeItem('adaVoice');
+        localStorage.removeItem('adaSpeechSpeed');
+        localStorage.removeItem('adaResponseStyle');
+        localStorage.removeItem('adaFormality');
+        localStorage.removeItem('adaDetailLevel');
+        
+        // Create default settings
+        localStorage.setItem('adaVoice', defaults.voice);
+        localStorage.setItem('adaSpeechSpeed', defaults.speechSpeed.toString());
+        localStorage.setItem('adaResponseStyle', defaults.responseStyle);
+        localStorage.setItem('adaFormality', defaults.formality.toString());
+        localStorage.setItem('adaDetailLevel', defaults.detailLevel.toString());
+        
+        // Reload settings to update UI
+        this.loadAdaSettings();
+        
+        // Show success message
+        this.showNotification('Ada settings reset to defaults', 'success');
+        
+        console.log('[Ada Settings] Reset to defaults:', defaults);
+    }
+    
+    // Get Ada settings (READ - returns current settings object)
+    getUseRelationshipDetection() {
+        // Check localStorage, default to true
+        const stored = localStorage.getItem('useRelationshipDetection');
+        return stored !== null ? stored === 'true' : true;
+    }
+    
+    setUseRelationshipDetection(enabled) {
+        localStorage.setItem('useRelationshipDetection', enabled.toString());
+        console.log(`🔧 Relationship Detection ${enabled ? 'ENABLED' : 'DISABLED'}`);
+    }
+    
+    getAdaSettings() {
+        return {
+            voice: localStorage.getItem('adaVoice') || 'eve',
+            speechSpeed: parseFloat(localStorage.getItem('adaSpeechSpeed') || '1.0'),
+            responseStyle: localStorage.getItem('adaResponseStyle') || 'conversational',
+            formality: parseInt(localStorage.getItem('adaFormality') || '3'),
+            detailLevel: parseInt(localStorage.getItem('adaDetailLevel') || '3')
+        };
     }
 
     // Update current model display
@@ -14059,6 +14736,24 @@ class ValuationApp {
                     });
                 }
                 
+                // Attach X feed click handlers
+                if (tileContentType === TILE_CONTENT_TYPES.X_FEEDS) {
+                    requestAnimationFrame(() => {
+                        setTimeout(() => {
+                            this.attachXFeedClickHandlers(tileElement, tile, cachedInsight);
+                        }, 200);
+                    });
+                }
+                
+                // Attach news article click handlers
+                if (tileContentType === TILE_CONTENT_TYPES.NEWS) {
+                    requestAnimationFrame(() => {
+                        setTimeout(() => {
+                            this.attachNewsClickHandlers(tileElement, tile, cachedInsight);
+                        }, 200);
+                    });
+                }
+                
                 // Render chart if present (for cached insights with charts)
                 // Skip chart rendering for special content tiles (X-feeds, News, Image-Comments, List)
                 const isSpecialContent = tileContentType === TILE_CONTENT_TYPES.X_FEEDS || 
@@ -14415,6 +15110,24 @@ class ValuationApp {
                                     }, 200);
                                 });
                             }
+                            
+                            // Attach X feed click handlers
+                            if (tileContentType === TILE_CONTENT_TYPES.X_FEEDS) {
+                                requestAnimationFrame(() => {
+                                    setTimeout(() => {
+                                        this.attachXFeedClickHandlers(updatedElement, tile, insightData);
+                                    }, 200);
+                                });
+                            }
+                            
+                            // Attach news article click handlers
+                            if (tileContentType === TILE_CONTENT_TYPES.NEWS) {
+                                requestAnimationFrame(() => {
+                                    setTimeout(() => {
+                                        this.attachNewsClickHandlers(updatedElement, tile, insightData);
+                                    }, 200);
+                                });
+                            }
                         }
                 };
 
@@ -14445,6 +15158,13 @@ class ValuationApp {
                 // Also wait for all to complete for final status
                 await Promise.allSettled(insightPromises);
                 console.log(`✅ Terminal insights loading complete: ${completedCount}/${totalTiles} tiles`);
+                
+                // Start real-time polling for X feeds tile if on dashboard view
+                if (this.currentView === 'dashboard') {
+                    setTimeout(() => {
+                        this.startXFeedsPolling();
+                    }, 1000); // Wait 1 second after initial load
+                }
             } catch (error) {
                 console.error('❌ Error loading terminal insights in parallel:', error);
             } finally {
@@ -14456,6 +15176,142 @@ class ValuationApp {
 
         // Return promise (but don't await - let it run in background)
         return this.terminalInsightsLoadPromise;
+    }
+
+    /**
+     * Refresh X feeds tile with latest tweets
+     */
+    async refreshXFeedsTile() {
+        try {
+            const gridContainer = document.getElementById('dashboardGrid');
+            if (!gridContainer) return;
+
+            const xFeedsTile = gridContainer.querySelector('[data-tile-id="x-posts"]');
+            if (!xFeedsTile) return;
+
+            // Only refresh if we're on the dashboard view
+            if (this.currentView !== 'dashboard') return;
+
+            console.log('[X Feeds] 🔄 Refreshing X feeds tile...');
+
+            // Find the tile definition
+            const tiles = Array.from(gridContainer.querySelectorAll('[data-tile-id]')).map(el => {
+                const tileId = el.getAttribute('data-tile-id');
+                const tileElement = gridContainer.querySelector(`[data-tile-id="${tileId}"]`);
+                if (!tileElement) return null;
+                
+                // Extract tile properties from element
+                return {
+                    id: tileId,
+                    insightType: el.getAttribute('data-insight-type') || 'x-feeds',
+                    title: el.querySelector('.tile-title')?.textContent || 'Key X Posts',
+                    value: el.querySelector('.tile-value')?.textContent || 'Recent',
+                    color: el.style.getPropertyValue('--tile-color') || '#1da1f2',
+                    size: el.getAttribute('data-tile-size') || 'vertical',
+                    contentType: TILE_CONTENT_TYPES.X_FEEDS,
+                    isSpecialTile: true
+                };
+            }).filter(Boolean);
+
+            const xFeedsTileDef = tiles.find(t => t.id === 'x-posts');
+            if (!xFeedsTileDef) return;
+
+            // Get current data and inputs
+            const data = this.currentData;
+            const inputs = this.getInputs();
+            if (!data) return;
+
+            // Fetch fresh X feeds data
+            const contentLimits = this.getTileContentLimits(xFeedsTileDef.size, xFeedsTile);
+            const response = await fetch('/api/insights/enhanced', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    valuationData: data,
+                    inputs: inputs,
+                    tileId: 'x-posts',
+                    tileTitle: xFeedsTileDef.title,
+                    tileValue: xFeedsTileDef.value,
+                    tileSize: xFeedsTileDef.size,
+                    contentLimits: contentLimits,
+                    context: {
+                        metric: xFeedsTileDef.title,
+                        value: xFeedsTileDef.value,
+                        tileType: 'x-feeds'
+                    }
+                })
+            });
+
+            const result = await response.json();
+            if (result.success && result.data && result.data.xFeeds) {
+                // Update cache
+                const cacheKey = `x-posts-x-feeds`;
+                if (this.cachedTerminalInsights[this.currentModelId]) {
+                    this.cachedTerminalInsights[this.currentModelId][cacheKey] = result.data;
+                }
+
+                // Update tile with new data
+                const updatedHTML = this.renderDashboardTile(xFeedsTileDef, result.data, false);
+                const tempDiv = document.createElement('div');
+                tempDiv.innerHTML = updatedHTML.trim();
+                const updatedElement = tempDiv.firstElementChild;
+                
+                if (updatedElement) {
+                    // Preserve grid position
+                    updatedElement.style.gridColumn = xFeedsTile.style.gridColumn;
+                    updatedElement.style.gridRow = xFeedsTile.style.gridRow;
+                    xFeedsTile.replaceWith(updatedElement);
+                    
+                    // Re-attach click handlers
+                    this.attachTileClickHandler(updatedElement, xFeedsTileDef, result.data);
+                    
+                    // Refresh icons
+                    if (window.lucide) window.lucide.createIcons();
+                    
+                    console.log(`[X Feeds] ✅ Refreshed with ${result.data.xFeeds.length} tweets`);
+                }
+            }
+        } catch (error) {
+            console.error('[X Feeds] ❌ Error refreshing tile:', error);
+        }
+    }
+
+    /**
+     * Start real-time polling for X feeds tile
+     */
+    startXFeedsPolling() {
+        // Clear existing interval if any
+        this.stopXFeedsPolling();
+
+        // Only start if we're on dashboard view
+        if (this.currentView !== 'dashboard') return;
+
+        console.log(`[X Feeds] 🚀 Starting real-time polling (${this.xFeedsRefreshIntervalMs / 1000}s interval)`);
+
+        // Refresh immediately, then set up interval
+        this.refreshXFeedsTile();
+
+        // Set up polling interval
+        this.xFeedsRefreshInterval = setInterval(() => {
+            // Only refresh if still on dashboard view
+            if (this.currentView === 'dashboard') {
+                this.refreshXFeedsTile();
+            } else {
+                // Stop polling if we've navigated away
+                this.stopXFeedsPolling();
+            }
+        }, this.xFeedsRefreshIntervalMs);
+    }
+
+    /**
+     * Stop real-time polling for X feeds tile
+     */
+    stopXFeedsPolling() {
+        if (this.xFeedsRefreshInterval) {
+            clearInterval(this.xFeedsRefreshInterval);
+            this.xFeedsRefreshInterval = null;
+            console.log('[X Feeds] ⏹️ Stopped real-time polling');
+        }
     }
 
     packGridTiles(tiles, gridColumns) {
@@ -15730,8 +16586,46 @@ class ValuationApp {
             
             return `
                 <div class="special-content" style="margin-top: 2px; padding-top: 2px; border-top: 1px solid var(--border-color); display: flex; flex-direction: column; gap: 4px; flex: 1; overflow-y: auto; min-height: 0;">
-                    ${aiData.xFeeds.slice(0, itemCount).map(post => `
-                        <div class="special-item" style="font-size: ${fontSize}; line-height: 1.4; padding: 4px 0; border-bottom: 1px solid rgba(0,0,0,0.05);">
+                    ${aiData.xFeeds.slice(0, itemCount).map((post, idx) => {
+                        const engagement = post.engagement || {};
+                        const likes = engagement.likes || 0;
+                        const retweets = engagement.retweets || 0;
+                        const replies = engagement.replies || 0;
+                        const quotes = engagement.quotes || 0;
+                        const totalEngagement = likes + retweets + replies + quotes;
+                        const engagementStr = totalEngagement > 0 ? JSON.stringify({likes, retweets, replies, quotes}).replace(/"/g, '&quot;') : '';
+                        const rootTweetStr = post.rootTweet ? JSON.stringify(post.rootTweet).replace(/"/g, '&quot;') : '';
+                        const originalTweetStr = post.originalTweet ? JSON.stringify(post.originalTweet).replace(/"/g, '&quot;') : '';
+                        const quotedTweetStr = post.quotedTweet ? JSON.stringify(post.quotedTweet).replace(/"/g, '&quot;') : '';
+                        const conversationId = post.conversationId || post.tweetId || '';
+                        const tweetId = post.tweetId || '';
+                        const isReply = post.isReply || false;
+                        const isRetweet = post.isRetweet || false;
+                        const isQuote = post.isQuote || false;
+                        const conversationThreadStr = post.conversationThread && Array.isArray(post.conversationThread) && post.conversationThread.length > 0 
+                            ? JSON.stringify(post.conversationThread).replace(/"/g, '&quot;') : '';
+                        
+                        return `
+                        <div class="special-item x-feed-item" 
+                             data-x-feed-index="${idx}"
+                             data-x-feed-account="${(post.accountName || post.account || '').replace(/"/g, '&quot;')}"
+                             data-x-feed-content="${(post.content || '').replace(/"/g, '&quot;').replace(/\n/g, ' ').substring(0, 1000)}"
+                             data-x-feed-date="${(post.date || '').replace(/"/g, '&quot;')}"
+                             data-x-feed-url="${(post.url || post.link || '').replace(/"/g, '&quot;')}"
+                             data-x-feed-is-key-account="${post.isKeyAccount || false}"
+                             data-x-feed-tweet-id="${tweetId}"
+                             data-x-feed-conversation-id="${conversationId}"
+                             data-x-feed-is-reply="${isReply}"
+                             data-x-feed-is-retweet="${isRetweet}"
+                             data-x-feed-is-quote="${isQuote}"
+                             ${rootTweetStr ? `data-x-feed-root-tweet="${rootTweetStr}"` : ''}
+                             ${originalTweetStr ? `data-x-feed-original-tweet="${originalTweetStr}"` : ''}
+                             ${quotedTweetStr ? `data-x-feed-quoted-tweet="${quotedTweetStr}"` : ''}
+                             ${conversationThreadStr ? `data-x-feed-conversation-thread="${conversationThreadStr}"` : ''}
+                             ${engagementStr ? `data-x-feed-engagement="${engagementStr}"` : ''}
+                             style="font-size: ${fontSize}; line-height: 1.4; padding: 4px 0; border-bottom: 1px solid rgba(0,0,0,0.05); cursor: pointer; transition: background-color 0.2s;"
+                             onmouseover="this.style.backgroundColor='var(--surface-secondary)'"
+                             onmouseout="this.style.backgroundColor='transparent'">
                             <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 2px;">
                                 <div class="special-item-title" style="font-weight: 600; color: ${post.isKeyAccount ? tile.color : 'var(--text-secondary)'}; font-size: ${accountNameSize};">
                                 ${post.accountName || post.account}
@@ -15741,15 +16635,28 @@ class ValuationApp {
                             <div style="color: var(--text-primary); word-wrap: break-word; line-height: 1.4;">
                                 ${this.processInsightLinks((post.content || '').substring(0, charLimit))}${(post.content || '').length > charLimit ? '...' : ''}
                             </div>
+                            ${totalEngagement > 0 ? `
+                            <div class="x-feed-engagement" 
+                                 data-x-feed-engagement-index="${idx}"
+                                 style="display: flex; gap: 8px; margin-top: 4px; font-size: 9px; color: var(--text-secondary); cursor: pointer; padding: 2px 4px; border-radius: 4px; transition: background-color 0.2s;"
+                                 onmouseover="this.style.backgroundColor='var(--surface-secondary)'"
+                                 onmouseout="this.style.backgroundColor='transparent'">
+                                ${likes > 0 ? `<span title="Likes">❤️ ${likes >= 1000 ? (likes/1000).toFixed(1) + 'K' : likes.toLocaleString()}</span>` : ''}
+                                ${retweets > 0 ? `<span title="Retweets">🔄 ${retweets >= 1000 ? (retweets/1000).toFixed(1) + 'K' : retweets.toLocaleString()}</span>` : ''}
+                                ${replies > 0 ? `<span title="Replies">💬 ${replies >= 1000 ? (replies/1000).toFixed(1) + 'K' : replies.toLocaleString()}</span>` : ''}
+                                ${quotes > 0 ? `<span title="Quotes">💭 ${quotes >= 1000 ? (quotes/1000).toFixed(1) + 'K' : quotes.toLocaleString()}</span>` : ''}
+                            </div>
+                            ` : ''}
                         </div>
-                    `).join('')}
+                    `;
+                    }).join('')}
                 </div>
             `;
         } else if (tileContentType === TILE_CONTENT_TYPES.NEWS && aiData && aiData.news && Array.isArray(aiData.news) && aiData.news.length > 0) {
             console.log(`[renderSpecialTileContent] ✅ Rendering ${aiData.news.length} news items for tile: ${tile.id}`);
             return `
                 <div class="special-content" style="margin-top: 2px; padding-top: 2px; border-top: 1px solid var(--border-color); display: flex; flex-direction: column; gap: 4px; flex: 1; overflow-y: auto; min-height: 0;">
-                    ${aiData.news.slice(0, itemCount).map(item => {
+                    ${aiData.news.slice(0, itemCount).map((item, idx) => {
                         let thumbnailUrl = item.thumbnail || item.image || item.imageUrl || '';
                         
                         // Validate URL - must start with http:// or https://
@@ -15758,7 +16665,16 @@ class ValuationApp {
                         }
                         
                         return `
-                        <div class="special-item" style="font-size: ${fontSize}; line-height: 1.4; padding: 4px 0; border-bottom: 1px solid rgba(0,0,0,0.05); display: flex; gap: 6px; align-items: flex-start;">
+                        <div class="special-item news-item" 
+                             data-news-index="${idx}"
+                             data-news-title="${(item.title || '').replace(/"/g, '&quot;')}"
+                             data-news-summary="${((item.summary || item.content || '').substring(0, 300)).replace(/"/g, '&quot;')}"
+                             data-news-date="${(item.date || '').replace(/"/g, '&quot;')}"
+                             data-news-url="${(item.url || item.link || '').replace(/"/g, '&quot;')}"
+                             data-news-source="${(item.source || '').replace(/"/g, '&quot;')}"
+                             style="font-size: ${fontSize}; line-height: 1.4; padding: 4px 0; border-bottom: 1px solid rgba(0,0,0,0.05); display: flex; gap: 6px; align-items: flex-start; cursor: pointer; transition: background-color 0.2s;"
+                             onmouseover="this.style.backgroundColor='var(--surface-secondary)'"
+                             onmouseout="this.style.backgroundColor='transparent'">
                             <div class="news-thumbnail" style="flex-shrink: 0; width: 60px; height: 40px; border-radius: 2px; overflow: hidden; background: var(--surface-secondary); border: 0.5px solid var(--border-color); display: flex; align-items: center; justify-content: center; position: relative;">
                                 ${thumbnailUrl ? `
                                     <img src="${thumbnailUrl}" alt="${(item.title || 'News thumbnail').replace(/"/g, '&quot;')}" 
@@ -15799,12 +16715,23 @@ class ValuationApp {
             `;
         } else if (tileContentType === TILE_CONTENT_TYPES.NEWS) {
             // News tile but no data - show empty/loading state
-            console.warn(`[renderSpecialTileContent] ⚠️ News tile has no news data. aiData:`, aiData);
+            // Only log warning if we're actually expecting news (not just initial load)
+            if (!aiData) {
+                // Don't log warning - this is normal during initial load
+                return `
+                    <div class="special-content" style="display: flex; flex-direction: column; gap: 8px; flex: 1 1 0%; min-height: 0; align-items: center; justify-content: center; padding: 0;">
+                        <i data-lucide="loader" class="spinning" style="width: 20px; height: 20px; color: ${tile.color};"></i>
+                        <div style="font-size: 9px; color: var(--text-secondary); text-align: center;">
+                            Loading news...
+                        </div>
+                    </div>
+                `;
+            }
+            // If aiData exists but has no news, show empty state
             return `
                 <div class="special-content" style="display: flex; flex-direction: column; gap: 8px; flex: 1 1 0%; min-height: 0; align-items: center; justify-content: center; padding: 0;">
-                    ${!aiData ? `<i data-lucide="loader" class="spinning" style="width: 20px; height: 20px; color: ${tile.color};"></i>` : ''}
                     <div style="font-size: 9px; color: var(--text-secondary); text-align: center;">
-                        ${!aiData ? 'Loading news...' : 'No news available'}
+                        No news available
                     </div>
                 </div>
             `;
@@ -15973,14 +16900,29 @@ class ValuationApp {
             `;
         } else if (tileContentType === TILE_CONTENT_TYPES.LIST) {
             // Render competitors list tile - use combined competitors (space + telecom) if available
-            const comparables = this.combinedCompetitorsData || this.currentComparablesData || [];
+            // Fallback to in-memory data if API fails
+            let comparables = this.combinedCompetitorsData || this.currentComparablesData || [];
+            
+            // If no data loaded, use fallback data
+            if (comparables.length === 0) {
+                comparables = this.fallbackCompetitorData;
+                console.log('[Competitors Tile] Using fallback competitor data:', comparables.length, 'companies');
+            }
+            
             const maxItems = tile.size === 'square' ? 8 : (tile.size === 'vertical' || tile.size === '1x2' ? 10 : 6);
             const displayItems = comparables.slice(0, maxItems);
             
-            // Load combined competitors if not already loaded
-            if (!this.combinedCompetitorsData && comparables.length === 0) {
-                this.loadCombinedCompetitors().catch(err => {
+            // Load combined competitors if not already loaded (but don't wait - use fallback)
+            if (!this.combinedCompetitorsData && !this.currentComparablesData) {
+                this.loadCombinedCompetitors().then(() => {
+                    // Once loaded, update the tile if it's still visible
+                    const tileElement = document.querySelector(`[data-tile-id="${tile.id}"]`);
+                    if (tileElement) {
+                        this.updateDashboardTileContent(tile.id, tile, this.cachedTerminalInsights?.[this.currentModelId]?.[tile.id]);
+                    }
+                }).catch(err => {
                     console.error('Error loading combined competitors:', err);
+                    // Fallback data is already being used, so this is fine
                 });
             }
             
@@ -16220,6 +17162,13 @@ class ValuationApp {
                 display: agentWindow.style.display,
                 position: agentWindow.style.position
             });
+            
+            // Show Ada's introduction if this is the first time opening the agent in this session
+            setTimeout(() => {
+                if (!this.adaHasIntroduced) {
+                    this.showAdaIntroduction();
+                }
+            }, 300); // Small delay to ensure window is fully initialized
         } else {
             this.closeAIAgent();
         }
@@ -16263,6 +17212,7 @@ class ValuationApp {
         const savedVoiceMode = localStorage.getItem('agentVoiceMode');
         const savedVoiceOutput = localStorage.getItem('agentVoiceOutputEnabled');
         const savedVoiceInput = localStorage.getItem('agentVoiceInputEnabled');
+        const savedClickInput = localStorage.getItem('agentClickInputEnabled');
         
         // Migrate old agentVoiceMode to agentVoiceOutputEnabled for backward compatibility
         if (savedVoiceOutput !== null) {
@@ -16275,6 +17225,36 @@ class ValuationApp {
         
         if (savedVoiceInput !== null) {
             this.agentVoiceInputEnabled = savedVoiceInput === 'true';
+        }
+        
+        // Load click input preference (default: true)
+        if (savedClickInput !== null) {
+            this.agentClickInputEnabled = savedClickInput === 'true';
+        } else {
+            this.agentClickInputEnabled = true; // Default: clicks enabled
+        }
+        
+        // Update ClickSensor enabled state
+        if (this.adaInputSystem) {
+            this.adaInputSystem.setSensorEnabled('click', this.agentClickInputEnabled);
+        }
+        
+        // Update click toggle button state
+        const clickToggleBtn = document.getElementById('agentClickToggleBtn');
+        const clickToggleIcon = document.getElementById('agentClickToggleIcon');
+        if (clickToggleBtn && clickToggleIcon) {
+            if (this.agentClickInputEnabled) {
+                clickToggleBtn.classList.add('active');
+                clickToggleIcon.setAttribute('data-lucide', 'mouse-pointer');
+                clickToggleBtn.setAttribute('title', 'Disable Clicks: OFF (Click to disable click-to-chat)');
+                clickToggleBtn.style.opacity = '0.6'; // Normal opacity when enabled
+            } else {
+                clickToggleBtn.classList.remove('active');
+                clickToggleIcon.setAttribute('data-lucide', 'mouse-pointer');
+                clickToggleBtn.setAttribute('title', 'Disable Clicks: ON (Click to enable click-to-chat)');
+                clickToggleBtn.style.opacity = '0.3'; // Dimmed when disabled
+            }
+            if (window.lucide) window.lucide.createIcons();
         }
         
         // Update legacy flag for backward compatibility
@@ -16313,7 +17293,7 @@ class ValuationApp {
             } else {
                 voiceInputToggleBtn.classList.remove('active');
                 voiceInputToggleIcon.setAttribute('data-lucide', 'mic-off');
-                voiceInputToggleBtn.setAttribute('title', 'Voice Input: OFF (Click to enable microphone)');
+                voiceInputToggleBtn.setAttribute('title', 'Mute User: ON (Click to unmute microphone)');
                 // Reset placeholder when voice input is disabled
                 if (chatInput) {
                     chatInput.placeholder = 'Type your message here...';
@@ -16354,8 +17334,10 @@ class ValuationApp {
         }
         if (!window) return;
 
-        // Load system prompts
-        this.loadAgentSystemPrompts();
+        // Load system prompts (async - will fallback to localStorage if DB fails)
+        this.loadAgentSystemPrompts().catch(err => {
+            console.warn('⚠️ Failed to load prompts, using defaults:', err);
+        });
 
         // Initialize draggable functionality
         this.setupAgentDraggable();
@@ -16368,6 +17350,121 @@ class ValuationApp {
 
         // Refresh icons
         if (window.lucide) window.lucide.createIcons();
+        
+        // CRITICAL: Setup AudioContext resume on first user interaction (required for remote machines)
+        // Browsers require user interaction to start audio playback (autoplay policy)
+        this.setupAudioContextResume();
+    }
+
+    /**
+     * Show Ada's introduction when agent is first opened
+     * Explains who she is and how she works
+     */
+    async showAdaIntroduction() {
+        if (this.adaHasIntroduced) {
+            return; // Already introduced
+        }
+
+        this.adaHasIntroduced = true;
+        
+        // Introduction message from Ada
+        const introductionMessage = `Hey Aaron! I'm Ada, your Mach33 Assistant. I'm here to help you analyze SpaceX valuation data and answer questions about the models, charts, and insights you're working with.
+
+Here's how I work:
+• Click on any stock, chart, or tile and I'll provide analysis and insights
+• Ask me questions about the data, models, or SpaceX valuation
+• I can explain trends, compare companies, and dive deeper into specific topics
+• Use the "Learn more" links at the end of my responses to explore topics further
+
+I remember our conversation history, so I can build on previous discussions and make connections between different topics. Feel free to click around or ask me anything about SpaceX valuation!`;
+
+        // Display introduction as a system message (from Ada)
+        this.addAgentMessage(introductionMessage, 'assistant');
+        
+        // If voice output is enabled, speak the introduction
+        if (this.agentVoiceOutputEnabled) {
+            try {
+                // Use modular VoiceOutputHandler for verbatim reading
+                if (this.adaInputSystem && this.adaInputSystem.getVoiceOutputHandler()) {
+                    const voiceHandler = this.adaInputSystem.getVoiceOutputHandler();
+                    await voiceHandler.speakVerbatim(introductionMessage);
+                } else {
+                    // Fallback to original method
+                    await this.speakAgentResponse(introductionMessage, null);
+                }
+            } catch (error) {
+                console.error('❌ Failed to speak Ada introduction:', error);
+                // Don't fail silently - introduction is important
+            }
+        }
+        
+        console.log('👋 Ada introduction displayed');
+    }
+
+    /**
+     * Setup AudioContext resume on first user interaction
+     * Required for remote machines where AudioContext starts suspended
+     * Browsers require user interaction to start audio playback (autoplay policy)
+     */
+    setupAudioContextResume() {
+        // Only set up once
+        if (this.audioContextResumeSetup) return;
+        this.audioContextResumeSetup = true;
+        
+        const resumeAudioContext = async () => {
+            console.log('👆 User interaction detected - resuming AudioContext...');
+            
+            // Resume Grok Voice service AudioContext if it exists
+            if (this.grokVoiceService && this.grokVoiceService.audioContext) {
+                if (this.grokVoiceService.audioContext.state === 'suspended') {
+                    try {
+                        await this.grokVoiceService.audioContext.resume();
+                        console.log('✅ AudioContext resumed on user interaction, state:', this.grokVoiceService.audioContext.state);
+                        
+                        // Show success message
+                        const existingMsg = document.querySelector('.audio-resume-message');
+                        if (existingMsg) existingMsg.remove();
+                    } catch (error) {
+                        console.error('❌ Failed to resume AudioContext:', error);
+                    }
+                } else {
+                    console.log('ℹ️ AudioContext already running, state:', this.grokVoiceService.audioContext.state);
+                }
+            } else {
+                console.log('ℹ️ Grok Voice service not initialized yet');
+            }
+        };
+        
+        // Resume on any user interaction (click, touch, keypress)
+        // Use capture phase to catch interactions early
+        document.addEventListener('click', resumeAudioContext, { once: true, capture: true });
+        document.addEventListener('touchstart', resumeAudioContext, { once: true, capture: true });
+        document.addEventListener('keydown', resumeAudioContext, { once: true, capture: true });
+        
+        console.log('✅ AudioContext resume handler setup - will resume on first user interaction');
+        
+        // Show visual indicator if AudioContext is suspended
+        const checkAudioContext = () => {
+            if (this.grokVoiceService && this.grokVoiceService.audioContext) {
+                if (this.grokVoiceService.audioContext.state === 'suspended') {
+                    // Show message in agent window
+                    const agentWindow = document.getElementById('aiAgentWindow');
+                    if (agentWindow && !document.querySelector('.audio-resume-message')) {
+                        const message = document.createElement('div');
+                        message.className = 'audio-resume-message';
+                        message.style.cssText = 'padding: 8px 12px; background: rgba(255, 193, 7, 0.1); border-left: 3px solid #ffc107; margin: 8px 0; font-size: 11px; color: var(--text-secondary);';
+                        message.innerHTML = '🔊 <strong>Audio Ready:</strong> Click anywhere to enable audio playback';
+                        const agentMessages = agentWindow.querySelector('.agent-chat-messages');
+                        if (agentMessages) {
+                            agentMessages.insertBefore(message, agentMessages.firstChild);
+                        }
+                    }
+                }
+            }
+        };
+        
+        // Check after a short delay to allow service initialization
+        setTimeout(checkAudioContext, 1000);
     }
 
     updateAgentContextBadge() {
@@ -16435,6 +17532,14 @@ class ValuationApp {
         if (activeContent) {
             activeContent.style.display = 'block';
         }
+        
+        // Initialize feature flags when model-config tab is opened
+        if (tabName === 'model-config') {
+            const relationshipToggle = document.getElementById('useRelationshipDetectionToggle');
+            if (relationshipToggle) {
+                relationshipToggle.checked = this.getUseRelationshipDetection();
+            }
+        }
 
         if (window.lucide) window.lucide.createIcons();
     }
@@ -16442,21 +17547,47 @@ class ValuationApp {
     setupAgentDraggable() {
         const window = document.getElementById('aiAgentWindow');
         const header = document.getElementById('agentHeader');
+        const footer = document.querySelector('.agent-chat-input-container');
         if (!window || !header) return;
 
         let isDragging = false;
         let startX, startY, startLeft, startTop;
+        let dragSource = null; // Track which element initiated the drag
 
-        header.addEventListener('mousedown', (e) => {
-            if (e.target.closest('.agent-header-btn')) return; // Don't drag when clicking buttons
+        const startDrag = (e, source) => {
+            // Don't drag when clicking interactive elements
+            if (e.target.closest('.agent-header-btn') || 
+                e.target.closest('button') || 
+                e.target.closest('textarea') ||
+                e.target.closest('input') ||
+                e.target.closest('.agent-resize-handle')) {
+                return;
+            }
             isDragging = true;
+            dragSource = source;
             startX = e.clientX;
             startY = e.clientY;
             startLeft = parseInt(window.style.left) || 100;
             startTop = parseInt(window.style.top) || 100;
-            header.style.cursor = 'grabbing';
+            if (source === header) {
+                header.style.cursor = 'grabbing';
+            } else if (source === footer) {
+                footer.style.cursor = 'grabbing';
+            }
             e.preventDefault();
+        };
+
+        // Header drag handler
+        header.addEventListener('mousedown', (e) => {
+            startDrag(e, header);
         });
+
+        // Footer drag handler
+        if (footer) {
+            footer.addEventListener('mousedown', (e) => {
+                startDrag(e, footer);
+            });
+        }
 
         document.addEventListener('mousemove', (e) => {
             if (!isDragging) return;
@@ -16469,7 +17600,12 @@ class ValuationApp {
         document.addEventListener('mouseup', () => {
             if (isDragging) {
                 isDragging = false;
-                header.style.cursor = 'grab';
+                if (dragSource === header) {
+                    header.style.cursor = 'grab';
+                } else if (dragSource === footer) {
+                    footer.style.cursor = 'grab';
+                }
+                dragSource = null;
                 // Save agent position to application state (fire and forget)
                 const agentPosition = {
                     left: window.style.left,
@@ -16527,12 +17663,17 @@ class ValuationApp {
     }
 
     toggleAIAgentCollapse() {
-        const content = document.getElementById('agentContent');
+        const messagesArea = document.getElementById('agentChatMessages');
+        const inputContainer = document.querySelector('.agent-chat-input-container');
         const collapseBtn = document.getElementById('agentCollapseBtn');
-        if (!content || !collapseBtn) return;
+        if (!messagesArea || !inputContainer || !collapseBtn) return;
 
-        const isCollapsed = content.style.display === 'none';
-        content.style.display = isCollapsed ? 'block' : 'none';
+        // IMPORTANT: Always keep input container visible - only collapse messages area
+        const isCollapsed = messagesArea.style.display === 'none';
+        messagesArea.style.display = isCollapsed ? 'block' : 'none';
+        
+        // Ensure input container is always visible
+        inputContainer.style.display = 'flex';
         
         const icon = collapseBtn.querySelector('i');
         if (icon) {
@@ -16565,7 +17706,10 @@ class ValuationApp {
         const modal = document.getElementById('agentSettingsModal');
         if (modal) {
             modal.style.display = 'block';
-            this.loadAgentSystemPrompts(); // Ensure prompts are loaded
+            // Ensure prompts are loaded (async - will fallback if DB fails)
+            this.loadAgentSystemPrompts().catch(err => {
+                console.warn('⚠️ Failed to load prompts:', err);
+            });
             this.updateAgentSystemPromptDisplay();
             
             // Load saved AI model selection
@@ -16573,6 +17717,12 @@ class ValuationApp {
             if (modelSelect) {
                 const savedModel = localStorage.getItem('agentAIModel') || 'claude-opus-4-1-20250805';
                 modelSelect.value = savedModel;
+            }
+            
+            // Load saved feature flags
+            const relationshipToggle = document.getElementById('useRelationshipDetectionToggle');
+            if (relationshipToggle) {
+                relationshipToggle.checked = this.getUseRelationshipDetection();
             }
             
             if (window.lucide) window.lucide.createIcons();
@@ -16586,23 +17736,308 @@ class ValuationApp {
         }
     }
 
-    loadAgentSystemPrompts() {
+    async loadAgentSystemPrompts() {
+        // Try to load from database first
+        try {
+            const userId = this.getUserId(); // Get user ID (can be email, username, or session ID)
+            const response = await fetch(`/api/agent/prompts?userId=${encodeURIComponent(userId)}`);
+            
+            if (response.ok) {
+                const result = await response.json();
+                if (result.success && result.data && result.data.prompts) {
+                    this.agentSystemPrompts = result.data.prompts;
+                    this.currentPromptSetId = result.data.id;
+                    // Cache in localStorage for offline fallback
+                    localStorage.setItem('agentSystemPrompts', JSON.stringify(this.agentSystemPrompts));
+                    localStorage.setItem('agentPromptSetId', result.data.id);
+                    console.log('✅ Loaded prompts from database');
+                    this.updateAgentSystemPromptDisplay();
+                    return;
+                }
+            }
+        } catch (error) {
+            console.warn('⚠️ Failed to load prompts from database, using localStorage fallback:', error.message);
+        }
+        
+        // Fallback to localStorage
         const stored = localStorage.getItem('agentSystemPrompts');
         if (stored) {
             try {
                 this.agentSystemPrompts = JSON.parse(stored);
+                console.log('✅ Loaded prompts from localStorage');
             } catch (e) {
                 this.agentSystemPrompts = this.getDefaultAgentSystemPrompts();
+                console.log('✅ Using default prompts');
             }
         } else {
             this.agentSystemPrompts = this.getDefaultAgentSystemPrompts();
+            console.log('✅ Using default prompts');
         }
         this.updateAgentSystemPromptDisplay();
+    }
+    
+    /**
+     * Get user ID for prompt storage
+     * Can be overridden to use actual user authentication
+     */
+    getUserId() {
+        // Try to get from localStorage (could be set during login)
+        const storedUserId = localStorage.getItem('userId') || localStorage.getItem('userEmail') || localStorage.getItem('username');
+        if (storedUserId) {
+            return storedUserId;
+        }
+        
+        // Fallback to session-based ID (persists for this browser session)
+        let sessionId = sessionStorage.getItem('sessionId');
+        if (!sessionId) {
+            sessionId = 'session_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+            sessionStorage.setItem('sessionId', sessionId);
+        }
+        return sessionId;
+    }
+
+    /**
+     * Returns list of main entities that should be linked in Ada's responses
+     * @returns {string[]} Array of entity names
+     */
+    getMainEntities() {
+        return [
+            // SpaceX entities
+            'Starlink', 'Falcon', 'Starship', 'Mars', 'SpaceX', 
+            'Tesla', 'Elon Musk', 'Dragon', 'Raptor', 'Super Heavy',
+            'Falcon 9', 'Falcon Heavy', 'Starlink V2', 'Mars Base Alpha',
+            'Earth Operations', 'Mars Operations', 'Launch Services',
+            
+            // NASA and government programs
+            'Artemis', 'Artemis Program', 'NASA', 'SLS', 'Orion',
+            'Commercial Crew', 'Commercial Resupply Services', 'CRS',
+            'Gateway', 'Lunar Gateway', 'Moon', 'Lunar',
+            
+            // Commercial space companies
+            'Intuitive Machines', 'IM-1', 'IM-2', 'IM-3', 'Nova-C',
+            'Blue Origin', 'New Shepard', 'New Glenn', 'BE-4',
+            'Boeing', 'Starliner', 'ULA', 'Vulcan', 'Atlas V',
+            'Rocket Lab', 'Electron', 'Neutron', 'Photon',
+            'Relativity Space', 'Terran 1', 'Terran R',
+            'Astra', 'Firefly', 'Alpha', 'Beta',
+            'Virgin Galactic', 'VSS Unity', 'Virgin Orbit',
+            'Northrop Grumman', 'Antares', 'Cygnus',
+            'Lockheed Martin', 'Space Systems',
+            
+            // Space infrastructure and concepts
+            'ISS', 'International Space Station', 'Space Station',
+            'Lunar Base', 'Moon Base', 'Mars Colony', 'Mars Settlement',
+            'Space Tourism', 'Space Mining', 'Asteroid Mining',
+            'Space Debris', 'Space Traffic Management',
+            'In-Situ Resource Utilization', 'ISRU',
+            
+            // Satellite and communication
+            'OneWeb', 'Amazon Kuiper', 'Kuiper', 'Project Kuiper',
+            'Iridium', 'Globalstar', 'Viasat', 'Hughes Network',
+            'LEO', 'GEO', 'MEO', 'Low Earth Orbit', 'Geostationary',
+            'Satellite Constellation', 'Mega Constellation',
+            
+            // Space technology
+            'Reusability', 'Reusable Rockets', 'Landing', 'Booster Landing',
+            'In-Space Manufacturing', '3D Printing in Space',
+            'Space-Based Solar Power', 'SBSP',
+            'Nuclear Thermal Propulsion', 'NTP',
+            'Ion Propulsion', 'Electric Propulsion',
+            
+            // Financial and business
+            'Valuation', 'DCF', 'Discounted Cash Flow', 'Terminal Value',
+            'Revenue', 'Cash Flow', 'Subscribers', 'Launch Volume',
+            'Market Cap', 'Enterprise Value', 'EBITDA',
+            
+            // Key people
+            'Gwynne Shotwell', 'Jim Bridenstine', 'Bill Nelson',
+            'Jeff Bezos', 'Peter Beck', 'Tim Ellis', 'Chris Kemp'
+        ];
+    }
+
+    /**
+     * Extracts the current conversation topic from recent messages
+     * @returns {string} Current topic or 'SpaceX valuation analysis'
+     */
+    getCurrentConversationTopic() {
+        const history = this.getAgentChatHistory();
+        if (!history || history.length === 0) {
+            return 'SpaceX valuation analysis';
+        }
+        
+        // Get last few messages to determine topic
+        const recentMessages = history.slice(-3);
+        const topics = [];
+        
+        recentMessages.forEach(msg => {
+            if (msg.role === 'user' && msg.content) {
+                // Extract key terms from user messages
+                const content = msg.content.toLowerCase();
+                // SpaceX entities
+                if (content.includes('starlink')) topics.push('Starlink');
+                if (content.includes('mars')) topics.push('Mars');
+                if (content.includes('falcon')) topics.push('Falcon');
+                if (content.includes('starship')) topics.push('Starship');
+                if (content.includes('dragon')) topics.push('Dragon');
+                if (content.includes('raptor')) topics.push('Raptor');
+                // NASA/Government
+                if (content.includes('artemis')) topics.push('Artemis');
+                if (content.includes('nasa')) topics.push('NASA');
+                if (content.includes('sls')) topics.push('SLS');
+                if (content.includes('orion')) topics.push('Orion');
+                if (content.includes('lunar') || content.includes('moon')) topics.push('Lunar');
+                // Commercial space companies
+                if (content.includes('intuitive machines')) topics.push('Intuitive Machines');
+                if (content.includes('blue origin')) topics.push('Blue Origin');
+                if (content.includes('rocket lab')) topics.push('Rocket Lab');
+                if (content.includes('boeing')) topics.push('Boeing');
+                if (content.includes('starliner')) topics.push('Starliner');
+                if (content.includes('ula')) topics.push('ULA');
+                if (content.includes('vulcan')) topics.push('Vulcan');
+                if (content.includes('relativity')) topics.push('Relativity Space');
+                if (content.includes('astra')) topics.push('Astra');
+                if (content.includes('firefly')) topics.push('Firefly');
+                // Satellite/Communication
+                if (content.includes('oneweb')) topics.push('OneWeb');
+                if (content.includes('kuiper')) topics.push('Kuiper');
+                if (content.includes('iridium')) topics.push('Iridium');
+                // Space infrastructure
+                if (content.includes('iss') || content.includes('space station')) topics.push('International Space Station');
+                if (content.includes('space tourism')) topics.push('Space Tourism');
+                if (content.includes('space mining') || content.includes('asteroid mining')) topics.push('Space Mining');
+                // Financial
+                if (content.includes('valuation')) topics.push('Valuation');
+                if (content.includes('dcf') || content.includes('discounted cash flow')) topics.push('DCF');
+                if (content.includes('revenue')) topics.push('Revenue');
+                if (content.includes('cash flow')) topics.push('Cash Flow');
+                if (content.includes('valuation')) topics.push('valuation');
+                if (content.includes('revenue')) topics.push('revenue');
+            }
+        });
+        
+        if (topics.length > 0) {
+            return topics[0] + ' analysis';
+        }
+        
+        // Fallback: check last assistant message
+        const lastAssistant = history.slice().reverse().find(msg => msg.role === 'assistant');
+        if (lastAssistant && lastAssistant.content) {
+            const content = lastAssistant.content.toLowerCase();
+            if (content.includes('starlink')) return 'Starlink analysis';
+            if (content.includes('mars')) return 'Mars analysis';
+            if (content.includes('falcon')) return 'Falcon analysis';
+            if (content.includes('starship')) return 'Starship analysis';
+        }
+        
+        return 'SpaceX valuation analysis';
+    }
+
+    /**
+     * Adds clickable entity links to text for main entities
+     * @param {string} text - Text to process
+     * @param {object} context - Context object with currentTopic and recentMessages
+     * @returns {string} Text with entity links added
+     */
+    addEntityLinks(text, context = {}) {
+        if (!text || typeof text !== 'string') {
+            return text;
+        }
+        
+        // Don't process if text already contains entity links
+        if (text.includes('<span class="ada-entity-link"')) {
+            return text;
+        }
+        
+        const entities = this.getMainEntities();
+        let processedText = text;
+        
+        // Sort entities by length (longest first) to avoid partial matches
+        const sortedEntities = entities.sort((a, b) => b.length - a.length);
+        
+        sortedEntities.forEach(entity => {
+            // Create regex to match entity as whole word (case-insensitive)
+            // Escape special regex characters
+            const escapedEntity = entity.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            const regex = new RegExp(`\\b${escapedEntity}\\b`, 'gi');
+            
+            // Find all matches with their positions
+            const matches = [];
+            let match;
+            while ((match = regex.exec(processedText)) !== null) {
+                matches.push({
+                    index: match.index,
+                    text: match[0],
+                    length: match[0].length
+                });
+                
+                // Prevent infinite loop
+                if (match.index === regex.lastIndex) {
+                    regex.lastIndex++;
+                }
+            }
+            
+            // Replace matches in reverse order to preserve indices
+            matches.reverse().forEach(m => {
+                const before = processedText.substring(0, m.index);
+                const after = processedText.substring(m.index + m.length);
+                
+                // Check if we're inside an HTML tag
+                const beforeTags = before.match(/<[^>]+>/g) || [];
+                const beforeCloseTags = before.match(/<\/[^>]+>/g) || [];
+                const isInsideTag = beforeTags.length > beforeCloseTags.length;
+                
+                if (!isInsideTag) {
+                    const linkedText = `<span class="ada-entity-link" data-entity="${entity.replace(/"/g, '&quot;')}" style="color: var(--primary-color); text-decoration: underline; cursor: pointer; font-weight: 500;">${m.text}</span>`;
+                    processedText = before + linkedText + after;
+                }
+            });
+        });
+        
+        return processedText;
+    }
+
+    /**
+     * Attaches click event handlers to entity links in a message
+     * @param {string} messageId - ID of the message element
+     */
+    attachEntityLinkHandlers(messageId) {
+        const messageElement = document.getElementById(messageId);
+        if (!messageElement) {
+            console.warn('⚠️ Message element not found:', messageId);
+            return;
+        }
+        
+        const entityLinks = messageElement.querySelectorAll('.ada-entity-link');
+        entityLinks.forEach(link => {
+            // Remove existing listeners by cloning
+            const newLink = link.cloneNode(true);
+            link.parentNode.replaceChild(newLink, link);
+            
+            // Add click handler
+            newLink.addEventListener('click', async (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                
+                const entity = newLink.getAttribute('data-entity');
+                if (!entity) return;
+                
+                console.log('🔗 Entity link clicked:', entity);
+                
+                // Get current conversation topic for context
+                const currentTopic = this.getCurrentConversationTopic();
+                
+                // Construct context-aware prompt
+                const prompt = `Tell me more about ${entity} in the context of ${currentTopic}`;
+                
+                // Send to Ada
+                await this.sendAgentMessage(prompt);
+            });
+        });
     }
 
     getDefaultAgentSystemPrompts() {
         return {
-            level1: 'You are an AI assistant specialized in analyzing SpaceX valuation models and financial data. You are assisting Vlad Saigau (@VladSaigau) and Aaron Burnett (@aaronburnett), who built and are using this tool at Mach33. Cathie Wood (@CathieDWood) is a partner. Keep responses concise (2-3 sentences max). End each response with "Learn more: [topic1], [topic2], [topic3]" for deeper dives.',
+            level1: 'You are an AI assistant specialized in analyzing SpaceX valuation models and financial data. You are assisting Vlad Saigau (@VladSaigau) and Aaron Burnett (@aaronburnett), who built and are using this tool at Mach33. Cathie Wood (@CathieDWood) is a partner. Keep responses concise (2-3 sentences max). End each response with "Learn more: [topic1], [topic2], [topic3]" for deeper dives. IMPORTANT: Named entities (Starlink, Falcon, Starship, Mars, SpaceX, etc.) will automatically become clickable inline links - these provide entity-specific commentary. "Learn more" links are for general topic categories and broader exploration.',
             level2: 'You have deep expertise in space industry economics, satellite communications, launch services, and Mars colonization economics.',
             level3: 'You understand valuation methodologies including DCF, real options theory, and Monte Carlo simulations.',
             level4: 'You can analyze financial metrics, cash flows, revenue projections, and risk factors.',
@@ -16611,7 +18046,7 @@ class ValuationApp {
             level7: 'You understand the relationship between technical milestones, market dynamics, and valuation outcomes.',
             level8: 'You can compare scenarios, identify key value drivers, and assess risk factors.',
             level9: 'You provide context-aware responses based on the current model, inputs, and valuation results. Remember that Vlad Saigau (@VladSaigau) and Aaron Burnett (@aaronburnett) are the primary users and builders of this tool. Cathie Wood (@CathieDWood) is a partner. IMPORTANT: Dashboard tiles have different content types: "chart-comments" (chart with commentary), "image-comments" (image with commentary - NOT a chart), "news" (news articles), "x-feeds" (X/Twitter posts), "comments" (text only), etc. The "Featured Insight" tile (tileId: featured-insight) is an "image-comments" tile - it shows an image with model-focused commentary, NOT a chart. Do NOT describe image-comments tiles as charts.',
-            level10: 'You maintain a professional, analytical tone while being accessible and helpful.'
+            level10: 'You maintain a natural, conversational tone. When a user clicks on something (a stock, chart, tile, etc.), treat it as them expressing interest - like saying "tell me more about this" in a normal conversation. When a user types a question or message, acknowledge it naturally and conversationally before responding - for example, briefly acknowledge what they asked about or reference their question naturally in your response. This makes the conversation feel more natural and engaged. Do NOT use phrases like "sharp instinct", "good choice", "thanks for that breakdown", or other evaluative comments about prompts or context. Simply acknowledge what they selected or asked and provide insightful commentary. Use conversation history to frame your responses naturally and make connections. Background context provided in brackets [like this] is for your reference only - do NOT comment on it or acknowledge it. Just use it to inform your response naturally. For the FIRST interaction in a session: respond naturally and directly - do NOT be overly formal, introductory, or explanatory. Just acknowledge what they selected or asked and dive into the analysis as if continuing a conversation. Subsequent interactions should flow naturally like an ongoing conversation. Be professional and analytical while being conversational and helpful.'
         };
     }
 
@@ -16622,9 +18057,14 @@ class ValuationApp {
             return;
         }
 
-        // Ensure prompts are loaded
+        // Ensure prompts are loaded (async - will use defaults if not loaded yet)
         if (!this.agentSystemPrompts) {
-            this.loadAgentSystemPrompts();
+            // Load asynchronously, but continue with defaults for now
+            this.loadAgentSystemPrompts().catch(err => {
+                console.warn('⚠️ Failed to load prompts:', err);
+            });
+            // Use defaults temporarily
+            this.agentSystemPrompts = this.agentSystemPrompts || this.getDefaultAgentSystemPrompts();
         }
 
         container.innerHTML = '';
@@ -16678,7 +18118,7 @@ class ValuationApp {
         }
     }
 
-    saveAgentSystemPrompts() {
+    async saveAgentSystemPrompts() {
         const prompts = {};
         for (let i = 1; i <= 10; i++) {
             const input = document.getElementById(`agentPrompt${i}`);
@@ -16687,7 +18127,42 @@ class ValuationApp {
             }
         }
         this.agentSystemPrompts = prompts;
+        
+        // Save to database
+        try {
+            const userId = this.getUserId();
+            const response = await fetch('/api/agent/prompts', {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-User-Id': userId
+                },
+                body: JSON.stringify({
+                    userId: userId,
+                    name: 'default',
+                    prompts: prompts,
+                    isDefault: true
+                })
+            });
+            
+            if (response.ok) {
+                const result = await response.json();
+                if (result.success) {
+                    this.currentPromptSetId = result.data.id;
+                    console.log('✅ Saved prompts to database');
+                }
+            } else {
+                throw new Error(`API error: ${response.status}`);
+            }
+        } catch (error) {
+            console.warn('⚠️ Failed to save prompts to database, saving to localStorage:', error.message);
+        }
+        
+        // Always save to localStorage as fallback/cache
         localStorage.setItem('agentSystemPrompts', JSON.stringify(prompts));
+        if (this.currentPromptSetId) {
+            localStorage.setItem('agentPromptSetId', this.currentPromptSetId);
+        }
         
         // Save AI model selection
         const modelSelect = document.getElementById('agentAIModelSelect');
@@ -16707,15 +18182,43 @@ class ValuationApp {
         setTimeout(() => notification.remove(), 3000);
     }
 
-    resetAgentSystemPrompts() {
+    async resetAgentSystemPrompts() {
         this.agentSystemPrompts = this.getDefaultAgentSystemPrompts();
-        localStorage.removeItem('agentSystemPrompts');
+        
+        // Save defaults to database
+        try {
+            const userId = this.getUserId();
+            await fetch('/api/agent/prompts', {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-User-Id': userId
+                },
+                body: JSON.stringify({
+                    userId: userId,
+                    name: 'default',
+                    prompts: this.agentSystemPrompts,
+                    isDefault: true
+                })
+            });
+            console.log('✅ Reset prompts in database');
+        } catch (error) {
+            console.warn('⚠️ Failed to reset prompts in database:', error.message);
+        }
+        
+        // Update localStorage
+        localStorage.setItem('agentSystemPrompts', JSON.stringify(this.agentSystemPrompts));
+        localStorage.removeItem('agentPromptSetId');
+        
         this.updateAgentSystemPromptDisplay();
     }
 
-    async sendAgentMessageSilent(message) {
+    async sendAgentMessageSilent(message, stockInfo = null) {
         // Same as sendAgentMessage but doesn't show user message - just spinner then response
         console.log('📨 sendAgentMessageSilent called');
+        if (stockInfo) {
+            console.log('📨 Stock info:', stockInfo);
+        }
         console.log('📨 Message length:', message?.length || 0);
         console.log('📨 Voice output enabled?', this.agentVoiceOutputEnabled);
         console.log('📨 Voice input enabled?', this.agentVoiceInputEnabled);
@@ -16771,7 +18274,11 @@ class ValuationApp {
                 .filter(p => p && p.trim())
                 .join('\n\n');
             
-            const response = await fetch('/api/agent/chat', {
+            // Use enhanced endpoint with relationship detection
+            // Get Ada settings to include in request
+            const adaSettings = this.getAdaSettings();
+            
+            const response = await fetch('/api/agent/chat-enhanced', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -16780,8 +18287,13 @@ class ValuationApp {
                 body: JSON.stringify({
                     message: message,
                     systemPrompt: systemPromptText,
-                    context: context,
-                    history: this.getAgentChatHistory()
+                    context: {
+                        ...context,
+                        stockInfo: stockInfo // Include stock info for relationship detection
+                    },
+                    history: this.getAgentChatHistory(),
+                    useRelationshipDetection: this.getUseRelationshipDetection(), // Enable/disable relationship detection
+                    adaSettings: adaSettings // Include Ada persona parameters
                 })
             });
 
@@ -16792,33 +18304,180 @@ class ValuationApp {
             console.log('📨 Response success?', result.success);
             console.log('📨 Response length:', result.response?.length || 0);
             console.log('📨 Voice output enabled?', this.agentVoiceOutputEnabled);
+            if (result.relationship) {
+                console.log('📨 Relationship detected: Category', result.relationship.category, 
+                           `(Confidence: ${result.relationship.confidence.toFixed(2)}, Similarity: ${result.relationship.similarity.toFixed(2)})`);
+                console.log('📨 Transition phrase:', result.relationship.transitionPhrase);
+            }
 
             if (result.success) {
-                this.addAgentMessage(result.response, 'assistant');
+                // Check for floating panel triggers in response
+                // Pattern: [PANEL:id:title:value] or [SHOW:id:title]
+                if (window.adaFloatingPanels) {
+                    window.adaFloatingPanels.showPanelFromTranscript(result.response);
+                }
                 
-                // If voice output enabled, speak the response
+                // Extract "Learn more" section - it should NOT be spoken, only shown as clickable links
+                // Support multiple formats: "Learn more: [topic1], [topic2], [topic3]" or "Learn more: topic1, topic2, topic3"
+                const learnMoreRegex1 = /Learn more:\s*\[([^\]]+)\](?:\s*,\s*\[([^\]]+)\])?(?:\s*,\s*\[([^\]]+)\])?/i;
+                const learnMoreRegex2 = /Learn more:\s*([^,\n]+)(?:\s*,\s*([^,\n]+))?(?:\s*,\s*([^,\n]+))?/i;
+                let learnMoreMatch = result.response.match(learnMoreRegex1);
+                let learnMoreTopics = [];
+                let responseWithoutLearnMore = result.response;
+                
+                if (learnMoreMatch) {
+                    // Extract topics from "Learn more: [topic1], [topic2], [topic3]"
+                    learnMoreTopics = [
+                        learnMoreMatch[1],
+                        learnMoreMatch[2],
+                        learnMoreMatch[3]
+                    ].filter(Boolean);
+                    
+                    // Remove "Learn more" section from displayed response
+                    responseWithoutLearnMore = result.response.replace(learnMoreRegex1, '').trim();
+                    console.log('📚 Extracted Learn more topics (brackets format):', learnMoreTopics);
+                } else {
+                    // Try format without brackets
+                    learnMoreMatch = result.response.match(learnMoreRegex2);
+                    if (learnMoreMatch) {
+                        learnMoreTopics = [
+                            learnMoreMatch[1],
+                            learnMoreMatch[2],
+                            learnMoreMatch[3]
+                        ].filter(Boolean).map(t => t.trim());
+                        
+                        // Remove "Learn more" section from displayed response
+                        responseWithoutLearnMore = result.response.replace(learnMoreRegex2, '').trim();
+                        console.log('📚 Extracted Learn more topics (plain format):', learnMoreTopics);
+                    }
+                }
+                
+                // Add named entity links to response (main entities only)
+                const responseWithEntityLinks = this.addEntityLinks(responseWithoutLearnMore, {
+                    currentTopic: this.getCurrentConversationTopic(),
+                    recentMessages: this.getAgentChatHistory().slice(-3)
+                });
+                
+                // Display response with entity links
+                const responseMessageId = this.addAgentMessage(responseWithEntityLinks, 'assistant');
+                
+                // Attach click handlers to entity links
+                setTimeout(() => {
+                    this.attachEntityLinkHandlers(responseMessageId);
+                }, 100);
+                
+                // Display "Learn more" topics as clickable links (if any)
+                if (learnMoreTopics.length > 0) {
+                    const learnMoreHtml = learnMoreTopics.map((topic, index) => {
+                        return `<span class="learn-more-link" data-topic="${topic.replace(/"/g, '&quot;')}" style="color: var(--primary-color); text-decoration: underline; cursor: pointer; font-weight: 500; margin-right: 8px;">${topic}</span>`;
+                    }).join('');
+                    
+                    const learnMoreMessageId = this.addAgentMessage(`Learn more: ${learnMoreHtml}`, 'system');
+                    
+                    // Attach click handlers to "Learn more" links
+                    setTimeout(() => {
+                        const learnMoreMessage = document.getElementById(learnMoreMessageId);
+                        if (learnMoreMessage) {
+                            learnMoreMessage.querySelectorAll('.learn-more-link').forEach(link => {
+                                link.addEventListener('click', async (e) => {
+                                    e.preventDefault();
+                                    const topic = link.getAttribute('data-topic');
+                                    console.log('📚 Learn more clicked:', topic);
+                                    
+                                    // Send message to Ada to continue on this topic
+                                    await this.sendAgentMessage(`Tell me more about ${topic}`);
+                                });
+                            });
+                        }
+                    }, 100);
+                }
+                
+                // If voice output enabled, speak the response (WITHOUT "Learn more" section)
                 if (this.agentVoiceOutputEnabled) {
                     console.log('🔊🔊🔊 VOICE OUTPUT ENABLED - CALLING speakAgentResponse 🔊🔊🔊');
-                    console.log('🔊 Response text length:', result.response?.length || 0);
-                    console.log('🔊 Response preview:', result.response?.substring(0, 100) + '...');
-                    this.speakAgentResponse(result.response).catch(error => {
-                        console.error('❌ Error speaking response:', error);
-                        console.error('❌ Error details:', error.message, error.stack);
-                    });
+                    console.log('🔊 Response text length:', responseWithoutLearnMore?.length || 0);
+                    console.log('🔊 Response preview:', responseWithoutLearnMore?.substring(0, 100) + '...');
+                    
+                    // Use relationship transition phrase if available and interrupting
+                    if (result.relationship && this.isSpeaking && result.relationship.transitionPhrase) {
+                        console.log('🔊 Using transition phrase:', result.relationship.transitionPhrase);
+                    }
+                    
+                    // Use modular VoiceOutputHandler for verbatim reading
+                    if (this.adaInputSystem && this.adaInputSystem.getVoiceOutputHandler()) {
+                        const voiceHandler = this.adaInputSystem.getVoiceOutputHandler();
+                        await voiceHandler.speakVerbatim(responseWithoutLearnMore).catch(error => {
+                            console.error('❌ Error speaking response:', error);
+                            console.error('❌ Error details:', error.message, error.stack);
+                        });
+                    } else {
+                        // Fallback to original method
+                        this.speakAgentResponse(responseWithoutLearnMore, stockInfo).catch(error => {
+                            console.error('❌ Error speaking response:', error);
+                            console.error('❌ Error details:', error.message, error.stack);
+                        });
+                    }
                 } else {
                     console.log('🔇🔇🔇 VOICE OUTPUT DISABLED - SKIPPING AUDIO 🔇🔇🔇');
                     console.log('🔇 To enable voice output, click the speaker icon in the agent header');
                 }
             } else {
-                const errorMsg = 'Sorry, I encountered an error: ' + (result.error || 'Unknown error');
-                this.addAgentMessage(errorMsg, 'assistant');
-                
-                // Speak error if voice output enabled
-                if (this.agentVoiceOutputEnabled) {
-                    console.log('🔊 Voice output enabled - speaking error message');
-                    this.speakAgentResponse(errorMsg).catch(error => {
-                        console.error('❌ Error speaking error message:', error);
+                // Fallback to legacy endpoint
+                console.warn('⚠️ Enhanced endpoint failed, trying legacy endpoint...');
+                try {
+                    const legacyResponse = await fetch('/api/agent/chat', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-AI-Model': document.getElementById('agentAIModelSelect')?.value || this.aiModel || 'claude-opus-4-1-20250805'
+                        },
+                        body: JSON.stringify({
+                            message: message,
+                            systemPrompt: systemPromptText,
+                            context: context,
+                            history: this.getAgentChatHistory(),
+                            adaSettings: adaSettings // Include Ada persona parameters
+                        })
                     });
+                    const legacyResult = await legacyResponse.json();
+                        if (legacyResult.success) {
+                        // Add entity links to legacy response
+                        const legacyResponseWithLinks = this.addEntityLinks(legacyResult.response, {
+                            currentTopic: this.getCurrentConversationTopic(),
+                            recentMessages: this.getAgentChatHistory().slice(-3)
+                        });
+                        const legacyMessageId = this.addAgentMessage(legacyResponseWithLinks, 'assistant');
+                        setTimeout(() => {
+                            this.attachEntityLinkHandlers(legacyMessageId);
+                        }, 100);
+                        if (this.agentVoiceOutputEnabled) {
+                            // Use modular VoiceOutputHandler for verbatim reading
+                            if (this.adaInputSystem && this.adaInputSystem.getVoiceOutputHandler()) {
+                                const voiceHandler = this.adaInputSystem.getVoiceOutputHandler();
+                                await voiceHandler.speakVerbatim(legacyResult.response).catch(error => {
+                                    console.error('❌ Error speaking response:', error);
+                                });
+                            } else {
+                                // Fallback to original method
+                                this.speakAgentResponse(legacyResult.response, stockInfo).catch(error => {
+                                    console.error('❌ Error speaking response:', error);
+                                });
+                            }
+                        }
+                    } else {
+                        throw new Error(legacyResult.error || 'Legacy endpoint also failed');
+                    }
+                } catch (fallbackError) {
+                    const errorMsg = 'Sorry, I encountered an error: ' + (result.error || fallbackError.message || 'Unknown error');
+                    this.addAgentMessage(errorMsg, 'assistant');
+                    
+                    // Speak error if voice output enabled
+                    if (this.agentVoiceOutputEnabled) {
+                        console.log('🔊 Voice output enabled - speaking error message');
+                        this.speakAgentResponse(errorMsg).catch(error => {
+                            console.error('❌ Error speaking error message:', error);
+                        });
+                    }
                 }
             }
         } catch (error) {
@@ -16828,11 +18487,209 @@ class ValuationApp {
         }
     }
 
-    async sendAgentMessage(message) {
+    /**
+     * Show a floating panel during ADA's verbal response
+     * @param {Object} panelData - Panel configuration
+     * @param {string} panelData.id - Unique panel ID
+     * @param {Object} panelData.tile - Tile data (same format as dashboard tiles)
+     * @param {Object} panelData.insight - Optional insight data for the tile
+     * @param {number} panelData.lingerTime - Optional linger time in ms (default: 8000)
+     * @param {string} panelData.position - Optional position: 'top-right', 'top-left', 'bottom-right', 'bottom-left' (default: 'top-right')
+     * @param {number} panelData.width - Optional width in px (default: 300)
+     * @param {number} panelData.height - Optional height in px (default: auto)
+     */
+    showAdaFloatingPanel(panelData) {
+        if (window.adaFloatingPanels) {
+            window.adaFloatingPanels.showPanel(panelData);
+        } else {
+            console.error('AdaFloatingPanels not initialized');
+        }
+    }
+
+    /**
+     * Show a competitor floating panel with company information
+     * @param {Object} competitorData - Competitor/stock data
+     * @param {string} competitorData.ticker - Stock ticker symbol
+     * @param {string} competitorData.companyName - Company name
+     * @param {number} competitorData.marketCap - Market capitalization
+     * @param {number} competitorData.evRevenue - EV/Revenue ratio
+     * @param {number} competitorData.peRatio - P/E ratio
+     * @param {number} competitorData.revenueGrowth - Revenue growth rate
+     * @param {number} competitorData.evEbitda - EV/EBITDA ratio (optional)
+     * @param {number} lingerTime - Time to show panel in ms (default: 12000 for voice responses)
+     */
+    showCompetitorFloatingPanel(competitorData, lingerTime = 12000) {
+        if (!competitorData || (!competitorData.ticker && !competitorData.companyName)) {
+            console.warn('showCompetitorFloatingPanel: Missing competitor data');
+            return;
+        }
+
+        const ticker = competitorData.ticker || '';
+        const companyName = competitorData.companyName || ticker || 'Company';
+        const panelId = `competitor-${ticker || companyName.toLowerCase().replace(/\s+/g, '-')}`;
+
+        // Format market cap
+        let marketCapFormatted = 'N/A';
+        if (competitorData.marketCap && competitorData.marketCap > 0) {
+            if (competitorData.marketCap >= 1e12) {
+                marketCapFormatted = `$${(competitorData.marketCap / 1e12).toFixed(2)}T`;
+            } else if (competitorData.marketCap >= 1e9) {
+                marketCapFormatted = `$${(competitorData.marketCap / 1e9).toFixed(2)}B`;
+            } else if (competitorData.marketCap >= 1e6) {
+                marketCapFormatted = `$${(competitorData.marketCap / 1e6).toFixed(2)}M`;
+            } else {
+                marketCapFormatted = `$${competitorData.marketCap.toFixed(0)}`;
+            }
+        }
+
+        // Build comprehensive insight text with all available metrics
+        const insightParts = [];
+        
+        // Add ticker if available
+        if (ticker) {
+            insightParts.push(`Ticker: ${ticker}`);
+        }
+        
+        // Financial metrics - first section
+        if (competitorData.evRevenue && competitorData.evRevenue > 0) {
+            insightParts.push(`EV/Revenue: ${competitorData.evRevenue.toFixed(1)}x`);
+        }
+        if (competitorData.peRatio && competitorData.peRatio > 0) {
+            insightParts.push(`P/E: ${competitorData.peRatio.toFixed(1)}x`);
+        }
+        if (competitorData.evEbitda && competitorData.evEbitda > 0) {
+            insightParts.push(`EV/EBITDA: ${competitorData.evEbitda.toFixed(1)}x`);
+        }
+        if (competitorData.pegRatio && competitorData.pegRatio > 0) {
+            insightParts.push(`PEG: ${competitorData.pegRatio.toFixed(1)}x`);
+        }
+        if (competitorData.revenueGrowth && competitorData.revenueGrowth > 0) {
+            insightParts.push(`Growth: ${(competitorData.revenueGrowth * 100).toFixed(0)}%`);
+        }
+        
+        // Add separator for second section
+        if (insightParts.length > 0) {
+            insightParts.push('');
+            insightParts.push('━━━━━━━━━━━━━━━━━━');
+            insightParts.push('');
+        }
+        
+        // Second section: Company-specific information
+        // Check if it's a space/rocket company
+        const spaceKeywords = ['rocket', 'space', 'aerospace', 'satellite', 'launch'];
+        const isSpaceCompany = spaceKeywords.some(keyword => 
+            companyName.toLowerCase().includes(keyword) || (ticker && ticker.toLowerCase().includes(keyword))
+        );
+        
+        // For Rocket Lab specifically - More detailed information
+        if ((ticker && ticker.toUpperCase() === 'RKLB') || 
+            companyName.toLowerCase().includes('rocket lab')) {
+            insightParts.push('📍 Company Details');
+            insightParts.push('Small Satellite Launch Provider');
+            insightParts.push('Electron & Neutron Rockets');
+            insightParts.push('Space Systems Division');
+            insightParts.push('');
+            insightParts.push('📅 Founded: 2006');
+            insightParts.push('🏢 HQ: Long Beach, CA');
+            insightParts.push('');
+            insightParts.push('💼 Business Model');
+            insightParts.push('  • Launch Services');
+            insightParts.push('  • Space Systems');
+            insightParts.push('  • Satellite Manufacturing');
+            insightParts.push('');
+            insightParts.push('🚀 Key Products');
+            insightParts.push('  • Electron (Small Sat)');
+            insightParts.push('  • Neutron (Medium Lift)');
+            insightParts.push('  • Photon (Satellite Bus)');
+            insightParts.push('');
+            insightParts.push('⭐ Competitive Position');
+            insightParts.push('  • Small sat market leader');
+            insightParts.push('  • Reusable rocket technology');
+            insightParts.push('  • Rapid launch cadence');
+        } else if (isSpaceCompany) {
+            insightParts.push('📍 Sector: Aerospace & Defense');
+            insightParts.push('Focus: Space Technology');
+            insightParts.push('Launch Services Provider');
+        } else {
+            insightParts.push('📍 Sector: Telecommunications');
+            insightParts.push('Focus: Satellite Services');
+            insightParts.push('Satellite Communications');
+        }
+
+        // Format as multi-line for better readability
+        const insightText = insightParts.length > 0 
+            ? insightParts.join('\n')
+            : 'Company information';
+
+        // Determine icon based on company type
+        let icon = 'building-2';
+        let color = '#0066cc';
+        
+        // Use isSpaceCompany already defined above
+        if (isSpaceCompany || competitorData.ticker === 'RKT' || competitorData.ticker === 'RKLB' || companyName.toLowerCase().includes('rocket lab')) {
+            icon = 'rocket';
+            color = '#f59e0b'; // Orange for space companies
+        }
+
+        // Create tile data
+        const tile = {
+            id: panelId,
+            title: companyName,
+            value: marketCapFormatted,
+            subtitle: ticker || '',
+            icon: icon,
+            color: color
+        };
+
+        // Create insight data with formatted multi-line content
+        const insight = {
+            insight: insightText
+        };
+
+        // Show panel - 1x1 tile size, centered but avoiding agent
+        // Size will be set by CSS (25vw x 25vh for 1x1 tile)
+        try {
+            this.showAdaFloatingPanel({
+                id: panelId,
+                tile: tile,
+                insight: insight,
+                lingerTime: lingerTime,
+                position: 'center', // Will be handled by smart positioning
+                width: null, // Use CSS default (1x1 tile size)
+                height: null // Use CSS default (1x1 tile size)
+            });
+
+            console.log(`✅ Competitor floating panel shown: ${companyName} (${ticker})`);
+        } catch (error) {
+            console.error('❌ Error showing competitor floating panel:', error);
+            console.error('❌ Panel data:', { panelId, tile, insight, lingerTime });
+        }
+    }
+
+    /**
+     * Remove a floating panel
+     * @param {string} panelId - Panel ID to remove
+     */
+    removeAdaFloatingPanel(panelId) {
+        if (window.adaFloatingPanels) {
+            window.adaFloatingPanels.removePanel(panelId);
+        }
+    }
+
+    /**
+     * Remove all floating panels
+     */
+    removeAllAdaFloatingPanels() {
+        if (window.adaFloatingPanels) {
+            window.adaFloatingPanels.removeAllPanels();
+        }
+    }
+
+    async sendAgentMessage(message, stimulus = 'type', stimulusData = null) {
         if (!message.trim()) return;
 
-        // Add user message
-        this.addAgentMessage(message, 'user');
+        // Add user message with stimulus tracking
+        this.addAgentMessage(message, 'user', stimulus, stimulusData);
 
         // Show loading
         const loadingId = this.addAgentLoadingMessage();
@@ -16894,19 +18751,107 @@ class ValuationApp {
                 })
             });
 
+            // Check if response is OK before parsing JSON
+            if (!response.ok) {
+                const errorText = await response.text();
+                console.error('❌ Agent chat API error:', response.status, errorText);
+                throw new Error(`API error: ${response.status} - ${errorText.substring(0, 200)}`);
+            }
+            
             const result = await response.json();
             this.removeAgentMessage(loadingId);
 
             if (result.success) {
-                this.addAgentMessage(result.response, 'assistant');
+                // Extract "Learn more" section - it should NOT be spoken, only shown as clickable links
+                // Support multiple formats: "Learn more: [topic1], [topic2], [topic3]" or "Learn more: topic1, topic2, topic3"
+                const learnMoreRegex1 = /Learn more:\s*\[([^\]]+)\](?:\s*,\s*\[([^\]]+)\])?(?:\s*,\s*\[([^\]]+)\])?/i;
+                const learnMoreRegex2 = /Learn more:\s*([^,\n]+)(?:\s*,\s*([^,\n]+))?(?:\s*,\s*([^,\n]+))?/i;
+                let learnMoreMatch = result.response.match(learnMoreRegex1);
+                let learnMoreTopics = [];
+                let responseWithoutLearnMore = result.response;
                 
-                // If voice output enabled, speak the response
+                if (learnMoreMatch) {
+                    // Extract topics from "Learn more: [topic1], [topic2], [topic3]"
+                    learnMoreTopics = [
+                        learnMoreMatch[1],
+                        learnMoreMatch[2],
+                        learnMoreMatch[3]
+                    ].filter(Boolean);
+                    
+                    // Remove "Learn more" section from displayed response
+                    responseWithoutLearnMore = result.response.replace(learnMoreRegex1, '').trim();
+                    console.log('📚 Extracted Learn more topics (brackets format):', learnMoreTopics);
+                } else {
+                    // Try format without brackets
+                    learnMoreMatch = result.response.match(learnMoreRegex2);
+                    if (learnMoreMatch) {
+                        learnMoreTopics = [
+                            learnMoreMatch[1],
+                            learnMoreMatch[2],
+                            learnMoreMatch[3]
+                        ].filter(Boolean).map(t => t.trim());
+                        
+                        // Remove "Learn more" section from displayed response
+                        responseWithoutLearnMore = result.response.replace(learnMoreRegex2, '').trim();
+                        console.log('📚 Extracted Learn more topics (plain format):', learnMoreTopics);
+                    }
+                }
+                
+                // Add named entity links to response (main entities only)
+                const responseWithEntityLinks = this.addEntityLinks(responseWithoutLearnMore, {
+                    currentTopic: this.getCurrentConversationTopic(),
+                    recentMessages: this.getAgentChatHistory().slice(-3)
+                });
+                
+                const responseMessageId = this.addAgentMessage(responseWithEntityLinks, 'assistant');
+                
+                // Attach click handlers to entity links
+                setTimeout(() => {
+                    this.attachEntityLinkHandlers(responseMessageId);
+                }, 100);
+                
+                // Display "Learn more" topics as clickable links (if any)
+                if (learnMoreTopics.length > 0) {
+                    const learnMoreHtml = learnMoreTopics.map((topic, index) => {
+                        return `<span class="learn-more-link" data-topic="${topic.replace(/"/g, '&quot;')}" style="color: var(--primary-color); text-decoration: underline; cursor: pointer; font-weight: 500; margin-right: 8px;">${topic}</span>`;
+                    }).join('');
+                    
+                    const learnMoreMessageId = this.addAgentMessage(`Learn more: ${learnMoreHtml}`, 'system');
+                    
+                    // Attach click handlers to "Learn more" links
+                    setTimeout(() => {
+                        const learnMoreMessage = document.getElementById(learnMoreMessageId);
+                        if (learnMoreMessage) {
+                            learnMoreMessage.querySelectorAll('.learn-more-link').forEach(link => {
+                                link.addEventListener('click', async (e) => {
+                                    e.preventDefault();
+                                    const topic = link.getAttribute('data-topic');
+                                    console.log('📚 Learn more clicked:', topic);
+                                    
+                                    // Send message to Ada to continue on this topic
+                                    await this.sendAgentMessage(`Tell me more about ${topic}`);
+                                });
+                            });
+                        }
+                    }, 100);
+                }
+                
+                // If voice output enabled, speak the response (WITHOUT "Learn more" section)
                 if (this.agentVoiceOutputEnabled) {
                     console.log('🔊 Voice output enabled - calling speakAgentResponse');
-                    console.log('🔊 Response text length:', result.response?.length || 0);
-                    this.speakAgentResponse(result.response).catch(error => {
-                        console.error('❌ Error speaking response:', error);
-                    });
+                    console.log('🔊 Response text length:', responseWithoutLearnMore?.length || 0);
+                    // Use modular VoiceOutputHandler for verbatim reading
+                    if (this.adaInputSystem && this.adaInputSystem.getVoiceOutputHandler()) {
+                        const voiceHandler = this.adaInputSystem.getVoiceOutputHandler();
+                        await voiceHandler.speakVerbatim(responseWithoutLearnMore).catch(error => {
+                            console.error('❌ Error speaking response:', error);
+                        });
+                    } else {
+                        // Fallback to original method
+                        this.speakAgentResponse(responseWithoutLearnMore).catch(error => {
+                            console.error('❌ Error speaking response:', error);
+                        });
+                    }
                 } else {
                     console.log('🔇 Voice output disabled - skipping audio');
                 }
@@ -16917,9 +18862,18 @@ class ValuationApp {
                 // Speak error if voice output enabled
                 if (this.agentVoiceOutputEnabled) {
                     console.log('🔊 Voice output enabled - speaking error message');
-                    this.speakAgentResponse(errorMsg).catch(error => {
-                        console.error('❌ Error speaking error message:', error);
-                    });
+                    // Use modular VoiceOutputHandler for verbatim reading
+                    if (this.adaInputSystem && this.adaInputSystem.getVoiceOutputHandler()) {
+                        const voiceHandler = this.adaInputSystem.getVoiceOutputHandler();
+                        await voiceHandler.speakVerbatim(errorMsg).catch(error => {
+                            console.error('❌ Error speaking error message:', error);
+                        });
+                    } else {
+                        // Fallback to original method
+                        this.speakAgentResponse(errorMsg).catch(error => {
+                            console.error('❌ Error speaking error message:', error);
+                        });
+                    }
                 }
             }
         } catch (error) {
@@ -16949,7 +18903,7 @@ class ValuationApp {
             toggleBtn?.classList.add('active');
             if (toggleIcon) {
                 toggleIcon.setAttribute('data-lucide', 'volume-2');
-                toggleIcon.setAttribute('title', 'Voice Output: ON (Click to disable)');
+                toggleIcon.setAttribute('title', 'Mute Ada: OFF (Click to mute Ada)');
                 if (window.lucide) window.lucide.createIcons();
             }
             
@@ -16961,17 +18915,23 @@ class ValuationApp {
             toggleBtn?.classList.remove('active');
             if (toggleIcon) {
                 toggleIcon.setAttribute('data-lucide', 'volume-x');
-                toggleIcon.setAttribute('title', 'Voice Output: OFF (Click to enable)');
+                toggleIcon.setAttribute('title', 'Mute Ada: ON (Click to unmute Ada)');
                 if (window.lucide) window.lucide.createIcons();
             }
             
-            // Stop any active speech
-            if (this.isSpeaking) {
+            // CRITICAL: Always stop ALL audio sources when muting, regardless of isSpeaking flag
+            console.log('🔇 Mute button clicked - stopping all audio sources');
+            this.stopVoiceAudio(); // Use the comprehensive stop function
+            
+            // Also ensure browser TTS is stopped
+            if ('speechSynthesis' in window) {
                 window.speechSynthesis.cancel();
-                if (this.grokVoiceService) {
-                    this.grokVoiceService.stopAudio();
-                }
-                this.isSpeaking = false;
+            }
+            
+            // Clear any speaking flags
+            this.isSpeaking = false;
+            if (this.grokVoiceService) {
+                this.grokVoiceService.isSpeaking = false;
             }
         }
     }
@@ -16992,10 +18952,11 @@ class ValuationApp {
             // Enable voice input
             if (inputToggleBtn) {
                 inputToggleBtn.classList.add('active');
-                inputToggleBtn.setAttribute('title', 'Voice Input: ON (Click to disable)');
+                inputToggleBtn.setAttribute('title', 'Mute User: OFF (Click to mute microphone)');
             }
             if (inputToggleIcon) {
                 inputToggleIcon.setAttribute('data-lucide', 'mic');
+                inputToggleIcon.setAttribute('title', 'Mute User: OFF (Click to mute microphone)');
                 if (window.lucide) window.lucide.createIcons();
             }
             
@@ -17010,16 +18971,18 @@ class ValuationApp {
                 recordBtn.setAttribute('title', 'Click to start recording');
             }
             
-            // Initialize Web Speech API if available
-            this.initializeVoiceRecognition();
+            // CONSOLIDATED: Voice recognition now handled by VoiceSensor
+            // VoiceSensor is initialized automatically by AdaInputSystem
+            // No manual initialization needed
         } else {
             // Disable voice input
             if (inputToggleBtn) {
                 inputToggleBtn.classList.remove('active');
-                inputToggleBtn.setAttribute('title', 'Voice Input: OFF (Click to enable microphone)');
+                inputToggleBtn.setAttribute('title', 'Mute User: ON (Click to unmute microphone)');
             }
             if (inputToggleIcon) {
                 inputToggleIcon.setAttribute('data-lucide', 'mic-off');
+                inputToggleIcon.setAttribute('title', 'Mute User: ON (Click to unmute microphone)');
                 if (window.lucide) window.lucide.createIcons();
             }
             
@@ -17036,6 +18999,46 @@ class ValuationApp {
             // Stop any active recording
             if (this.isRecording) {
                 this.stopVoiceRecording();
+            }
+        }
+    }
+
+    toggleAgentClickInput() {
+        // Toggle click INPUT (click-to-chat)
+        this.agentClickInputEnabled = !this.agentClickInputEnabled;
+        
+        const clickToggleBtn = document.getElementById('agentClickToggleBtn');
+        const clickToggleIcon = document.getElementById('agentClickToggleIcon');
+        
+        // Save preference to localStorage
+        localStorage.setItem('agentClickInputEnabled', this.agentClickInputEnabled.toString());
+        
+        // Update ClickSensor enabled state
+        if (this.adaInputSystem) {
+            this.adaInputSystem.setSensorEnabled('click', this.agentClickInputEnabled);
+        }
+        
+        if (this.agentClickInputEnabled) {
+            // Enable click input
+            if (clickToggleBtn) {
+                clickToggleBtn.classList.add('active');
+                clickToggleBtn.setAttribute('title', 'Disable Clicks: OFF (Click to disable click-to-chat)');
+            }
+            if (clickToggleIcon) {
+                clickToggleIcon.setAttribute('data-lucide', 'mouse-pointer');
+                clickToggleBtn.style.opacity = '0.6'; // Normal opacity when enabled
+                if (window.lucide) window.lucide.createIcons();
+            }
+        } else {
+            // Disable click input
+            if (clickToggleBtn) {
+                clickToggleBtn.classList.remove('active');
+                clickToggleBtn.setAttribute('title', 'Disable Clicks: ON (Click to enable click-to-chat)');
+            }
+            if (clickToggleIcon) {
+                clickToggleIcon.setAttribute('data-lucide', 'mouse-pointer');
+                clickToggleBtn.style.opacity = '0.3'; // Dimmed when disabled
+                if (window.lucide) window.lucide.createIcons();
             }
         }
     }
@@ -17057,129 +19060,57 @@ class ValuationApp {
         }
     }
 
+    /**
+     * DEPRECATED: Voice recognition now handled by VoiceSensor/VoiceInputHandler
+     * This method is kept for backward compatibility but routes to modular system
+     */
     initializeVoiceRecognition() {
-        // Check if Web Speech API is available
-        if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
-            this.addAgentMessage('Voice recognition is not supported in your browser. Please use text mode.', 'system');
-            this.agentVoiceInputEnabled = false;
-            localStorage.setItem('agentVoiceInputEnabled', 'false');
-            const recordBtn = document.getElementById('agentVoiceRecordBtn');
-            if (recordBtn) {
-                recordBtn.style.display = 'none';
-            }
-            return;
-        }
-
-        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-        this.agentRecognition = new SpeechRecognition();
-        this.agentRecognition.continuous = true;
-        this.agentRecognition.interimResults = true;
-        this.agentRecognition.lang = 'en-US';
-
-        this.agentRecognition.onresult = (event) => {
-            let interimTranscript = '';
-            let finalTranscript = '';
-
-            for (let i = event.resultIndex; i < event.results.length; i++) {
-                const transcript = event.results[i][0].transcript;
-                if (event.results[i].isFinal) {
-                    finalTranscript += transcript + ' ';
-                } else {
-                    interimTranscript += transcript;
-                }
-            }
-
-            // Show interim results in a temporary message
-            if (interimTranscript) {
-                // Could show interim transcript in UI if needed
-            }
-
-            // Send final transcript when user stops speaking
-            if (finalTranscript.trim()) {
-                this.sendAgentMessage(finalTranscript.trim());
-            }
-        };
-
-        this.agentRecognition.onerror = (event) => {
-            console.error('Speech recognition error:', event.error);
-            if (event.error === 'no-speech') {
-                // User stopped speaking, this is normal
-                return;
-            }
-            this.addAgentMessage('Voice recognition error: ' + event.error, 'system');
-            this.stopVoiceRecording();
-        };
-
-        this.agentRecognition.onend = () => {
-            // Restart recognition if voice input is enabled and still recording
-            if (this.agentVoiceInputEnabled && this.isRecording) {
-                try {
-                    this.agentRecognition.start();
-                } catch (error) {
-                    console.error('Failed to restart recognition:', error);
-                }
-            }
-        };
+        console.warn('⚠️ initializeVoiceRecognition() is deprecated - VoiceSensor handles initialization');
+        // VoiceSensor is initialized automatically by AdaInputSystem
+        // No action needed - VoiceSensor will handle Web Speech API initialization
     }
 
+    /**
+     * DEPRECATED: Use adaInputSystem.getVoiceSensor() instead
+     * Kept for backward compatibility only - routes to modular VoiceSensor
+     */
     toggleVoiceRecording() {
-        if (this.isRecording) {
-            this.stopVoiceRecording();
+        console.warn('⚠️ toggleVoiceRecording() is deprecated - use VoiceSensor instead');
+        if (this.adaInputSystem && this.adaInputSystem.getVoiceSensor()) {
+            const voiceSensor = this.adaInputSystem.getVoiceSensor();
+            if (voiceSensor.getIsListening()) {
+                voiceSensor.stopListening();
+            } else {
+                voiceSensor.startListening();
+            }
         } else {
-            this.startVoiceRecording();
+            console.error('VoiceSensor not available');
         }
     }
 
+    /**
+     * DEPRECATED: Use VoiceSensor.startListening() instead
+     */
     startVoiceRecording() {
-        if (!this.agentRecognition) {
-            this.initializeVoiceRecognition();
-        }
-
-        if (!this.agentRecognition) {
-            return;
-        }
-
-        try {
-            this.agentRecognition.start();
-            this.isRecording = true;
-            
-            const recordBtn = document.getElementById('agentVoiceRecordBtn');
-            const recordIcon = document.getElementById('agentVoiceRecordIcon');
-            recordBtn?.classList.add('recording');
-            if (recordIcon) {
-                recordIcon.setAttribute('data-lucide', 'square');
-                if (window.lucide) window.lucide.createIcons();
-            }
-            
-            this.addAgentMessage('🎤 Listening...', 'system');
-        } catch (error) {
-            console.error('Failed to start recording:', error);
-            this.addAgentMessage('Failed to start voice recording. Please try again.', 'system');
+        console.warn('⚠️ startVoiceRecording() is deprecated - use VoiceSensor.startListening() instead');
+        if (this.adaInputSystem && this.adaInputSystem.getVoiceSensor()) {
+            this.adaInputSystem.getVoiceSensor().startListening();
         }
     }
 
+    /**
+     * DEPRECATED: Use VoiceSensor.stopListening() instead
+     */
     stopVoiceRecording() {
-        if (this.agentRecognition && this.isRecording) {
-            try {
-                this.agentRecognition.stop();
-            } catch (error) {
-                console.error('Error stopping recognition:', error);
-            }
-        }
-
-        this.isRecording = false;
-        
-        const recordBtn = document.getElementById('agentVoiceRecordBtn');
-        const recordIcon = document.getElementById('agentVoiceRecordIcon');
-        recordBtn?.classList.remove('recording');
-        if (recordIcon) {
-            recordIcon.setAttribute('data-lucide', 'mic');
-            if (window.lucide) window.lucide.createIcons();
+        console.warn('⚠️ stopVoiceRecording() is deprecated - use VoiceSensor.stopListening() instead');
+        if (this.adaInputSystem && this.adaInputSystem.getVoiceSensor()) {
+            this.adaInputSystem.getVoiceSensor().stopListening();
         }
     }
 
     stopVoiceAudio() {
         console.log('🛑 Stopping voice audio...');
+        this.isStoppingAudio = true; // Set flag to prevent new audio
         
         // Stop browser TTS if playing
         if ('speechSynthesis' in window) {
@@ -17189,6 +19120,12 @@ class ValuationApp {
         // Stop Grok Voice audio if playing
         if (this.grokVoiceService) {
             this.grokVoiceService.stopAudio();
+            // Clear audio queue to prevent queued chunks from playing
+            if (this.grokVoiceService.audioQueue) {
+                this.grokVoiceService.audioQueue = [];
+            }
+            this.grokVoiceService.isPlayingQueue = false;
+            this.grokVoiceService.nextPlayTime = 0;
         }
         
         this.isSpeaking = false;
@@ -17204,40 +19141,113 @@ class ValuationApp {
         // Refresh icons
         if (window.lucide) window.lucide.createIcons();
         
+        // Clear stopping flag after a delay to allow cleanup
+        setTimeout(() => {
+            this.isStoppingAudio = false;
+        }, 500);
+        
         console.log('✅ Voice audio stopped');
     }
 
-    async speakAgentResponse(text) {
+    /**
+     * Speak agent response using Grok Voice API (TTS mode)
+     * 
+     * IMPORTANT VERBATIM READING NOTE:
+     * - Uses modular VoiceOutputHandler for verbatim reading (if available)
+     * - Backend adds prefix "Read this aloud exactly as written:" for verbatim reading
+     * - Backend does NOT send session.update before each message (prevents unwanted responses)
+     * - Initial session.update (during connection) sets identity only (minimal)
+     * - See server.js socket.on('grok-voice:text') for verbatim implementation
+     * - See documentation/VERBATIM_READING_SOLUTION.md for details
+     */
+    async speakAgentResponse(text, stockInfo = null) {
         console.log('🔊 speakAgentResponse called');
         console.log('🔊 Voice output enabled?', this.agentVoiceOutputEnabled);
         console.log('🔊 Text length:', text?.length || 0);
+        if (stockInfo) {
+            console.log('🔊 Stock info:', stockInfo);
+        }
+        
+        // CRITICAL: Check if voice output is disabled (muted) - stop immediately if so
+        if (!this.agentVoiceOutputEnabled) {
+            console.log('🔇 Voice output is disabled (muted) - stopping any active audio and returning');
+            this.stopVoiceAudio(); // Ensure any active audio is stopped
+            return;
+        }
         
         if (!text || !text.trim()) {
             console.warn('⚠️ speakAgentResponse: Empty text, returning');
             return;
         }
         
-        // Clean up text (remove markdown, HTML tags, etc.)
-        const cleanText = text
+        // Extract "Learn more" section - it should NOT be spoken, only shown as links
+        // Support multiple formats: "Learn more: [topic1], [topic2], [topic3]" or "Learn more: topic1, topic2, topic3"
+        const learnMoreRegex1 = /Learn more:\s*\[([^\]]+)\](?:\s*,\s*\[([^\]]+)\])?(?:\s*,\s*\[([^\]]+)\])?/i;
+        const learnMoreRegex2 = /Learn more:\s*([^,\n]+)(?:\s*,\s*([^,\n]+))?(?:\s*,\s*([^,\n]+))?/i;
+        let learnMoreMatch = text.match(learnMoreRegex1);
+        let learnMoreTopics = [];
+        let textWithoutLearnMore = text;
+        
+        if (learnMoreMatch) {
+            // Extract topics from "Learn more: [topic1], [topic2], [topic3]"
+            learnMoreTopics = [
+                learnMoreMatch[1],
+                learnMoreMatch[2],
+                learnMoreMatch[3]
+            ].filter(Boolean);
+            
+            // Remove "Learn more" section from text that will be spoken
+            textWithoutLearnMore = text.replace(learnMoreRegex1, '').trim();
+            console.log('🔊 Extracted Learn more topics (brackets format):', learnMoreTopics);
+            console.log('🔊 Text without Learn more:', textWithoutLearnMore.substring(0, 100));
+        } else {
+            // Try format without brackets
+            learnMoreMatch = text.match(learnMoreRegex2);
+            if (learnMoreMatch) {
+                learnMoreTopics = [
+                    learnMoreMatch[1],
+                    learnMoreMatch[2],
+                    learnMoreMatch[3]
+                ].filter(Boolean).map(t => t.trim());
+                
+                // Remove "Learn more" section from text that will be spoken
+                textWithoutLearnMore = text.replace(learnMoreRegex2, '').trim();
+                console.log('🔊 Extracted Learn more topics (plain format):', learnMoreTopics);
+                console.log('🔊 Text without Learn more:', textWithoutLearnMore.substring(0, 100));
+            }
+        }
+        
+        // Clean up text (remove markdown, HTML tags, etc.) - use text WITHOUT Learn more
+        let cleanText = textWithoutLearnMore
             .replace(/[#*_`]/g, '') // Remove markdown formatting
             .replace(/<[^>]*>/g, '') // Remove HTML tags
             .replace(/\n+/g, '. ') // Replace newlines with periods
             .trim();
+        
+        // Add pauses for transitional phrases (if processing while playing AND voice output is enabled)
+        // Look for patterns like "Switching to..." or "Let me tell you about..."
+        if (this.agentVoiceOutputEnabled && stockInfo && this.pausedStocks.length > 0) {
+            // Add pause before transitional phrase (ellipses create natural pauses in speech)
+            cleanText = cleanText.replace(/(Switching to|Let me tell you about|Now let's look at)/i, '... $1');
+            // Add pause after transitional phrase (before the analysis starts)
+            // Match transitional phrase followed by company name, then add pause
+            cleanText = cleanText.replace(/((?:Switching to|Let me tell you about|Now let's look at)[^.]*?\.)/i, '$1 ...');
+        }
 
         if (!cleanText) {
             console.warn('⚠️ speakAgentResponse: Clean text is empty, returning');
             return;
         }
 
-        // ONLY use Grok Voice API with Ara's voice - NO FALLBACKS
+        // ONLY use Grok Voice API with Ada's voice - NO FALLBACKS
         // Check voice output enabled flag
         if (this.agentVoiceOutputEnabled) {
             console.log('🔊 Voice output is enabled - proceeding with Grok Voice TTS');
             try {
-                await this.speakWithGrokVoice(cleanText);
+                await this.speakWithGrokVoice(cleanText, stockInfo);
             } catch (error) {
                 console.error('❌ Grok Voice TTS error:', error);
-                this.addAgentMessage('❌ ERROR: Failed to use Ara voice. ' + (error.message || 'Grok Voice API error'), 'system');
+                this.addAgentMessage('❌ ERROR: Failed to use Ada voice. ' + (error.message || 'Grok Voice API error'), 'system');
                 // NO FALLBACK - show error only
                 return;
             }
@@ -17247,114 +19257,208 @@ class ValuationApp {
         }
     }
 
-    async speakWithGrokVoice(text) {
-        console.log('🔊 Using Grok Voice (Ara) to speak:', text.substring(0, 50) + '...');
+    /**
+     * Speak text using Grok Voice API (TTS mode)
+     * 
+     * IMPORTANT VERBATIM READING NOTE:
+     * - Uses modular VoiceOutputHandler for verbatim reading (if available)
+     * - Backend adds prefix "Read this aloud exactly as written:" for verbatim reading
+     * - Backend does NOT send session.update before each message (prevents unwanted responses)
+     * - Initial session.update (during connection) sets identity only (minimal)
+     * - See server.js socket.on('grok-voice:text') for verbatim implementation
+     * - See documentation/VERBATIM_READING_SOLUTION.md for details
+     */
+    async speakWithGrokVoice(text, stockInfo = null) {
+        console.log('🔊 Using Grok Voice (Ada - Mach33 Assistant) to speak:', text.substring(0, 50) + '...');
+        if (stockInfo) {
+            console.log('🔊 Speaking about stock:', stockInfo.ticker, stockInfo.companyName);
+        }
+        
+        // CRITICAL: Use existing stopVoiceAudio() function if already speaking or stopping
+        if (this.isStoppingAudio) {
+            console.log('⏸️ Audio is currently stopping - waiting for stop to complete');
+            // Wait for stop to complete
+            while (this.isStoppingAudio) {
+                await new Promise(resolve => setTimeout(resolve, 100));
+            }
+        }
+        
+        if (this.isSpeaking || (this.grokVoiceService && this.grokVoiceService.isSpeaking)) {
+            console.log('⏸️ Already speaking - using stopVoiceAudio() to stop before starting new one');
+            this.stopVoiceAudio();
+            // Wait for audio to fully stop (Grok Voice needs time to process stop)
+            await new Promise(resolve => setTimeout(resolve, 600));
+            // Double-check using the function again
+            this.stopVoiceAudio();
+            await new Promise(resolve => setTimeout(resolve, 300));
+            console.log('✅ Previous audio stopped, ready for new audio');
+        }
         
         try {
-            // Initialize Grok Voice service if needed
+            // Initialize Grok Voice service if needed (using Socket.io)
             if (!this.grokVoiceService) {
-                this.grokVoiceService = new GrokVoiceService();
-                // Create audio context for playback (no microphone needed for TTS)
-                try {
-                    this.grokVoiceService.audioContext = new AudioContext({ sampleRate: 24000 });
-                } catch (error) {
-                    console.warn('Could not create AudioContext at 24kHz, using default:', error);
-                    this.grokVoiceService.audioContext = new AudioContext();
+                // Use Socket.io service ONLY (simplified architecture)
+                if (typeof GrokVoiceSocketIOService === 'undefined') {
+                    throw new Error('GrokVoiceSocketIOService not available - Socket.io is required for Grok Voice');
                 }
+                this.grokVoiceService = new GrokVoiceSocketIOService();
                 
-                // Resume audio context if suspended
-                if (this.grokVoiceService.audioContext.state === 'suspended') {
-                    await this.grokVoiceService.audioContext.resume();
-                }
+                // CRITICAL: Initialize the service (creates AudioContext properly)
+                await this.grokVoiceService.initialize();
+                console.log('✅ Grok Voice service initialized');
             }
 
-            // Ensure audio context is running
+            // CRITICAL: Ensure AudioContext exists and is running
+            // This is especially important for remote machines where AudioContext might be suspended
+            if (!this.grokVoiceService.audioContext) {
+                console.warn('⚠️ AudioContext not found, re-initializing service...');
+                await this.grokVoiceService.initialize();
+            }
+
+            // CRITICAL: Resume AudioContext if suspended (browser autoplay policy)
+            // This is REQUIRED for remote machines or when page loads without user interaction
             if (this.grokVoiceService.audioContext.state === 'suspended') {
-                await this.grokVoiceService.audioContext.resume();
+                console.log('⏸️ AudioContext suspended - attempting to resume (may require user interaction)...');
+                try {
+                    await this.grokVoiceService.audioContext.resume();
+                    console.log('✅ AudioContext resumed, state:', this.grokVoiceService.audioContext.state);
+                } catch (error) {
+                    console.error('❌ Failed to resume AudioContext:', error);
+                    console.error('⚠️ Audio playback requires user interaction (click/tap) to start');
+                    // Show user-friendly message
+                    this.addAgentMessage('🔊 Audio requires user interaction. Please click anywhere on the page to enable audio playback.', 'system');
+                    return;
+                }
             }
 
-            // Connect WebSocket if not connected - REUSE EXISTING CONNECTION
-            if (!this.grokVoiceService.ws || this.grokVoiceService.ws.readyState !== WebSocket.OPEN) {
-                console.log('🔌 WebSocket not connected, connecting...');
-                console.log('🔌 Current WebSocket state:', this.grokVoiceService.ws?.readyState || 'null');
-                
-                // Check if WebSocket is in a connecting state (CONNECTING = 0)
-                if (this.grokVoiceService.ws && this.grokVoiceService.ws.readyState === WebSocket.CONNECTING) {
-                    console.log('⏳ WebSocket is already connecting, waiting for it to open...');
-                    // Wait up to 5 seconds for connection to complete
-                    for (let i = 0; i < 50; i++) {
-                        await new Promise(resolve => setTimeout(resolve, 100));
-                        if (this.grokVoiceService.ws && this.grokVoiceService.ws.readyState === WebSocket.OPEN) {
-                            console.log('✅ WebSocket connection completed');
-                            break;
-                        }
-                        if (this.grokVoiceService.ws && this.grokVoiceService.ws.readyState === WebSocket.CLOSED) {
-                            console.log('⚠️ WebSocket connection failed, will create new one');
-                            break;
-                        }
-                    }
-                }
-                
-                // Only create new connection if still not connected
-                if (!this.grokVoiceService.ws || this.grokVoiceService.ws.readyState !== WebSocket.OPEN) {
-                    await this.grokVoiceService.connectWebSocket();
-                    console.log('🔌 WebSocket connected, state:', this.grokVoiceService.ws?.readyState);
-                    
-                    // Wait for WebSocket to be fully ready AND for conversation.created
-                    console.log('⏳ Waiting for conversation.created from Grok...');
-                    let conversationCreated = false;
-                    const conversationHandler = (event) => {
-                        try {
-                            const message = JSON.parse(event.data);
-                            if (message.type === 'conversation.created') {
-                                conversationCreated = true;
-                                console.log('✅ conversation.created received - Grok is ready');
-                                this.grokVoiceService.ws.removeEventListener('message', conversationHandler);
-                            }
-                        } catch (e) {
-                            // Ignore parse errors
-                        }
-                    };
-                    
-                    this.grokVoiceService.ws.addEventListener('message', conversationHandler);
-                    
-                    // Wait up to 3 seconds for conversation.created
-                    for (let i = 0; i < 30; i++) {
-                        await new Promise(resolve => setTimeout(resolve, 100));
-                        if (conversationCreated) break;
-                    }
-                    
-                    if (!conversationCreated) {
-                        console.warn('⚠️ conversation.created not received, proceeding anyway');
-                        this.grokVoiceService.ws.removeEventListener('message', conversationHandler);
-                    }
-                }
-                
-                // Verify WebSocket is actually open
-                if (!this.grokVoiceService.ws || this.grokVoiceService.ws.readyState !== WebSocket.OPEN) {
-                    console.error('❌ WebSocket failed to connect! State:', this.grokVoiceService.ws?.readyState);
-                    throw new Error('WebSocket connection failed. State: ' + (this.grokVoiceService.ws?.readyState || 'null'));
-                }
-                console.log('✅ WebSocket verified as OPEN');
-            } else {
-                console.log('✅ WebSocket already connected and ready');
+            if (this.grokVoiceService.audioContext.state === 'closed') {
+                console.error('❌ AudioContext is closed! Re-initializing...');
+                await this.grokVoiceService.initialize();
             }
 
-            // ALWAYS re-send session config to ensure Ara voice is active
-            // This is critical - Grok Voice may reset voice settings between messages
-            console.log('📤 Ensuring Ara voice is active - sending session config...');
+            // Connect Socket.io if not connected - REUSE EXISTING CONNECTION
+            const isSocketIO = this.grokVoiceService instanceof GrokVoiceSocketIOService;
+            const needsConnection = isSocketIO 
+                ? (!this.grokVoiceService.socket || !this.grokVoiceService.socket.connected)
+                : (!this.grokVoiceService.ws || this.grokVoiceService.ws.readyState !== WebSocket.OPEN);
             
-            try {
-                // sendSessionConfig now returns a promise that resolves when session.updated is received (or times out)
-                await this.grokVoiceService.sendSessionConfig();
-                console.log('✅ Session config sent (may have timed out waiting for confirmation, but proceeding)');
+            console.log('🔌 Connection check:', {
+                isSocketIO,
+                needsConnection,
+                socketExists: !!this.grokVoiceService.socket,
+                socketConnected: this.grokVoiceService.socket?.connected || false,
+                wsExists: !!this.grokVoiceService.ws,
+                wsState: this.grokVoiceService.ws?.readyState || 'none'
+            });
+            
+            if (needsConnection) {
+                if (isSocketIO) {
+                    console.log('🔌 Socket.io not connected, connecting...');
+                    await this.grokVoiceService.connectSocketIO();
+                    console.log('🔌 Socket.io connected:', {
+                        connected: this.grokVoiceService.socket?.connected || false,
+                        sessionId: this.grokVoiceService.sessionId
+                    });
+                } else {
+                    console.log('🔌 WebSocket not connected, connecting...');
+                    console.log('🔌 Current WebSocket state:', this.grokVoiceService.ws?.readyState || 'null');
+                    
+                    // Check if WebSocket is in a connecting state (CONNECTING = 0)
+                    if (this.grokVoiceService.ws && this.grokVoiceService.ws.readyState === WebSocket.CONNECTING) {
+                        console.log('⏳ WebSocket is already connecting, waiting for it to open...');
+                        // Wait up to 5 seconds for connection to complete
+                        for (let i = 0; i < 50; i++) {
+                            await new Promise(resolve => setTimeout(resolve, 100));
+                            if (this.grokVoiceService.ws && this.grokVoiceService.ws.readyState === WebSocket.OPEN) {
+                                console.log('✅ WebSocket connection completed');
+                                break;
+                            }
+                            if (this.grokVoiceService.ws && this.grokVoiceService.ws.readyState === WebSocket.CLOSED) {
+                                console.log('⚠️ WebSocket connection failed, will create new one');
+                                break;
+                            }
+                        }
+                    }
+                    
+                    // Only create new connection if still not connected
+                    if (!this.grokVoiceService.ws || this.grokVoiceService.ws.readyState !== WebSocket.OPEN) {
+                        await this.grokVoiceService.connectWebSocket();
+                        console.log('🔌 WebSocket connected, state:', this.grokVoiceService.ws?.readyState);
+                        
+                        // Wait for WebSocket to be fully ready AND for conversation.created
+                        console.log('⏳ Waiting for conversation.created from Grok...');
+                        let conversationCreated = false;
+                        const conversationHandler = (event) => {
+                            try {
+                                const message = JSON.parse(event.data);
+                                if (message.type === 'conversation.created') {
+                                    conversationCreated = true;
+                                    console.log('✅ conversation.created received - Grok is ready');
+                                    this.grokVoiceService.ws.removeEventListener('message', conversationHandler);
+                                }
+                            } catch (e) {
+                                // Ignore parse errors
+                            }
+                        };
+                        
+                        this.grokVoiceService.ws.addEventListener('message', conversationHandler);
+                        
+                        // Wait up to 3 seconds for conversation.created
+                        for (let i = 0; i < 30; i++) {
+                            await new Promise(resolve => setTimeout(resolve, 100));
+                            if (conversationCreated) break;
+                        }
+                        
+                        if (!conversationCreated) {
+                            console.warn('⚠️ conversation.created not received, proceeding anyway');
+                            this.grokVoiceService.ws.removeEventListener('message', conversationHandler);
+                        }
+                    }
+                }
                 
-                // Give Grok a moment to process the session config
-                await new Promise(resolve => setTimeout(resolve, 300));
-            } catch (error) {
-                console.error('❌ Session configuration failed:', error);
-                // Don't throw - session config timeout is normal, proceed anyway
-                console.warn('⚠️ Continuing despite session config timeout (this is often normal)');
+                // Verify connection is actually open
+                if (isSocketIO) {
+                    if (!this.grokVoiceService.socket || !this.grokVoiceService.socket.connected) {
+                        console.error('❌ Socket.io failed to connect!');
+                        throw new Error('Socket.io connection failed');
+                    }
+                    console.log('✅ Socket.io verified as connected');
+                } else {
+                    if (!this.grokVoiceService.ws || this.grokVoiceService.ws.readyState !== WebSocket.OPEN) {
+                        console.error('❌ WebSocket failed to connect! State:', this.grokVoiceService.ws?.readyState);
+                        throw new Error('WebSocket connection failed. State: ' + (this.grokVoiceService.ws?.readyState || 'null'));
+                    }
+                    console.log('✅ WebSocket verified as OPEN');
+                }
+            } else {
+                if (isSocketIO) {
+                    console.log('✅ Socket.io already connected and ready');
+                } else {
+                    console.log('✅ WebSocket already connected and ready');
+                }
+            }
+
+            // For Socket.io, session config is handled automatically on connect
+            // For WebSocket, we need to send session config
+            if (!isSocketIO) {
+                // ALWAYS re-send session config to ensure Ada (Eve voice) is active
+                // This is critical - Grok Voice may reset voice settings between messages
+                console.log('📤 Ensuring Ada (Eve voice) is active - sending session config...');
+                
+                try {
+                    // sendSessionConfig now returns a promise that resolves when session.updated is received (or times out)
+                    await this.grokVoiceService.sendSessionConfig();
+                    console.log('✅ Session config sent (may have timed out waiting for confirmation, but proceeding)');
+                    
+                    // Give Grok a moment to process the session config
+                    await new Promise(resolve => setTimeout(resolve, 300));
+                } catch (error) {
+                    console.error('❌ Session configuration failed:', error);
+                    // Don't throw - session config timeout is normal, proceed anyway
+                    console.warn('⚠️ Continuing despite session config timeout (this is often normal)');
+                }
+            } else {
+                console.log('✅ Socket.io connection - Ada (Eve voice) configured automatically');
             }
 
             // CRITICAL: Stop any audio recording before sending text (TTS doesn't need microphone)
@@ -17377,10 +19481,27 @@ class ValuationApp {
             let audioStarted = false;
             
             this.grokVoiceService.onTranscriptCallback = (transcript) => {
-                if (transcript.isFinal && !audioStarted) {
+                // Handle both object format and string format
+                let transcriptObj = transcript;
+                if (typeof transcript === 'string') {
+                    transcriptObj = { interim: transcript, final: '', isFinal: false };
+                }
+                
+                if (transcriptObj.isFinal && !audioStarted) {
                     audioStarted = true;
                     this.isSpeaking = true;
-                    console.log('🔊 Grok Voice (Ara) started speaking');
+                    console.log('🔊 Grok Voice (Ada) started speaking');
+                    
+                    // Show competitor panel when ADA starts speaking (if pending)
+                    if (this.pendingCompetitorPanel && this.agentVoiceOutputEnabled) {
+                        console.log('🎭 Showing competitor panel from transcript callback:', this.pendingCompetitorPanel);
+                        // Delay panel appearance slightly after voice starts
+                        setTimeout(() => {
+                            const panelLingerTime = 25000; // 25 seconds - keep it longer
+                            this.showCompetitorFloatingPanel(this.pendingCompetitorPanel, panelLingerTime);
+                            this.pendingCompetitorPanel = null; // Clear after showing
+                        }, 500); // Small delay after voice starts
+                    }
                     
                     // Show stop button when speaking starts
                     const stopBtn = document.getElementById('agentVoiceStopBtn');
@@ -17392,7 +19513,49 @@ class ValuationApp {
                     }
                 }
                 
-                if (originalCallback) originalCallback(transcript);
+                // Check transcript for floating panel triggers
+                if (window.adaFloatingPanels && transcriptObj) {
+                    try {
+                        const transcriptText = transcriptObj.final || transcriptObj.interim || '';
+                        if (transcriptText) {
+                            // Parse for panel markers: [PANEL:id:title:value] or [SHOW:id:title]
+                            window.adaFloatingPanels.showPanelFromTranscript(transcriptText);
+                            
+                            // Check if company name is mentioned in transcript (case-insensitive)
+                            if (this.pendingCompetitorPanel && this.agentVoiceOutputEnabled) {
+                                const companyName = this.pendingCompetitorPanel.companyName || '';
+                                const ticker = this.pendingCompetitorPanel.ticker || '';
+                                const transcriptLower = transcriptText.toLowerCase();
+                                const companyNameLower = companyName.toLowerCase();
+                                const tickerLower = ticker.toLowerCase();
+                                
+                                console.log(`🎭 [WebSocket Transcript] Checking for company mention:`, {
+                                    companyName,
+                                    ticker,
+                                    transcriptPreview: transcriptText.substring(0, 100),
+                                    hasPendingPanel: !!this.pendingCompetitorPanel,
+                                    voiceEnabled: this.agentVoiceOutputEnabled
+                                });
+                                
+                                // Check if company name or ticker is mentioned
+                                if ((companyNameLower && transcriptLower.includes(companyNameLower)) ||
+                                    (tickerLower && transcriptLower.includes(tickerLower))) {
+                                    console.log(`🎭 [WebSocket] Company mentioned in transcript: "${companyName}" - Showing panel`);
+                                    const panelData = this.pendingCompetitorPanel;
+                                    this.pendingCompetitorPanel = null; // Clear to prevent duplicate
+                                    setTimeout(() => {
+                                        const panelLingerTime = 25000; // 25 seconds
+                                        this.showCompetitorFloatingPanel(panelData, panelLingerTime);
+                                    }, 800); // Delay 800ms after mention
+                                }
+                            }
+                        }
+                    } catch (error) {
+                        console.error('❌ Error checking transcript for panel:', error);
+                    }
+                }
+                
+                if (originalCallback) originalCallback(transcriptObj);
             };
 
             // Track audio completion
@@ -17402,127 +19565,311 @@ class ValuationApp {
                         this.grokVoiceService.audioQueue.length === 0 && 
                         !this.grokVoiceService.isPlayingQueue) {
                         this.isSpeaking = false;
-                        console.log('✅ Grok Voice (Ara) finished speaking');
+                        console.log('✅ Grok Voice (Ada) finished speaking');
+                        
+                        // Remove competitor floating panel after voice response completes
+                        // Dissolve immediately after ADA finishes speaking
+                        if (stockInfo && stockInfo.ticker) {
+                            const panelId = `competitor-${stockInfo.ticker.toLowerCase()}`;
+                            // Dissolve panel after speech completes (no extra delay)
+                            setTimeout(() => {
+                                if (window.adaFloatingPanels) {
+                                    console.log(`🎭 Dissolving competitor panel after speech: ${panelId}`);
+                                    window.adaFloatingPanels.removePanel(panelId);
+                                }
+                            }, 1000); // Small delay to ensure speech is fully complete
+                        }
+                        
+                        // Inject prompt with clickable options at end (with pause)
+                        if (stockInfo && this.pausedStocks.length > 0) {
+                            setTimeout(() => {
+                                this.injectStockOptionsPrompt(stockInfo);
+                            }, 2000); // Wait 2 seconds after audio completes for pause
+                        }
                     }
                 }, 500);
             };
 
-            // Override message handler to track audio.done
-            const originalMessageHandler = this.grokVoiceService.handleWebSocketMessage.bind(this.grokVoiceService);
-            this.grokVoiceService.handleWebSocketMessage = (event) => {
-                originalMessageHandler(event);
+            // Set up Socket.io event handlers for audio tracking (if using Socket.io)
+            if (isSocketIO) {
+                // Set up audio chunk handler ONCE (persists across calls)
+                if (!this.audioChunkHandlerSetup) {
+                    const audioChunkHandler = () => {
+                        console.log('[Audio Chunk Handler] 🔔 CALLED');
+                        console.log('[Audio Chunk Handler] Flags:', {
+                            isWaitingForNewAudio: this.isWaitingForNewAudio,
+                            isSpeaking: this.isSpeaking,
+                            firstAudioChunkReceived: this.firstAudioChunkReceived,
+                            pendingStockRequest: this.pendingStockRequest?.ticker || 'none',
+                            pendingCompetitorPanel: this.pendingCompetitorPanel?.ticker || 'none'
+                        });
+                        
+                        // Don't show panel on audio chunk - wait for company name in transcript
+                        // This ensures panel appears when ADA actually mentions the company
+                        
+                        // Ignore audio chunks if we're stopping audio
+                        if (this.isStoppingAudio) {
+                            console.log('⏸️ Ignoring audio chunk - audio is being stopped');
+                            return; // Don't play this chunk
+                        }
+                        
+                        // Mark first chunk received (for transition pause if needed)
+                        if (!this.firstAudioChunkReceived) {
+                            this.firstAudioChunkReceived = true;
+                            
+                            // If this is a new stock after a pause, add transition pause
+                            if (this.pausedStocks.length > 0 && this.currentSpeakingStock) {
+                                console.log('⏸️ First chunk of new stock after pause - adding transition pause');
+                                if (this.grokVoiceService) {
+                                    this.grokVoiceService.addPauseBeforeNextChunk = true;
+                                }
+                            }
+                        }
+                    };
+                    
+                    // Set up audio chunk handler ONCE
+                    this.grokVoiceService.onAudioChunk(audioChunkHandler);
+                    this.audioChunkHandlerSetup = true;
+                    console.log('✅ Audio chunk handler set up');
+                }
                 
-                // Check if it's an audio.done message
-                if (typeof event.data === 'string') {
+                // Clear flags when starting new response (if not waiting for new audio)
+                if (!this.isWaitingForNewAudio) {
+                    this.firstAudioChunkReceived = false;
+                    console.log('[speakWithGrokVoice] Cleared firstAudioChunkReceived (not waiting for new audio)');
+                } else {
+                    console.log('[speakWithGrokVoice] KEEPING isWaitingForNewAudio=true (waiting for new audio)');
+                    console.log('[speakWithGrokVoice] Will NOT clear flags here - waiting for audio chunk handler to pause and clear');
+                    // DO NOT clear flags here - let the audio chunk handler do it when first chunk arrives
+                    // The handler will clear isWaitingForNewAudio when it pauses Stock A
+                }
+                
+                // Socket.io handles events automatically, but we can track response completion
+                // Store stockInfo in a variable accessible to the callback
+                const currentStockInfo = stockInfo;
+                
+                this.grokVoiceService.onTranscript((transcript, isFinal) => {
                     try {
-                        const message = JSON.parse(event.data);
-                        if (message.type === 'response.audio.done') {
-                            checkAudioComplete();
-                            // Hide stop button when audio is done
-                            const stopBtn = document.getElementById('agentVoiceStopBtn');
-                            const inputContainer = document.querySelector('.agent-chat-input-container');
-                            if (stopBtn && inputContainer) {
-                                inputContainer.classList.remove('speaking');
-                                stopBtn.style.display = 'none';
-                                if (window.lucide) window.lucide.createIcons();
+                        // Handle both string format (Socket.io) and object format (WebSocket)
+                        let transcriptText = '';
+                        let transcriptIsFinal = false;
+                        
+                        if (typeof transcript === 'string') {
+                            // Socket.io format: (transcript: string, isFinal: boolean)
+                            transcriptText = transcript;
+                            transcriptIsFinal = isFinal || false;
+                        } else if (transcript && typeof transcript === 'object') {
+                            // WebSocket format: { interim: string, final: string, isFinal: boolean }
+                            transcriptText = transcript.final || transcript.interim || '';
+                            transcriptIsFinal = transcript.isFinal || false;
+                        }
+                        
+                        // Check transcript for floating panel triggers
+                        if (window.adaFloatingPanels && transcriptText) {
+                            window.adaFloatingPanels.showPanelFromTranscript(transcriptText);
+                            
+                            // Check if company name is mentioned in transcript (case-insensitive)
+                            if (this.pendingCompetitorPanel && this.agentVoiceOutputEnabled) {
+                                const companyName = this.pendingCompetitorPanel.companyName || '';
+                                const ticker = this.pendingCompetitorPanel.ticker || '';
+                                const transcriptLower = transcriptText.toLowerCase();
+                                const companyNameLower = companyName.toLowerCase();
+                                const tickerLower = ticker.toLowerCase();
+                                
+                                // Check if company name or ticker is mentioned
+                                if ((companyNameLower && transcriptLower.includes(companyNameLower)) ||
+                                    (tickerLower && transcriptLower.includes(tickerLower))) {
+                                    console.log(`🎭 [Socket.io Transcript] Company mentioned: "${companyName}" - Showing panel`);
+                                    const panelData = this.pendingCompetitorPanel;
+                                    this.pendingCompetitorPanel = null; // Clear to prevent duplicate
+                                    setTimeout(() => {
+                                        const panelLingerTime = 25000; // 25 seconds
+                                        this.showCompetitorFloatingPanel(panelData, panelLingerTime);
+                                    }, 800); // Delay 800ms after mention
+                                }
                             }
                         }
                         
-                        // Show stop button when audio starts
-                        if (message.type === 'response.output_audio.delta' || message.type === 'response.audio.delta') {
-                            const stopBtn = document.getElementById('agentVoiceStopBtn');
-                            const inputContainer = document.querySelector('.agent-chat-input-container');
-                            if (stopBtn && inputContainer && !inputContainer.classList.contains('speaking')) {
-                                inputContainer.classList.add('speaking');
-                                stopBtn.style.display = 'flex';
-                                if (window.lucide) window.lucide.createIcons();
+                        if (transcriptIsFinal) {
+                            checkAudioComplete();
+                            // Reset firstAudioChunkReceived for next response
+                            this.firstAudioChunkReceived = false;
+                            
+                            // Also check for competitor panel removal after final transcript
+                            // This ensures panel dissolves even if checkAudioComplete doesn't fire
+                            if (currentStockInfo && currentStockInfo.ticker && this.agentVoiceOutputEnabled) {
+                                const panelId = `competitor-${currentStockInfo.ticker.toLowerCase()}`;
+                                // Wait for audio to finish, then dissolve
+                                setTimeout(() => {
+                                    if (window.adaFloatingPanels) {
+                                        // Only remove if audio has finished
+                                        if (!this.grokVoiceService.isSpeaking && 
+                                            this.grokVoiceService.audioQueue.length === 0) {
+                                            console.log(`🎭 Dissolving competitor panel after transcript: ${panelId}`);
+                                            window.adaFloatingPanels.removePanel(panelId);
+                                        }
+                                    }
+                                }, 2000); // Wait 2 seconds after final transcript to ensure speech completes
                             }
                         }
-                    } catch (e) {
-                        // Not JSON, ignore
+                    } catch (error) {
+                        console.error('❌ Error in transcript callback:', error);
                     }
-                }
-            };
-
-            // Grok Voice API: Send text as a conversation item
-            // Step 1: Create conversation item with text
-            const conversationMessage = {
-                type: 'conversation.item.create',
-                item: {
-                    type: 'message',
-                    role: 'user',
-                    content: [
-                        {
-                            type: 'input_text',
-                            text: text
+                });
+            } else {
+                // Override message handler to track audio.done (WebSocket)
+                const originalMessageHandler = this.grokVoiceService.handleWebSocketMessage.bind(this.grokVoiceService);
+                this.grokVoiceService.handleWebSocketMessage = (event) => {
+                    originalMessageHandler(event);
+                    
+                    // Check if it's an audio.done message
+                    if (typeof event.data === 'string') {
+                        try {
+                            const message = JSON.parse(event.data);
+                            if (message.type === 'response.audio.done') {
+                                checkAudioComplete();
+                                // Hide stop button when audio is done
+                                const stopBtn = document.getElementById('agentVoiceStopBtn');
+                                const inputContainer = document.querySelector('.agent-chat-input-container');
+                                if (stopBtn && inputContainer) {
+                                    inputContainer.classList.remove('speaking');
+                                    stopBtn.style.display = 'none';
+                                    if (window.lucide) window.lucide.createIcons();
+                                }
+                            }
+                            
+                            // Show stop button when audio starts
+                            if (message.type === 'response.output_audio.delta' || message.type === 'response.audio.delta') {
+                                const stopBtn = document.getElementById('agentVoiceStopBtn');
+                                const inputContainer = document.querySelector('.agent-chat-input-container');
+                                if (stopBtn && inputContainer && !inputContainer.classList.contains('speaking')) {
+                                    inputContainer.classList.add('speaking');
+                                    stopBtn.style.display = 'flex';
+                                    if (window.lucide) window.lucide.createIcons();
+                                }
+                            }
+                        } catch (e) {
+                            // Not JSON, ignore
                         }
-                    ]
-                }
-            };
-
-            // CRITICAL: Verify WebSocket is open before sending
-            if (!this.grokVoiceService.ws || this.grokVoiceService.ws.readyState !== WebSocket.OPEN) {
-                console.error('❌ WebSocket not open! State:', this.grokVoiceService.ws?.readyState);
-                console.error('❌ Cannot send text to Grok Voice - WebSocket connection failed');
-                throw new Error('WebSocket not connected. Cannot send text to Grok Voice.');
-            }
-            
-            console.log('📤 Sending conversation.item.create to Grok Voice API');
-            console.log('📤 Text preview:', text.substring(0, 50) + '...');
-            console.log('📤 Text length:', text.length, 'characters');
-            console.log('📤 WebSocket state:', this.grokVoiceService.ws.readyState, '(should be 1=OPEN)');
-            console.log('📤 Full conversation.item.create message:', JSON.stringify(conversationMessage, null, 2));
-            
-            try {
-                this.grokVoiceService.ws.send(JSON.stringify(conversationMessage));
-                console.log('✅ conversation.item.create sent successfully');
-            } catch (error) {
-                console.error('❌ Error sending conversation.item.create:', error);
-                console.error('❌ Error details:', error.message, error.stack);
-                throw error;
-            }
-            
-            // Step 2: Send response.create after 500ms delay (as per working implementation)
-            // Working implementation: Don't wait for conversation.item.created, just wait 500ms
-            setTimeout(() => {
-                // Verify WebSocket is still open
-                if (!this.grokVoiceService.ws || this.grokVoiceService.ws.readyState !== WebSocket.OPEN) {
-                    console.error('❌ WebSocket closed before sending response.create!');
-                    console.error('❌ WebSocket state:', this.grokVoiceService.ws?.readyState);
-                    console.error('❌ This means Grok Voice will NOT generate audio response!');
-                    return;
-                }
-                
-                const responseMessage = {
-                    type: 'response.create',
-                    response: {
-                        modalities: ['audio', 'text'] // Request both audio and text
                     }
                 };
-                
-                console.log('📤 Sending response.create to trigger Grok Voice audio response');
-                console.log('📤 WebSocket state:', this.grokVoiceService.ws.readyState, '(should be 1=OPEN)');
-                console.log('📤 Requesting modalities:', responseMessage.response.modalities);
-                console.log('📋 response.create message:', JSON.stringify(responseMessage, null, 2));
+            }
+
+            // Note: currentSpeakingStock is already set in stock click handler
+            // This ensures we're tracking the correct stock for this response
+            
+            // Check if we're waiting for new audio and first chunk already arrived
+            // If so, audio is already playing from the first request - don't send again!
+            // NOTE: This check happens BEFORE sending text, so if pause already happened,
+            // we skip sending duplicate request
+            if (this.isWaitingForNewAudio && this.firstAudioChunkReceived) {
+                console.log('⏸️ Already paused and new audio is playing - skipping duplicate request');
+                console.log('⏸️ Flags already cleared by audio chunk handler - audio is playing');
+                // Flags should already be cleared by audio chunk handler, but double-check
+                if (this.isWaitingForNewAudio) {
+                    console.log('⏸️ Clearing remaining flags');
+                    this.isWaitingForNewAudio = false;
+                    this.pendingStockRequest = null;
+                }
+                // Audio is already playing from the first request, just return
+                return;
+            }
+            
+            // Send text to Grok Voice
+            if (isSocketIO) {
+                // Use Socket.io speakText method (handles conversation + response automatically)
+                console.log('📤 Sending text via Socket.io (Ada - Eve voice)');
+                console.log('📤 Text preview:', text.substring(0, 50) + '...');
+                console.log('📤 Text length:', text.length, 'characters');
                 
                 try {
-                    this.grokVoiceService.ws.send(JSON.stringify(responseMessage));
-                    console.log('✅ response.create sent successfully');
-                    console.log('⏳ Now waiting for Grok to generate audio response...');
-                    console.log('⏳ Expected messages:');
-                    console.log('   1. response.create (confirmation)');
-                    console.log('   2. response.output_audio.delta (audio chunks)');
-                    console.log('   3. response.output_audio_transcript.delta (text transcript)');
-                    console.log('   4. response.done (completion)');
+                    await this.grokVoiceService.speakText(text);
+                    console.log('✅ Text sent successfully via Socket.io');
                 } catch (error) {
-                    console.error('❌ Error sending response.create:', error);
-                    console.error('❌ Error details:', error.message, error.stack);
+                    console.error('❌ Error sending text via Socket.io:', error);
+                    throw error;
                 }
-            }, 500); // 500ms delay as per working implementation
+            } else {
+                // WebSocket: Send text as a conversation item
+                // Step 1: Create conversation item with text
+                const conversationMessage = {
+                    type: 'conversation.item.create',
+                    item: {
+                        type: 'message',
+                        role: 'user',
+                        content: [
+                            {
+                                type: 'input_text',
+                                text: text
+                            }
+                        ]
+                    }
+                };
+
+                // CRITICAL: Verify WebSocket is open before sending
+                if (!this.grokVoiceService.ws || this.grokVoiceService.ws.readyState !== WebSocket.OPEN) {
+                    console.error('❌ WebSocket not open! State:', this.grokVoiceService.ws?.readyState);
+                    console.error('❌ Cannot send text to Grok Voice - WebSocket connection failed');
+                    throw new Error('WebSocket not connected. Cannot send text to Grok Voice.');
+                }
+                
+                console.log('📤 Sending conversation.item.create to Grok Voice API');
+                console.log('📤 Text preview:', text.substring(0, 50) + '...');
+                console.log('📤 Text length:', text.length, 'characters');
+                console.log('📤 WebSocket state:', this.grokVoiceService.ws.readyState, '(should be 1=OPEN)');
+                console.log('📤 Full conversation.item.create message:', JSON.stringify(conversationMessage, null, 2));
+                
+                try {
+                    this.grokVoiceService.ws.send(JSON.stringify(conversationMessage));
+                    console.log('✅ conversation.item.create sent successfully');
+                } catch (error) {
+                    console.error('❌ Error sending conversation.item.create:', error);
+                    console.error('❌ Error details:', error.message, error.stack);
+                    throw error;
+                }
+                
+                // Step 2: Send response.create after 500ms delay (as per working implementation)
+                // Working implementation: Don't wait for conversation.item.created, just wait 500ms
+                setTimeout(() => {
+                    // Verify WebSocket is still open
+                    if (!this.grokVoiceService.ws || this.grokVoiceService.ws.readyState !== WebSocket.OPEN) {
+                        console.error('❌ WebSocket closed before sending response.create!');
+                        console.error('❌ WebSocket state:', this.grokVoiceService.ws?.readyState);
+                        console.error('❌ This means Grok Voice will NOT generate audio response!');
+                        return;
+                    }
+                    
+                    const responseMessage = {
+                        type: 'response.create',
+                        response: {
+                            modalities: ['audio', 'text'] // Request both audio and text
+                        }
+                    };
+                    
+                    console.log('📤 Sending response.create to trigger Grok Voice audio response');
+                    console.log('📤 WebSocket state:', this.grokVoiceService.ws.readyState, '(should be 1=OPEN)');
+                    console.log('📤 Requesting modalities:', responseMessage.response.modalities);
+                    console.log('📋 response.create message:', JSON.stringify(responseMessage, null, 2));
+                    
+                    try {
+                        this.grokVoiceService.ws.send(JSON.stringify(responseMessage));
+                        console.log('✅ response.create sent successfully');
+                        console.log('⏳ Now waiting for Grok to generate audio response...');
+                        console.log('⏳ Expected messages:');
+                        console.log('   1. response.create (confirmation)');
+                        console.log('   2. response.output_audio.delta (audio chunks)');
+                        console.log('   3. response.output_audio_transcript.delta (text transcript)');
+                        console.log('   4. response.done (completion)');
+                    } catch (error) {
+                        console.error('❌ Error sending response.create:', error);
+                        console.error('❌ Error details:', error.message, error.stack);
+                    }
+                }, 500); // 500ms delay as per working implementation
+            }
             
             this.isSpeaking = true;
             
-            // Return true to indicate Ara voice is verified
+            // Return true to indicate Ada voice is verified
             return true;
             
         } catch (error) {
@@ -17980,6 +20327,60 @@ class ValuationApp {
     }
 
     /**
+     * Helper function to detect repeat clicks and build appropriate message
+     * Returns: { isRepeatClick: boolean, isConsecutiveRepeat: boolean, isReturningToTopic: boolean, message: string }
+     */
+    buildClickMessage(elementKey, elementType, baseMessage, isFirstInteraction = false) {
+        // Check if this is a consecutive repeat (same element clicked multiple times in a row)
+        const isConsecutiveRepeat = this.lastClickedElementKey === elementKey;
+        
+        // Check if this element was clicked before but not the last one (returning to topic)
+        const isReturningToTopic = !isConsecutiveRepeat && 
+                                   this.lastClickedElementKeyHistory.length > 0 &&
+                                   this.lastClickedElementKeyHistory.includes(elementKey);
+        
+        let message = '';
+        let isRepeatClick = false;
+        
+        if (isConsecutiveRepeat) {
+            // Consecutive repeat clicks - user wants MORE DETAILED information
+            isRepeatClick = true;
+            message = `Tell me more about ${baseMessage}. I want a more detailed, expanded analysis with deeper insights. Provide a longer, more comprehensive response that goes beyond the initial overview.`;
+        } else if (isReturningToTopic) {
+            // Returning to a previously clicked topic (with other clicks in between)
+            // Acknowledge coming back to the topic but use normal response length
+            message = `Tell me about ${baseMessage} again.`;
+        } else {
+            // First click - natural interest statement
+            if (isFirstInteraction) {
+                message = `${baseMessage}.`;
+            } else {
+                message = `Tell me about ${baseMessage}.`;
+            }
+        }
+        
+        // Update tracking
+        // Add to history (keep last 5 elements)
+        if (!this.lastClickedElementKeyHistory) {
+            this.lastClickedElementKeyHistory = [];
+        }
+        
+        // If this is a new element (not consecutive repeat), add to history
+        if (!isConsecutiveRepeat) {
+            this.lastClickedElementKeyHistory.push(elementKey);
+            // Keep only last 5 elements
+            if (this.lastClickedElementKeyHistory.length > 5) {
+                this.lastClickedElementKeyHistory.shift();
+            }
+        }
+        
+        this.lastClickedElementKey = elementKey;
+        this.lastClickedElementType = elementType;
+        
+        return { isRepeatClick, isConsecutiveRepeat, isReturningToTopic, message };
+    }
+    
+    /**
      * Attach click handler to a tile for agent commentary
      */
     attachCompetitorClickHandlers(tileElement, tile) {
@@ -17991,8 +20392,41 @@ class ValuationApp {
             
             const competitorRows = tileElement.querySelectorAll('.competitor-row');
             if (!competitorRows || competitorRows.length === 0) {
-                console.warn('[Competitor Click Handler] No competitor rows found in tile:', tile.id);
+                // Retry if data might still be loading - competitors data loads asynchronously
+                const hasLoadingState = tileElement.querySelector('.spinning') || 
+                                       tileElement.textContent.includes('Loading competitors');
+                
+                // Check if we've already retried (prevent infinite loops)
+                const retryCount = tileElement._competitorHandlerRetryCount || 0;
+                const maxRetries = 5; // Max 5 retries (5 seconds total)
+                
+                if (hasLoadingState && retryCount < maxRetries) {
+                    // Data is still loading, retry after a delay
+                    tileElement._competitorHandlerRetryCount = retryCount + 1;
+                    console.log(`[Competitor Click Handler] Competitor data still loading (retry ${retryCount + 1}/${maxRetries}), will retry...`);
+                    setTimeout(() => {
+                        this.attachCompetitorClickHandlers(tileElement, tile);
+                    }, 1000); // Retry after 1 second
+                    return;
+                }
+                
+                // Reset retry count if we found rows or gave up
+                if (retryCount > 0) {
+                    tileElement._competitorHandlerRetryCount = 0;
+                }
+                
+                // No loading state and no rows - data might not be available
+                if (retryCount >= maxRetries) {
+                    console.warn('[Competitor Click Handler] Max retries reached, competitor data may not be available for tile:', tile.id);
+                } else {
+                    console.warn('[Competitor Click Handler] No competitor rows found in tile:', tile.id, '- tile may not have competitor data yet');
+                }
                 return;
+            }
+            
+            // Reset retry count on success
+            if (tileElement._competitorHandlerRetryCount) {
+                tileElement._competitorHandlerRetryCount = 0;
             }
             
             console.log(`[Competitor Click Handler] Attaching handlers to ${competitorRows.length} competitor rows`);
@@ -18049,9 +20483,6 @@ class ValuationApp {
                         this.competitorClickHistory.shift();
                     }
                     
-                    // Update last clicked competitor
-                    this.lastClickedCompetitor = companyKey;
-                    
                     // Ensure agent window is open
                     const agentWindow = document.getElementById('aiAgentWindow');
                     if (agentWindow) {
@@ -18066,6 +20497,7 @@ class ValuationApp {
                     
                     // Get conversation history for episodic memory context
                     const chatHistory = this.getAgentChatHistory();
+                    const isFirstInteraction = chatHistory.length === 0;
                     const recentConversation = chatHistory.slice(-5).map(msg => 
                         `${msg.role === 'user' ? 'User' : 'Assistant'}: ${msg.content}`
                     ).join('\n');
@@ -18089,30 +20521,173 @@ class ValuationApp {
                     if (peRatio > 0) companyInfo.push(`P/E Ratio: ${peRatio.toFixed(1)}x`);
                     if (revenueGrowth > 0) companyInfo.push(`Revenue Growth: ${(revenueGrowth * 100).toFixed(0)}%`);
                     
+                    // Use unified tracking system
+                    const elementKey = `competitor:${companyKey}`;
+                    const { isRepeatClick: isConsecutiveRepeat, isReturningToTopic, message: baseMessage } = this.buildClickMessage(
+                        elementKey,
+                        'competitor',
+                        ticker || companyName || 'this company',
+                        isFirstInteraction
+                    );
+                    
+                    // Update last clicked competitor (for backward compatibility)
+                    this.lastClickedCompetitor = companyKey;
+                    this.lastClickedElement = { ticker, companyName, type: 'competitor' };
+                    
                     // Build message for agent with episodic memory context
-                    let message = '';
+                    let message = baseMessage;
                     
-                    if (isRepeatClick) {
-                        // User clicked same company twice - they want more information
-                        message = `I'm clicking on ${ticker || companyName || 'this competitor'} again because I'd like to know more. `;
-                        message += `Please provide additional analysis or deeper insights about ${ticker || companyName || 'this company'} in relation to SpaceX's valuation and operations. `;
-                        message += `${companyInfo.join(', ')}. `;
-                        message += `This is a follow-up question - please reference our previous conversation about this company and expand on it.`;
-                    } else {
-                        // First click or different company
-                        message = `Please analyze ${ticker || companyName || 'this competitor'} in relation to SpaceX's valuation and operations. `;
-                        message += `${companyInfo.join(', ')}. `;
-                        message += `How does this company compare to SpaceX/Starlink in terms of market position, valuation metrics, and competitive dynamics?`;
+                    // Check if another response is currently playing (ONLY for voice responses)
+                    const isProcessingWhilePlaying = this.agentVoiceOutputEnabled && this.isSpeaking && this.currentSpeakingStock;
+                    
+                    // IMPORTANT: If processing while another VOICE response is playing, include contextual transitional text with pauses
+                    // ONLY apply this logic when voice output is enabled
+                    if (isProcessingWhilePlaying && this.currentSpeakingStock && this.agentVoiceOutputEnabled && !isConsecutiveRepeat && !isReturningToTopic) {
+                        const previousStock = this.currentSpeakingStock;
+                        const previousTicker = previousStock.ticker || 'the previous company';
+                        const previousCompanyName = previousStock.companyName || previousTicker;
+                        
+                        message += ` [VOICE TRANSITION: User switching from ${previousCompanyName} to ${ticker || companyName}. Structure response: (1) Brief pause, (2) Acknowledge switch naturally, (3) Compare/contrast with ${previousCompanyName}, (4) Brief pause, (5) Begin analysis. Use natural pauses in speech.]`;
                     }
                     
-                    // Add conversation context if available
+                    // Add company info as background context (not part of user message)
+                    // This is background info for Ada, not something to comment on
+                    const backgroundContext = [];
+                    backgroundContext.push(`Company: ${ticker || companyName || 'Unknown'}`);
+                    if (companyInfo.length > 0) {
+                        backgroundContext.push(...companyInfo);
+                    }
+                    
+                    // Add conversation history as background context
                     if (recentConversation) {
-                        message += `\n\n[Context from recent conversation:\n${recentConversation}]`;
+                        backgroundContext.push(`Recent conversation: ${recentConversation}`);
                     }
                     
-                    // Add navigation context
+                    // Add navigation context as background
                     if (navHistory) {
-                        message += `\n\n[User has been navigating: ${navHistory}]`;
+                        backgroundContext.push(`Navigation history: ${navHistory}`);
+                    }
+                    
+                    // Append background context in a way that Ada knows it's context, not user input
+                    if (backgroundContext.length > 0) {
+                        message += `\n\n[Background context for reference: ${backgroundContext.join('; ')}]`;
+                    }
+                    
+                    // Store competitor data for panel display (will show when ADA starts speaking)
+                    const competitorData = {
+                        ticker: ticker,
+                        companyName: companyName,
+                        marketCap: marketCap,
+                        evRevenue: evRevenue,
+                        peRatio: peRatio,
+                        revenueGrowth: revenueGrowth,
+                        evEbitda: parseFloat(row.getAttribute('data-ev-ebitda') || 0),
+                        pegRatio: parseFloat(row.getAttribute('data-peg-ratio') || 0)
+                    };
+                    
+                    // Store competitor data to show panel when ADA mentions the company
+                    // Don't show immediately - wait for company name in transcript
+                    this.pendingCompetitorPanel = competitorData;
+                    console.log('🎭 [Competitor Click] Stored competitor panel data:', {
+                        ticker: competitorData.ticker,
+                        companyName: competitorData.companyName,
+                        voiceOutputEnabled: this.agentVoiceOutputEnabled,
+                        willShowWhen: 'Company name mentioned in transcript'
+                    });
+                    
+                    // Fallback: Show panel after 3 seconds if company name hasn't been mentioned yet
+                    // This ensures panel shows even if transcript matching fails
+                    if (this.agentVoiceOutputEnabled) {
+                        setTimeout(() => {
+                            if (this.pendingCompetitorPanel && 
+                                this.pendingCompetitorPanel.ticker === competitorData.ticker) {
+                                console.log('🎭 [Fallback] Showing competitor panel after timeout:', competitorData.companyName);
+                                const panelData = this.pendingCompetitorPanel;
+                                this.pendingCompetitorPanel = null;
+                                const panelLingerTime = 25000;
+                                this.showCompetitorFloatingPanel(panelData, panelLingerTime);
+                            }
+                        }, 3000); // 3 second fallback
+                    }
+                    
+                    // Handle voice pause/switch logic for stock clicks (ONLY when voice output is enabled)
+                    const stockInfo = {
+                        ticker: ticker,
+                        companyName: companyName,
+                        timestamp: Date.now()
+                    };
+                    
+                    // Only track voice state if voice output is enabled
+                    if (this.agentVoiceOutputEnabled) {
+                        // Use InterruptionManager if available (proper architecture)
+                        if (this.agentCommunicationSystem && this.agentCommunicationSystem.interruption) {
+                            if (this.isSpeaking && this.currentSpeakingStock) {
+                                console.log(`[Stock Click] ⏸️ Using InterruptionManager to interrupt ${this.currentSpeakingStock.ticker}`);
+                                // Use the proper interruption system
+                                await this.agentCommunicationSystem.interruption.interruptMidSentence();
+                                
+                                // Add current stock to paused list
+                                if (!this.pausedStocks.find(s => s.ticker === this.currentSpeakingStock.ticker)) {
+                                    this.pausedStocks.push({
+                                        ticker: this.currentSpeakingStock.ticker,
+                                        companyName: this.currentSpeakingStock.companyName,
+                                        timestamp: this.currentSpeakingStock.timestamp
+                                    });
+                                }
+                                
+                                // Set flags for new stock
+                                this.currentSpeakingStock = stockInfo;
+                                this.isWaitingForNewAudio = false;
+                                this.pendingStockRequest = null;
+                                this.firstAudioChunkReceived = false;
+                                
+                                console.log(`[Stock Click] ✅ Interrupted via InterruptionManager, switching to: ${stockInfo.ticker}`);
+                            } else {
+                                // Not currently speaking, set as current
+                                this.currentSpeakingStock = stockInfo;
+                                this.isWaitingForNewAudio = false;
+                                this.pendingStockRequest = null;
+                                this.firstAudioChunkReceived = false;
+                            }
+                        } else {
+                            // Fallback to manual stop if InterruptionManager not available
+                            if (this.isSpeaking && this.currentSpeakingStock) {
+                                console.log(`[Stock Click] ⏸️ Currently speaking about ${this.currentSpeakingStock.ticker}, STOPPING IMMEDIATELY`);
+                                this.stopVoiceAudio();
+                                await new Promise(resolve => setTimeout(resolve, 500));
+                                this.stopVoiceAudio();
+                                await new Promise(resolve => setTimeout(resolve, 200));
+                                
+                                // Add current stock to paused list
+                                if (!this.pausedStocks.find(s => s.ticker === this.currentSpeakingStock.ticker)) {
+                                    this.pausedStocks.push({
+                                        ticker: this.currentSpeakingStock.ticker,
+                                        companyName: this.currentSpeakingStock.companyName,
+                                        timestamp: this.currentSpeakingStock.timestamp
+                                    });
+                                }
+                                
+                                // Set flags for new stock
+                                this.currentSpeakingStock = stockInfo;
+                                this.isWaitingForNewAudio = false;
+                                this.pendingStockRequest = null;
+                                this.firstAudioChunkReceived = false;
+                                
+                                console.log(`[Stock Click] ✅ Stopped old audio, switching to: ${stockInfo.ticker}`);
+                            } else {
+                                // Not currently speaking, set as current
+                                this.currentSpeakingStock = stockInfo;
+                                this.isWaitingForNewAudio = false;
+                                this.pendingStockRequest = null;
+                                this.firstAudioChunkReceived = false;
+                            }
+                        }
+                    } else {
+                        // Voice output disabled - just set current stock without voice tracking
+                        this.currentSpeakingStock = stockInfo;
+                        this.isWaitingForNewAudio = false;
+                        this.pendingStockRequest = null;
+                        this.firstAudioChunkReceived = false;
                     }
                     
                     // Send to agent without showing user prompt - just spinner then response
@@ -18120,7 +20695,8 @@ class ValuationApp {
                     console.log('[Competitor Click] 📤 Voice output enabled?', this.agentVoiceOutputEnabled);
                     console.log('[Competitor Click] 📤 Voice input enabled?', this.agentVoiceInputEnabled);
                     console.log('[Competitor Click] 📤 Message preview:', message.substring(0, 100) + '...');
-                    await this.sendAgentMessageSilent(message);
+                    console.log('[Competitor Click] 📤 Stock info:', stockInfo);
+                    await this.sendAgentMessageSilent(message, stockInfo);
                     console.log('[Competitor Click] ✅ sendAgentMessageSilent completed');
                 };
                 
@@ -18137,6 +20713,659 @@ class ValuationApp {
         }
     }
 
+    /**
+     * Attach click handlers to X feed posts
+     */
+    attachXFeedClickHandlers(tileElement, tile, insightData) {
+        if (!tileElement || !insightData?.xFeeds) return;
+        
+        const xFeedItems = tileElement.querySelectorAll('.x-feed-item');
+        if (!xFeedItems || xFeedItems.length === 0) {
+            console.warn('[X Feed Click Handler] No X feed items found in tile:', tile.id);
+            return;
+        }
+        
+        console.log(`[X Feed Click Handler] Attaching handlers to ${xFeedItems.length} X feed items`);
+        
+        xFeedItems.forEach((item, idx) => {
+            // Remove existing handler if any
+            const existingHandler = item._xFeedClickHandler;
+            if (existingHandler) {
+                item.removeEventListener('click', existingHandler);
+            }
+            
+            // Get the FULL tweet object from insightData
+            const fullTweetObject = insightData.xFeeds && insightData.xFeeds[idx] ? insightData.xFeeds[idx] : null;
+            
+            const clickHandler = async (e) => {
+                e.stopPropagation();
+                
+                // Check if click was on engagement metrics area
+                const engagementArea = e.target.closest('.x-feed-engagement');
+                const isEngagementClick = !!engagementArea;
+                
+                const account = item.getAttribute('data-x-feed-account') || 'Unknown';
+                const content = item.getAttribute('data-x-feed-content') || '';
+                const date = item.getAttribute('data-x-feed-date') || '';
+                const url = item.getAttribute('data-x-feed-url') || '';
+                const isKeyAccount = item.getAttribute('data-x-feed-is-key-account') === 'true';
+                const engagementStr = item.getAttribute('data-x-feed-engagement') || '';
+                let engagement = null;
+                if (engagementStr) {
+                    try {
+                        engagement = JSON.parse(engagementStr.replace(/&quot;/g, '"'));
+                    } catch (e) {
+                        console.warn('[X Feed Click Handler] Failed to parse engagement:', e);
+                    }
+                }
+                
+                // Use engagement from full tweet object if available (more complete)
+                if (fullTweetObject && fullTweetObject.engagement) {
+                    engagement = fullTweetObject.engagement;
+                }
+                
+                if (!this.agentCommentaryEnabled) return;
+                
+                // If no engagement data, don't allow engagement clicks
+                if (isEngagementClick && !engagement) {
+                    console.warn('[X Feed Click Handler] Engagement click but no engagement data available');
+                    return;
+                }
+                
+                // Ensure agent window is open
+                const agentWindow = document.getElementById('aiAgentWindow');
+                if (agentWindow) {
+                    const isHidden = agentWindow.style.display === 'none' || 
+                                   !agentWindow.style.display || 
+                                   agentWindow.classList.contains('hidden');
+                    if (isHidden) {
+                        agentWindow.style.display = 'flex';
+                        agentWindow.classList.remove('hidden');
+                    }
+                }
+                
+                const chatHistory = this.getAgentChatHistory();
+                const isFirstInteraction = chatHistory.length === 0;
+                
+                let message = '';
+                let elementKey = '';
+                
+                if (isEngagementClick) {
+                    // Engagement-specific click - focus on discourse and engagement analysis
+                    elementKey = `x-feed-engagement:${account}:${idx}`;
+                    const { isRepeatClick: isConsecutiveRepeat, isReturningToTopic, message: baseMessage } = this.buildClickMessage(
+                        elementKey,
+                        'x-feed-engagement',
+                        `the engagement and discourse on ${account}'s post${date ? ` from ${date}` : ''}`,
+                        isFirstInteraction
+                    );
+                    
+                    // For engagement clicks, always ask about discourse and engagement
+                    if (isConsecutiveRepeat) {
+                        message = `Tell me more about the engagement and discourse on ${account}'s post. I want a deeper analysis of why this post is getting this level of engagement, what the discourse patterns suggest, and what the engagement metrics reveal about the post's impact and reception.`;
+                    } else {
+                        message = `Tell me about the engagement and discourse on ${account}'s post. Analyze what the engagement metrics (likes, retweets, replies, quotes) suggest about how people are responding to this post, what kind of discourse it's generating, and why it's getting this level of engagement.`;
+                    }
+                } else {
+                    // Regular post click
+                    elementKey = `x-feed:${account}:${idx}`;
+                    const { isRepeatClick: isConsecutiveRepeat, isReturningToTopic, message: baseMessage } = this.buildClickMessage(
+                        elementKey,
+                        'x-feed',
+                        `${account}'s post${date ? ` from ${date}` : ''}`,
+                        isFirstInteraction
+                    );
+                    message = baseMessage;
+                }
+                
+                // Get conversation context
+                const tweetId = item.getAttribute('data-x-feed-tweet-id') || '';
+                const conversationId = item.getAttribute('data-x-feed-conversation-id') || '';
+                const isReply = item.getAttribute('data-x-feed-is-reply') === 'true';
+                const isRetweet = item.getAttribute('data-x-feed-is-retweet') === 'true';
+                const isQuote = item.getAttribute('data-x-feed-is-quote') === 'true';
+                
+                const rootTweetStr = item.getAttribute('data-x-feed-root-tweet') || '';
+                const originalTweetStr = item.getAttribute('data-x-feed-original-tweet') || '';
+                const quotedTweetStr = item.getAttribute('data-x-feed-quoted-tweet') || '';
+                
+                let rootTweet = null;
+                let originalTweet = null;
+                let quotedTweet = null;
+                
+                if (rootTweetStr) {
+                    try {
+                        rootTweet = JSON.parse(rootTweetStr.replace(/&quot;/g, '"'));
+                    } catch (e) {
+                        console.warn('[X Feed Click Handler] Failed to parse root tweet:', e);
+                    }
+                }
+                
+                if (originalTweetStr) {
+                    try {
+                        originalTweet = JSON.parse(originalTweetStr.replace(/&quot;/g, '"'));
+                    } catch (e) {
+                        console.warn('[X Feed Click Handler] Failed to parse original tweet:', e);
+                    }
+                }
+                
+                if (quotedTweetStr) {
+                    try {
+                        quotedTweet = JSON.parse(quotedTweetStr.replace(/&quot;/g, '"'));
+                    } catch (e) {
+                        console.warn('[X Feed Click Handler] Failed to parse quoted tweet:', e);
+                    }
+                }
+                
+                // Get conversation thread from data attribute (already fetched by backend)
+                let conversationThread = [];
+                const conversationThreadStr = item.getAttribute('data-x-feed-conversation-thread') || '';
+                if (conversationThreadStr) {
+                    try {
+                        conversationThread = JSON.parse(conversationThreadStr.replace(/&quot;/g, '"'));
+                        console.log(`[X Feed Click Handler] ✅ Conversation thread loaded: ${conversationThread.length} tweets`);
+                        console.log(`[X Feed Click Handler] Thread accounts:`, conversationThread.map(t => t.account || t.accountName));
+                        console.log(`[X Feed Click Handler] Thread tweet IDs:`, conversationThread.map(t => t.tweetId || t.id));
+                        console.log(`[X Feed Click Handler] Thread with referencedTweets:`, conversationThread.filter(t => (t.referencedTweets || []).length > 0).length);
+                    } catch (e) {
+                        console.warn('[X Feed Click Handler] Failed to parse conversation thread:', e);
+                    }
+                } else {
+                    console.warn(`[X Feed Click Handler] ⚠️ No conversation thread data attribute found for ${account}'s tweet`);
+                    console.warn(`[X Feed Click Handler] Available data attributes:`, Array.from(item.attributes).map(a => a.name).filter(n => n.includes('conversation') || n.includes('thread')));
+                }
+                
+                // Use conversation thread as replies if available
+                let replies = conversationThread.length > 0 ? conversationThread : [];
+                
+                // Build discourse graph if we have conversation thread
+                let discourseGraph = null;
+                let accountDiscourseAnalysis = null;
+                if (conversationThread.length > 0) {
+                    try {
+                        // Check if DiscourseGraphBuilder is available (may not be loaded yet)
+                        if (typeof DiscourseGraphBuilder === 'undefined') {
+                            console.error('[X Feed Click Handler] ❌ DiscourseGraphBuilder not loaded! Check script tag order in index.html');
+                            console.error('[X Feed Click Handler] Available globals:', Object.keys(window).filter(k => k.includes('Graph') || k.includes('Discourse')));
+                        } else {
+                            console.log(`[X Feed Click Handler] ✅ DiscourseGraphBuilder available, building graph for account: ${account}`);
+                            console.log(`[X Feed Click Handler] Conversation thread length: ${conversationThread.length}`);
+                            console.log(`[X Feed Click Handler] Conversation thread accounts:`, conversationThread.map(t => t.account || t.accountName));
+                            
+                            const graphBuilder = new DiscourseGraphBuilder();
+                            discourseGraph = graphBuilder.buildGraph(conversationThread, conversationId, tweetId || conversationId);
+                            
+                            if (discourseGraph) {
+                                console.log(`[X Feed Click Handler] ✅ Graph built: ${Object.keys(discourseGraph.nodes || {}).length} nodes, ${Object.keys(discourseGraph.edges || {}).length} edges`);
+                                console.log(`[X Feed Click Handler] Graph participants:`, Array.from(discourseGraph.participants || []));
+                                
+                                accountDiscourseAnalysis = graphBuilder.analyzeAccountCommentary(account);
+                                
+                                if (accountDiscourseAnalysis) {
+                                    console.log(`[X Feed Click Handler] ✅ Account analysis for ${account}:`, {
+                                        isSkeptical: accountDiscourseAnalysis.isSkeptical,
+                                        skepticalTweetCount: accountDiscourseAnalysis.skepticalTweetCount,
+                                        primaryRole: accountDiscourseAnalysis.primaryDiscourseRole,
+                                        roles: accountDiscourseAnalysis.roles,
+                                        tweetCount: accountDiscourseAnalysis.tweetCount
+                                    });
+                                } else {
+                                    console.warn(`[X Feed Click Handler] ⚠️ No account analysis found for ${account}. Available accounts in graph:`, Array.from(discourseGraph.participants || []));
+                                }
+                            } else {
+                                console.warn(`[X Feed Click Handler] ❌ Failed to build discourse graph for ${account}`);
+                                console.warn(`[X Feed Click Handler] Conversation thread:`, conversationThread);
+                            }
+                        }
+                    } catch (e) {
+                        console.warn('[X Feed Click Handler] Failed to build discourse graph:', e);
+                    }
+                }
+                
+                // Build background context
+                const backgroundContext = [];
+                
+                // ⚠️ CRITICAL: Check for skepticism FIRST and put warning at TOP
+                let isSkeptical = false;
+                let primaryRole = 'responder';
+                let isChallenger = false;
+                if (accountDiscourseAnalysis) {
+                    isSkeptical = accountDiscourseAnalysis.isSkeptical || accountDiscourseAnalysis.skepticalTweetCount > 0;
+                    primaryRole = accountDiscourseAnalysis.primaryDiscourseRole || 'responder';
+                    isChallenger = primaryRole === 'challenger' || accountDiscourseAnalysis.roles?.challenger > 0;
+                }
+                
+                // ⚠️ PUT SKEPTICISM WARNING AT THE VERY TOP - BEFORE ANYTHING ELSE
+                if (isSkeptical || isChallenger) {
+                    backgroundContext.push(`🚨🚨🚨 CRITICAL WARNING - READ THIS FIRST 🚨🚨🚨`);
+                    backgroundContext.push(`${account.toUpperCase()} IS SKEPTICAL AND CHALLENGING, NOT AMPLIFYING OR ENDORSING!`);
+                    backgroundContext.push(`Their discourse role is ${primaryRole} with ${accountDiscourseAnalysis?.skepticalTweetCount || 0} skeptical tweets.`);
+                    backgroundContext.push(`DO NOT analyze this as positive amplification. DO NOT focus on what they retweeted.`);
+                    backgroundContext.push(`FOCUS ON: What ${account} is QUESTIONING, CHALLENGING, or CAUTIONING about.`);
+                    backgroundContext.push(`IGNORE: The retweeted content - that's just context. Their COMMENTS reveal their actual skeptical perspective.`);
+                    backgroundContext.push(`ANALYSIS REQUIRED: Analyze ${account}'s skeptical commentary, not the retweeted announcement.`);
+                }
+                
+                // CRITICAL: Include the FULL tweet object so Ada can analyze all properties
+                if (fullTweetObject) {
+                    backgroundContext.push(`FULL TWEET OBJECT (analyze all properties): ${JSON.stringify(fullTweetObject, null, 2)}`);
+                    backgroundContext.push(`CRITICAL: Analyze this tweet by examining the COMPLETE tweet object above. Consider all properties: content, engagement metrics, conversation context, timestamps, account information, retweet/quote/reply relationships, and conversation thread participation.`);
+                }
+                
+                // CRITICAL: Include discourse graph for structural analysis
+                if (discourseGraph) {
+                    // Convert Set to Array for JSON serialization
+                    const participantsArray = discourseGraph.participants instanceof Set 
+                        ? Array.from(discourseGraph.participants) 
+                        : (discourseGraph.participants || []);
+                    
+                    // Build graph summary
+                    const graphSummary = {
+                        conversationId: discourseGraph.conversationId,
+                        rootTweetId: discourseGraph.rootTweetId,
+                        participantCount: participantsArray.length,
+                        participants: participantsArray,
+                        tweetCount: Object.keys(discourseGraph.nodes || {}).length,
+                        edgeCount: Object.keys(discourseGraph.edges || {}).length,
+                        keyNodes: discourseGraph.patterns?.keyNodes?.slice(0, 5) || [],
+                        threadCount: discourseGraph.patterns?.threads?.length || 0
+                    };
+                    
+                    // Serialize full graph properly (convert Set to Array)
+                    const serializableGraph = {
+                        ...discourseGraph,
+                        participants: participantsArray,
+                        nodes: discourseGraph.nodes || {},
+                        edges: discourseGraph.edges || {},
+                        patterns: discourseGraph.patterns || {}
+                    };
+                    
+                    backgroundContext.push(`DISCOURSE GRAPH STRUCTURE: ${JSON.stringify(graphSummary, null, 2)}`);
+                    backgroundContext.push(`FULL DISCOURSE GRAPH (nodes, edges, patterns): ${JSON.stringify(serializableGraph, null, 2)}`);
+                    backgroundContext.push(`CRITICAL DISCOURSE ANALYSIS INSTRUCTIONS: Analyze this conversation as a discourse graph. Consider:`);
+                    backgroundContext.push(`1. NODE PROPERTIES: Each tweet is a node with properties (content, engagement, centrality, discourse role, depth). Centrality > 0.5 = central/highly connected, < 0.3 = peripheral.`);
+                    backgroundContext.push(`2. EDGE RELATIONSHIPS: Edges represent relationships (reply, retweet, quote) between tweets. Follow edges to understand conversation flow and who responds to whom.`);
+                    backgroundContext.push(`3. GRAPH METRICS: Centrality indicates importance/connectedness in conversation. Depth indicates position in conversation tree (0 = root, higher = deeper in thread).`);
+                    backgroundContext.push(`4. DISCOURSE ROLES: initiator (starts conversation), responder (replies without extending), amplifier (retweets/shares), elaborator (extends discussion with replies), challenger (quotes often to disagree)`);
+                    backgroundContext.push(`5. PATTERNS: Key nodes (high centrality/engagement) are conversation hubs. Threads show conversation branches. Clusters show topic groups.`);
+                    backgroundContext.push(`6. ACCOUNT ANALYSIS: Use account discourse analysis to understand ${account}'s role and position. High centrality = central to conversation. High engagement = high impact. Discourse role shows participation pattern.`);
+                    backgroundContext.push(`7. DISCOURSE FLOW: Analyze tweets chronologically to understand how ${account}'s perspective evolves. Early tweets may set context, later tweets may elaborate or respond.`);
+                    backgroundContext.push(`8. RELATIONSHIP CONTEXT: When ${account} replies/retweets/quotes, analyze what they're responding to and why. The edge relationships show conversation structure.`);
+                }
+                
+                // Include account discourse analysis if available
+                if (accountDiscourseAnalysis) {
+                    // Put account's ACTUAL commentary FIRST (before retweeted content)
+                    backgroundContext.push(`${account.toUpperCase()}'S ACTUAL COMMENTARY (THIS IS THE PRIMARY FOCUS):`);
+                    
+                    // Show their tweets with skepticism analysis and graph relationships
+                    accountDiscourseAnalysis.tweets.forEach((tweet, idx) => {
+                        const skepticismNote = tweet.skepticism?.isSkeptical 
+                            ? ` [SKEPTICAL - confidence: ${tweet.skepticism.confidence.toFixed(2)}]` 
+                            : '';
+                        
+                        // Show graph relationships (what this tweet replies to/retweets)
+                        const relationships = [];
+                        if (tweet.repliesTo && tweet.repliesTo.length > 0) {
+                            relationships.push(`replies to: ${tweet.repliesTo.join(', ')}`);
+                        }
+                        if (tweet.retweets && tweet.retweets.length > 0) {
+                            relationships.push(`retweets: ${tweet.retweets.join(', ')}`);
+                        }
+                        if (tweet.quotes && tweet.quotes.length > 0) {
+                            relationships.push(`quotes: ${tweet.quotes.join(', ')}`);
+                        }
+                        const relationshipStr = relationships.length > 0 ? ` [${relationships.join('; ')}]` : '';
+                        
+                        backgroundContext.push(`Tweet ${idx + 1} [${tweet.discourseRole}${skepticismNote}${relationshipStr}]: "${tweet.content}"`);
+                        backgroundContext.push(`  - Centrality: ${tweet.centrality.toFixed(2)} (${tweet.centrality > 0.5 ? 'CENTRAL' : tweet.centrality > 0.3 ? 'MODERATE' : 'PERIPHERAL'}), Depth: ${tweet.depth}, Engagement: ${tweet.engagement.total}`);
+                        if (tweet.skepticism?.isSkeptical) {
+                            backgroundContext.push(`  → Skeptical indicators: ${tweet.skepticism.hasConditional ? 'CONDITIONAL LANGUAGE' : ''} ${tweet.skepticism.hasContradiction ? 'CONTRADICTION/CHALLENGE' : ''}`);
+                        }
+                    });
+                    
+                    // Graph structure summary
+                    if (discourseGraph) {
+                        backgroundContext.push(`\nGRAPH STRUCTURE ANALYSIS:`);
+                        backgroundContext.push(`- Total nodes: ${Object.keys(discourseGraph.nodes || {}).length} tweets`);
+                        backgroundContext.push(`- Total edges: ${Object.keys(discourseGraph.edges || {}).length} relationships`);
+                        backgroundContext.push(`- ${account}'s centrality: ${accountDiscourseAnalysis.avgCentrality.toFixed(2)} (${accountDiscourseAnalysis.avgCentrality > 0.5 ? 'CENTRAL - their skepticism drives the conversation' : 'PERIPHERAL'})`);
+                        backgroundContext.push(`- ${account}'s role breakdown: ${JSON.stringify(accountDiscourseAnalysis.roles)}`);
+                        backgroundContext.push(`- Primary role: ${primaryRole} (${accountDiscourseAnalysis.roles.challenger > 0 ? `${accountDiscourseAnalysis.roles.challenger} challenger tweets` : ''} vs ${accountDiscourseAnalysis.roles.amplifier > 0 ? `${accountDiscourseAnalysis.roles.amplifier} amplifier tweet` : '0 amplifier tweets'})`);
+                    }
+                    
+                    backgroundContext.push(`\n${account.toUpperCase()}'S DISCOURSE ANALYSIS (from graph structure): ${JSON.stringify(accountDiscourseAnalysis, null, 2)}`);
+                    
+                    // Graph-based interpretation guide
+                    if (isSkeptical || isChallenger) {
+                        backgroundContext.push(`\n🚨 GRAPH-BASED INTERPRETATION GUIDE:`);
+                        backgroundContext.push(`${account} is ${primaryRole.toUpperCase()} with ${accountDiscourseAnalysis.skepticalTweetCount} skeptical tweets. Graph analysis reveals:`);
+                        backgroundContext.push(`1. CENTRALITY (${accountDiscourseAnalysis.avgCentrality.toFixed(2)}): ${account} is ${accountDiscourseAnalysis.avgCentrality > 0.5 ? 'CENTRAL to the conversation - their skepticism drives the discourse' : 'peripheral'}`);
+                        backgroundContext.push(`2. ROLE DOMINANCE: CHALLENGER (${accountDiscourseAnalysis.roles.challenger}) vs AMPLIFIER (${accountDiscourseAnalysis.roles.amplifier}) = SKEPTICISM is primary`);
+                        backgroundContext.push(`3. DISCOURSE FLOW: ${accountDiscourseAnalysis.discourseFlow.map((t, i) => `${i+1}. ${t.role} at ${t.timestamp.substring(11,16)}`).join(' → ')}`);
+                        backgroundContext.push(`4. EDGE TYPES: Reply edges show CHALLENGE, retweet edge shows SHARING (not endorsement)`);
+                        backgroundContext.push(`5. SKEPTICAL LANGUAGE: ${accountDiscourseAnalysis.tweets.filter(t => t.skepticism?.isSkeptical).map(t => `${t.skepticism.hasConditional ? 'conditional' : ''} ${t.skepticism.hasContradiction ? 'contradiction' : ''}`).filter(Boolean).join(', ')}`);
+                        backgroundContext.push(`\nINTERPRETATION: ${account} is QUESTIONING/CHALLENGING claims, not endorsing them. The graph structure (${accountDiscourseAnalysis.roles.challenger} challenger tweets, centrality ${accountDiscourseAnalysis.avgCentrality.toFixed(2)}) confirms SKEPTICAL intent. Analyze what they're skeptical about, not what they're amplifying.`);
+                    }
+                    
+                    backgroundContext.push(`DISCOURSE FLOW: ${account}'s tweets in chronological order: ${JSON.stringify(accountDiscourseAnalysis.discourseFlow, null, 2)}`);
+                    backgroundContext.push(`ANALYSIS PRIORITY: Use the graph structure above. If ${account} is a CHALLENGER (${accountDiscourseAnalysis.roles.challenger} tweets), analyze what they're questioning/challenging. If they're SKEPTICAL (${accountDiscourseAnalysis.skepticalTweetCount} tweets), analyze their concerns/cautions. If they retweet AFTER skeptical comments, the retweet is for DISCUSSION, not ENDORSEMENT.`);
+                }
+                
+                backgroundContext.push(`X Post from: ${account}`);
+                if (date) backgroundContext.push(`Date: ${date}`);
+                if (content) backgroundContext.push(`Post Content: ${content.substring(0, 500)}`);
+                if (url) backgroundContext.push(`URL: ${url}`);
+                if (isKeyAccount) backgroundContext.push(`Key Account: Yes`);
+                
+                // Normalize account name for comparison (remove @ if present)
+                const normalizedAccount = account.replace(/^@/, '').toLowerCase();
+                
+                // Identify tweets from the clicked account in the conversation thread
+                const accountTweets = conversationThread.filter(tweet => {
+                    const tweetAccount = (tweet.account || tweet.accountName || '').replace(/^@/, '').toLowerCase();
+                    return tweetAccount === normalizedAccount;
+                });
+                
+                // Add conversation context - CRITICAL: For retweets, prioritize the retweeter's commentary
+                if (isRetweet && originalTweet) {
+                    if (accountTweets.length > 0) {
+                        // CRITICAL: This is a retweet, but the retweeter has commentary - focus on THAT
+                        // Put account's commentary FIRST, retweeted content SECOND
+                        backgroundContext.push(`\n🚨 CRITICAL CONTEXT: This is a RETWEET by ${account}, BUT ${account} has ${accountTweets.length} COMMENT(S) in this thread.`);
+                        backgroundContext.push(`ANALYSIS ORDER: 1) Analyze ${account}'s ACTUAL commentary (shown above), 2) The retweeted content is just context.`);
+                        backgroundContext.push(`RETWEETED CONTENT (for context only): ${account} retweeted a post by ${originalTweet.author} that reads: "${originalTweet.text.substring(0, 300)}".`);
+                        backgroundContext.push(`BUT REMEMBER: ${account}'s ACTUAL COMMENTARY (shown above) reveals their real perspective. The retweet is context, their comments are the analysis target.`);
+                        
+                        // If skeptical, emphasize even more
+                        if (isSkeptical || isChallenger) {
+                            backgroundContext.push(`\n⚠️ SKEPTICISM ALERT: ${account} retweeted BUT their comments are SKEPTICAL. This means they're sharing for DISCUSSION/ANALYSIS, not ENDORSEMENT.`);
+                            backgroundContext.push(`Their skeptical comments (shown above) reveal they're CHALLENGING the retweeted claims, not amplifying them.`);
+                        }
+                    } else {
+                        backgroundContext.push(`CRITICAL: This is a RETWEET by ${account}. The ORIGINAL tweet was posted by ${originalTweet.author} and reads: "${originalTweet.text.substring(0, 400)}" (Original tweet URL: ${originalTweet.url}). ${account} has not commented in this thread - this is a pure retweet without commentary.`);
+                    }
+                } else if (isQuote && quotedTweet) {
+                    backgroundContext.push(`CRITICAL: This is a QUOTE TWEET. The quoted tweet was originally posted by ${quotedTweet.author} and reads: "${quotedTweet.text.substring(0, 400)}" (Quoted tweet URL: ${quotedTweet.url}).`);
+                } else if (isReply && rootTweet) {
+                    backgroundContext.push(`CRITICAL: This is a REPLY. The original tweet this is replying to was posted by @${rootTweet.author} and reads: "${rootTweet.text.substring(0, 300)}" (Root tweet URL: ${rootTweet.url}).`);
+                }
+                
+                // Add FULL conversation thread - CRITICAL: Include entire conversation chain, prioritize account's tweets
+                if (conversationThread.length > 0) {
+                    // Separate tweets from the clicked account vs others
+                    const otherTweets = conversationThread.filter(tweet => {
+                        const tweetAccount = (tweet.account || tweet.accountName || '').replace(/^@/, '').toLowerCase();
+                        return tweetAccount !== normalizedAccount;
+                    });
+                    
+                    // Build conversation chain, highlighting account's tweets
+                    const conversationChain = conversationThread.map((tweet, idx) => {
+                        const tweetEngagement = (tweet.engagement?.likes || 0) + (tweet.engagement?.retweets || 0) + (tweet.engagement?.replies || 0);
+                        const engagementStr = tweetEngagement > 0 ? ` [${tweetEngagement} engagement]` : '';
+                        const isReplyInThread = tweet.isReply || false;
+                        const tweetAccount = (tweet.account || tweet.accountName || '').replace(/^@/, '').toLowerCase();
+                        const isFromClickedAccount = tweetAccount === normalizedAccount;
+                        const accountIndicator = isFromClickedAccount ? '⭐ ' : '';
+                        const replyIndicator = isReplyInThread ? '↳ REPLY: ' : '';
+                        return `${idx + 1}. ${accountIndicator}${replyIndicator}@${tweet.account || tweet.accountName || 'Unknown'}: "${tweet.content.substring(0, 300)}"${engagementStr}`;
+                    }).join('\n');
+                    
+                    backgroundContext.push(`FULL CONVERSATION THREAD (${conversationThread.length} tweets in chronological order, ⭐ = tweets from ${account}):\n${conversationChain}`);
+                    
+                    if (accountTweets.length > 0) {
+                        // Include full tweet objects for account's tweets
+                        const accountTweetsFull = accountTweets.map(tweet => {
+                            return {
+                                account: tweet.account || tweet.accountName,
+                                content: tweet.content,
+                                date: tweet.date,
+                                timestamp: tweet.timestamp,
+                                engagement: tweet.engagement,
+                                url: tweet.url,
+                                tweetId: tweet.tweetId,
+                                isReply: tweet.isReply,
+                                conversationId: tweet.conversationId
+                            };
+                        });
+                        
+                        backgroundContext.push(`CRITICAL ANALYSIS INSTRUCTIONS: ${account} has ${accountTweets.length} tweet(s) in this conversation thread (marked with ⭐). These tweets contain ${account}'s ACTUAL commentary and analysis. Focus your analysis on what ${account} is SAYING in their tweets by examining the FULL tweet objects above. Analyze all properties: content, engagement metrics, timing, context, and how their tweets relate to the conversation. ${account}'s commentary reveals their perspective, insights, and meaning.`);
+                        backgroundContext.push(`${account.toUpperCase()}'S FULL TWEET OBJECTS FOR ANALYSIS: ${JSON.stringify(accountTweetsFull, null, 2)}`);
+                    } else {
+                        backgroundContext.push(`CRITICAL: Analyze the ENTIRE conversation chain, not just the surface-level post. Consider how the conversation evolved, what themes emerged, and how participants responded to each other.`);
+                    }
+                } else if (replies.length > 0) {
+                    // Fallback: If no conversation thread but we have replies, use old method
+                    const sortedReplies = replies.sort((a, b) => {
+                        const aEngagement = (a.engagement?.likes || 0) + (a.engagement?.retweets || 0) + (a.engagement?.replies || 0);
+                        const bEngagement = (b.engagement?.likes || 0) + (b.engagement?.retweets || 0) + (b.engagement?.replies || 0);
+                        return bEngagement - aEngagement;
+                    });
+                    
+                    const topReplies = sortedReplies.slice(0, 5).map(reply => {
+                        const replyEngagement = (reply.engagement?.likes || 0) + (reply.engagement?.retweets || 0) + (reply.engagement?.replies || 0);
+                        const engagementStr = replyEngagement > 0 ? ` (${replyEngagement} engagement)` : '';
+                        return `@${reply.account || reply.author}: "${reply.content.substring(0, 200)}"${engagementStr}`;
+                    }).join(' | ');
+                    
+                    if (isRetweet && originalTweet) {
+                        backgroundContext.push(`IMPORTANT COMMENTS/REPLIES to the ORIGINAL tweet by ${originalTweet.author} (${replies.length} total comments, showing top 5 most engaged): ${topReplies}`);
+                    } else {
+                        backgroundContext.push(`IMPORTANT COMMENTS/REPLIES to this post (${replies.length} total comments, showing top 5 most engaged): ${topReplies}`);
+                    }
+                } else if (conversationId && !isReply && !isRetweet && !isQuote) {
+                    backgroundContext.push(`This is a root post (conversation ID: ${conversationId})`);
+                }
+                if (engagement) {
+                    const engagementParts = [];
+                    if (engagement.likes > 0) engagementParts.push(`${engagement.likes} likes`);
+                    if (engagement.retweets > 0) engagementParts.push(`${engagement.retweets} retweets`);
+                    if (engagement.replies > 0) engagementParts.push(`${engagement.replies} replies`);
+                    if (engagement.quotes > 0) engagementParts.push(`${engagement.quotes} quotes`);
+                    if (engagementParts.length > 0) {
+                        const totalEngagement = (engagement.likes || 0) + (engagement.retweets || 0) + (engagement.replies || 0) + (engagement.quotes || 0);
+                        // For engagement clicks, emphasize engagement metrics more prominently
+                        if (isEngagementClick) {
+                            backgroundContext.push(`ENGAGEMENT METRICS (FOCUS OF ANALYSIS): ${engagementParts.join(', ')} (Total: ${totalEngagement})`);
+                            // Add engagement ratios for analysis
+                            const replyRatio = engagement.replies > 0 ? ((engagement.replies / totalEngagement) * 100).toFixed(1) : 0;
+                            const retweetRatio = engagement.retweets > 0 ? ((engagement.retweets / totalEngagement) * 100).toFixed(1) : 0;
+                            const quoteRatio = engagement.quotes > 0 ? ((engagement.quotes / totalEngagement) * 100).toFixed(1) : 0;
+                            backgroundContext.push(`Engagement Ratios: ${replyRatio}% replies, ${retweetRatio}% retweets, ${quoteRatio}% quotes`);
+                        } else {
+                            backgroundContext.push(`Engagement: ${engagementParts.join(', ')} (Total: ${totalEngagement})`);
+                        }
+                    }
+                }
+                
+                // Add conversation history
+                const recentConversation = chatHistory.slice(-5).map(msg => 
+                    `${msg.role === 'user' ? 'User' : 'Assistant'}: ${msg.content}`
+                ).join('\n');
+                if (recentConversation) {
+                    backgroundContext.push(`Recent conversation: ${recentConversation}`);
+                }
+                
+                // Add navigation context
+                const navHistory = this.navigationHistory.slice(-5).map(entry => 
+                    `${entry.view}${entry.tab ? ` > ${entry.tab}` : ''}${entry.subTab ? ` > ${entry.subTab}` : ''}`
+                ).join(' → ');
+                if (navHistory) {
+                    backgroundContext.push(`Navigation history: ${navHistory}`);
+                }
+                
+                // ⚠️ CRITICAL: If skeptical, COMPLETELY REPLACE the message to focus on skepticism
+                if (isSkeptical || isChallenger) {
+                    // Get Tim's actual skeptical tweets
+                    const skepticalTweets = accountDiscourseAnalysis?.tweets?.filter(t => t.skepticism?.isSkeptical) || [];
+                    const skepticalContent = skepticalTweets.map(t => `"${t.content}"`).join(' | ');
+                    
+                    message = `${account} is being SKEPTICAL and CHALLENGING, not amplifying or endorsing. Their skeptical commentary: ${skepticalContent}. Analyze what ${account} is QUESTIONING, CHALLENGING, or CAUTIONING about. Do NOT focus on what they retweeted - focus on their skeptical comments. What concerns or questions is ${account} raising? What is ${account} challenging about the claims?`;
+                }
+                
+                // Append background context - CRITICAL: Put skepticism warnings FIRST
+                if (backgroundContext.length > 0) {
+                    // Separate critical warnings from other context
+                    const criticalWarnings = backgroundContext.filter(ctx => 
+                        ctx.includes('🚨') || ctx.includes('CRITICAL WARNING') || 
+                        ctx.includes('SKEPTICAL') || ctx.includes('CHALLENGING') ||
+                        ctx.includes('ACTUAL COMMENTARY') || ctx.includes('ANALYSIS ORDER')
+                    );
+                    const otherContext = backgroundContext.filter(ctx => 
+                        !ctx.includes('🚨') && !ctx.includes('CRITICAL WARNING') && 
+                        !ctx.includes('SKEPTICAL') && !ctx.includes('CHALLENGING') &&
+                        !ctx.includes('ACTUAL COMMENTARY') && !ctx.includes('ANALYSIS ORDER')
+                    );
+                    
+                    // Put critical warnings FIRST, then other context
+                    const orderedContext = [...criticalWarnings, ...otherContext];
+                    
+                    message += `\n\n[Background context for reference: ${orderedContext.join('; ')}]`;
+                }
+                
+                // Handle voice interruption if needed
+                if (this.agentVoiceOutputEnabled && this.isSpeaking && this.currentSpeakingStock) {
+                    if (this.agentCommunicationSystem && this.agentCommunicationSystem.interruption) {
+                        await this.agentCommunicationSystem.interruption.interruptMidSentence();
+                    } else {
+                        this.stopVoiceAudio();
+                        await new Promise(resolve => setTimeout(resolve, 500));
+                        this.stopVoiceAudio();
+                        await new Promise(resolve => setTimeout(resolve, 200));
+                    }
+                }
+                
+                // Use enhanced endpoint
+                await this.sendAgentMessageSilent(message, {
+                    itemType: 'x-feed',
+                    account: account,
+                    content: content,
+                    date: date,
+                    url: url,
+                    isKeyAccount: isKeyAccount
+                });
+            };
+            
+            item._xFeedClickHandler = clickHandler;
+            item.addEventListener('click', clickHandler);
+        });
+    }
+    
+    /**
+     * Attach click handlers to news articles
+     */
+    attachNewsClickHandlers(tileElement, tile, insightData) {
+        if (!tileElement || !insightData?.news) return;
+        
+        const newsItems = tileElement.querySelectorAll('.news-item');
+        if (!newsItems || newsItems.length === 0) {
+            console.warn('[News Click Handler] No news items found in tile:', tile.id);
+            return;
+        }
+        
+        console.log(`[News Click Handler] Attaching handlers to ${newsItems.length} news items`);
+        
+        newsItems.forEach((item, idx) => {
+            // Remove existing handler if any
+            const existingHandler = item._newsClickHandler;
+            if (existingHandler) {
+                item.removeEventListener('click', existingHandler);
+            }
+            
+            const clickHandler = async (e) => {
+                e.stopPropagation();
+                
+                const title = item.getAttribute('data-news-title') || 'News article';
+                const summary = item.getAttribute('data-news-summary') || '';
+                const date = item.getAttribute('data-news-date') || '';
+                const url = item.getAttribute('data-news-url') || '';
+                const source = item.getAttribute('data-news-source') || '';
+                
+                if (!this.agentCommentaryEnabled) return;
+                
+                // Ensure agent window is open
+                const agentWindow = document.getElementById('aiAgentWindow');
+                if (agentWindow) {
+                    const isHidden = agentWindow.style.display === 'none' || 
+                                   !agentWindow.style.display || 
+                                   agentWindow.classList.contains('hidden');
+                    if (isHidden) {
+                        agentWindow.style.display = 'flex';
+                        agentWindow.classList.remove('hidden');
+                    }
+                }
+                
+                const chatHistory = this.getAgentChatHistory();
+                const isFirstInteraction = chatHistory.length === 0;
+                
+                // Detect repeat clicks
+                const elementKey = `news:${title}:${idx}`;
+                const { isRepeatClick: isConsecutiveRepeat, isReturningToTopic, message: baseMessage } = this.buildClickMessage(
+                    elementKey,
+                    'news',
+                    `"${title}"${date ? ` from ${date}` : ''}`,
+                    isFirstInteraction
+                );
+                
+                let message = baseMessage;
+                
+                // Build background context
+                const backgroundContext = [];
+                backgroundContext.push(`News Article: ${title}`);
+                if (source) backgroundContext.push(`Source: ${source}`);
+                if (date) backgroundContext.push(`Date: ${date}`);
+                if (summary) backgroundContext.push(`Summary: ${summary.substring(0, 500)}`);
+                if (url) backgroundContext.push(`URL: ${url}`);
+                
+                // Add conversation history
+                const recentConversation = chatHistory.slice(-5).map(msg => 
+                    `${msg.role === 'user' ? 'User' : 'Assistant'}: ${msg.content}`
+                ).join('\n');
+                if (recentConversation) {
+                    backgroundContext.push(`Recent conversation: ${recentConversation}`);
+                }
+                
+                // Add navigation context
+                const navHistory = this.navigationHistory.slice(-5).map(entry => 
+                    `${entry.view}${entry.tab ? ` > ${entry.tab}` : ''}${entry.subTab ? ` > ${entry.subTab}` : ''}`
+                ).join(' → ');
+                if (navHistory) {
+                    backgroundContext.push(`Navigation history: ${navHistory}`);
+                }
+                
+                // Append background context
+                if (backgroundContext.length > 0) {
+                    message += `\n\n[Background context for reference: ${backgroundContext.join('; ')}]`;
+                }
+                
+                // Handle voice interruption if needed
+                if (this.agentVoiceOutputEnabled && this.isSpeaking && this.currentSpeakingStock) {
+                    if (this.agentCommunicationSystem && this.agentCommunicationSystem.interruption) {
+                        await this.agentCommunicationSystem.interruption.interruptMidSentence();
+                    } else {
+                        this.stopVoiceAudio();
+                        await new Promise(resolve => setTimeout(resolve, 500));
+                        this.stopVoiceAudio();
+                        await new Promise(resolve => setTimeout(resolve, 200));
+                    }
+                }
+                
+                // Use enhanced endpoint
+                await this.sendAgentMessageSilent(message, {
+                    itemType: 'news',
+                    title: title,
+                    source: source,
+                    date: date,
+                    url: url,
+                    summary: summary
+                });
+            };
+            
+            item._newsClickHandler = clickHandler;
+            item.addEventListener('click', clickHandler);
+        });
+    }
+    
     attachTileClickHandler(tileElement, tile, insightData) {
         if (!tileElement || !tile) return;
         
@@ -18200,200 +21429,110 @@ class ValuationApp {
             }
         }
         
-        // Show loading spinner
-        const loadingId = this.addAgentLoadingMessage();
-        
         try {
-            // Get current context
-            const currentContext = {
-                view: this.currentView,
-                tab: this.getCurrentTabInfo().tab,
-                subTab: this.getCurrentTabInfo().subTab,
-                modelName: this.currentModelName,
-                data: this.currentData
-            };
-            
-            // Debug: Log what data we're receiving
-            console.log('[Tile Commentary] Tile:', tile.id, 'Has news:', !!insightData?.news, 'Has XFeeds:', !!insightData?.xFeeds);
-            if (insightData?.news) {
-                console.log('[Tile Commentary] News items:', insightData.news.map(n => ({ title: n.title, date: n.date, url: n.url })));
-            }
-            if (insightData?.xFeeds) {
-                console.log('[Tile Commentary] X Feeds:', insightData.xFeeds.map(x => ({ account: x.account, date: x.date, url: x.url })));
-            }
-            
             // Determine tile content type
             const tileContentType = determineTileContentType(tile, insightData);
             const isImageCommentsTile = tileContentType === TILE_CONTENT_TYPES.IMAGE_COMMENTS;
             
-            // Build tile information
-            const tileInfo = {
-                id: tile.id,
-                title: tile.title,
-                value: tile.value,
-                subtitle: tile.subtitle || '',
-                color: tile.color,
-                size: tile.size,
-                insightType: tile.insightType,
-                contentType: tileContentType,
-                hasChart: insightData?.chart ? true : false,
-                hasImage: insightData?.image ? true : false,
-                hasImageComments: isImageCommentsTile,
-                hasNews: insightData?.news ? insightData.news.length : 0,
-                hasXFeeds: insightData?.xFeeds ? insightData.xFeeds.length : 0,
-                insightText: insightData?.insight || '',
-                chartData: insightData?.chart ? {
-                    type: insightData.chart.type,
-                    label: insightData.chart.label,
-                    dataPoints: insightData.chart.data?.length || 0,
-                    labels: insightData.chart.labels || []
-                } : null,
-                imageComments: insightData?.imageComments || null,
-                newsItems: insightData?.news || [],
-                xFeeds: insightData?.xFeeds || []
-            };
+            // Build natural message (like stock clicks)
+            const chatHistory = this.getAgentChatHistory();
+            const isFirstInteraction = chatHistory.length === 0;
             
-            // Build prompt for agent commentary
-            let prompt = `You are an AI assistant observing user interactions in a SpaceX valuation application.
-
-CURRENT CONTEXT:
-- View: ${currentContext.view}
-- Tab: ${currentContext.tab || 'N/A'}
-- Sub-Tab: ${currentContext.subTab || 'N/A'}
-- Model: ${currentContext.modelName || 'No model loaded'}
-${currentContext.data ? `
-CURRENT VALUATION:
-- Total: $${(currentContext.data.total?.value / 1000).toFixed(2)}T
-- Earth: $${(currentContext.data.earth?.adjustedValue / 1000).toFixed(2)}T
-- Mars: $${(currentContext.data.mars?.adjustedValue / 1000).toFixed(2)}T
-` : ''}
-
-TILE SELECTED:
-- Title: "${tileInfo.title}"
-- Value: ${tileInfo.value}
-${tileInfo.subtitle ? `- Subtitle: ${tileInfo.subtitle}` : ''}
-- Type: ${tileInfo.insightType}
-- Content Type: ${tileInfo.contentType}
-- Size: ${tileInfo.size}
-${tileInfo.hasChart ? `- Chart: ${tileInfo.chartData.type} chart with ${tileInfo.chartData.dataPoints} data points (${tileInfo.chartData.label})` : ''}
-${tileInfo.hasImage ? '- Contains image visualization' : ''}
-${tileInfo.hasImageComments ? '- This is an IMAGE-COMMENTS tile (image with model-focused commentary)' : ''}
-${tileInfo.hasNews > 0 ? `- Contains ${tileInfo.hasNews} news items` : ''}
-${tileInfo.hasXFeeds > 0 ? `- Contains ${tileInfo.hasXFeeds} X (Twitter) posts` : ''}
-${tileInfo.insightText ? `- Insight: ${tileInfo.insightText.substring(0, 300)}${tileInfo.insightText.length > 300 ? '...' : ''}` : ''}
-
-${tileInfo.hasImageComments && tileInfo.imageComments ? `
-IMAGE-COMMENTS TILE CONTENT:
-- Topic: "${tileInfo.imageComments.topic || 'Featured Insight'}"
-- Image URL: ${tileInfo.imageComments.image || 'N/A'}
-- Article URL: ${tileInfo.imageComments.articleUrl || 'N/A'}
-- Commentary: "${tileInfo.imageComments.commentary || ''}"
-
-This tile displays a relevant image related to SpaceX/Starlink topics along with model-focused commentary. The commentary provides insights about how the topic relates to the current valuation model. The image is sourced from a relevant news article but the commentary is entirely model-focused analysis.
-` : ''}
-
-${tileInfo.newsItems.length > 0 ? `
-NEWS ARTICLES IN THIS TILE:
-${tileInfo.newsItems.map((item, idx) => {
-    const date = item.date ? ` (${item.date})` : '';
-    const url = item.url || item.link || '';
-    const source = item.source || 'Unknown Source';
-    return `${idx + 1}. "${item.title}"${date} - ${source}${url ? ` [Read article|url:${url}]` : ''}`;
-}).join('\n')}
-` : ''}
-
-${tileInfo.xFeeds.length > 0 ? `
-X (TWITTER) POSTS IN THIS TILE:
-${tileInfo.xFeeds.map((feed, idx) => {
-    const account = feed.account || feed.accountName || 'Unknown';
-    const date = feed.date || feed.timestamp ? ` (${feed.date || feed.timestamp})` : '';
-    const url = feed.url || feed.link || (feed.account ? `https://twitter.com/${feed.account.replace('@', '')}` : '');
-    const content = feed.content ? feed.content.substring(0, 100) + (feed.content.length > 100 ? '...' : '') : '';
-    return `${idx + 1}. ${account}${date}: "${content}"${url ? ` [View tweet|url:${url}]` : ''}`;
-}).join('\n')}
-` : ''}
-
-TASK: Provide a brief, insightful comment (1-2 sentences max) about this tile that:
-1. Acknowledges what tile the user selected
-2. Highlights key insights or interesting aspects of the tile's content
-3. Provides context about what this metric/tile means for SpaceX valuation
-4. Be conversational and helpful
-${tileInfo.hasImageComments ? `
-5. IMPORTANT: This is an IMAGE-COMMENTS tile. The user clicked on a tile showing:
-   - An image related to: "${tileInfo.imageComments?.topic || 'Featured Insight'}"
-   - Model-focused commentary: "${tileInfo.imageComments?.commentary?.substring(0, 200) || ''}"
-   - Reference article: ${tileInfo.imageComments?.articleUrl || 'N/A'}
-   
-   Your response should:
-   - Acknowledge they're viewing the Featured Insight tile with an image and commentary
-   - Discuss the topic shown in the image and how the commentary relates to the valuation model
-   - Reference the model-focused insights in the commentary
-   - If an article URL is available, include it: [Read source article|url:${tileInfo.imageComments?.articleUrl}]
-   - Do NOT describe this as a chart - it's an image with commentary tile
-` : `
-5. IMPORTANT: If this tile contains news articles or X (Twitter) posts, ALWAYS include links to them with dates:
-   - For news articles: Use format [Article Title (Date)|url:article-url]
-   - For X posts: Use format [View @account tweet (Date)|url:tweet-url]
-   - Include dates in the link text: e.g., [SpaceX Starship Test Flight (Jan 10, 2026)|url:https://...]
-6. Include other clickable links where helpful:
-   - For internal navigation: Use format [link text|view:viewName] or [link text|view:viewName:subTab]
-   - For external articles/news: Use format [link text|url:https://example.com]
-   - You can include 2-4 links per comment (prioritize news/X feed links if available)
-`}
-
-EXAMPLES:
-- "You're looking at the Total Enterprise Value tile showing $1.8T. This represents the combined value of Earth and Mars operations. Explore [Earth Operations|view:earth] or [Mars Operations|view:mars] for details."
-- "The Starlink Penetration tile shows 15% market penetration. This is a key driver of Earth operations value. Check out [Starlink metrics|view:earth:starlink] for more analysis."
-- "This news tile contains recent SpaceX updates. Read [SpaceX Starship Test Flight (Jan 10, 2026)|url:https://example.com/article] and [Starlink Global Expansion (Jan 8, 2026)|url:https://example.com/article2]. Also check [strategic insights|view:insights]."
-- "This X Posts tile shows recent tweets from key SpaceX accounts. View [@elonmusk tweet (Jan 12, 2026)|url:https://twitter.com/elonmusk/status/123] and [@CathieDWood tweet (Jan 11, 2026)|url:https://twitter.com/CathieDWood/status/456]."
-
-Format your response as plain text. Use the link format exactly as shown above.`;
-
-            // Call AI API to generate commentary
-            const systemPrompts = this.agentSystemPrompts || this.getDefaultAgentSystemPrompts();
-            const systemPromptText = Object.values(systemPrompts)
-                .filter(p => p && p.trim())
-                .join('\n\n');
+            // Detect repeat clicks
+            const elementKey = `tile:${tile.id}`;
+            const { isRepeatClick, message: baseMessage } = this.buildClickMessage(
+                elementKey,
+                'tile',
+                tile.title || 'this tile',
+                isFirstInteraction
+            );
             
-            const response = await fetch('/api/agent/chat', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-AI-Model': document.getElementById('agentAIModelSelect')?.value || this.aiModel || 'claude-opus-4-1-20250805'
-                },
-                body: JSON.stringify({
-                    message: prompt,
-                    systemPrompt: systemPromptText,
-                    context: currentContext,
-                    history: [] // Don't include full history for tile commentary
-                })
-            });
-
-            const result = await response.json();
+            let message = baseMessage;
             
-            // Remove loading message
-            this.removeAgentMessage(loadingId);
+            // Build background context (not part of user message)
+            const backgroundContext = [];
+            backgroundContext.push(`Tile: ${tile.title || tile.id}`);
+            if (tile.value) backgroundContext.push(`Value: ${tile.value}`);
+            if (tile.subtitle) backgroundContext.push(`Subtitle: ${tile.subtitle}`);
+            backgroundContext.push(`Type: ${tile.insightType || 'unknown'}`);
+            backgroundContext.push(`Content Type: ${tileContentType}`);
             
-            if (result.success && result.response) {
-                // Debug: Log the response
-                console.log('[Tile Commentary] Agent response:', result.response.substring(0, 200));
-                
-                // Parse links and add message
-                const commentaryWithLinks = this.parseCommentaryLinks(result.response);
-                this.addAgentMessage(`📊 ${commentaryWithLinks}`, 'system');
-            } else {
-                // Show error if API call failed
-                console.error('[Tile Commentary] API error:', result.error);
-                this.addAgentMessage('Sorry, I encountered an error generating commentary for this tile.', 'assistant');
+            if (insightData?.chart) {
+                backgroundContext.push(`Chart: ${insightData.chart.type} chart with ${insightData.chart.data?.length || 0} data points`);
             }
+            if (insightData?.image) {
+                backgroundContext.push(`Contains image visualization`);
+            }
+            if (isImageCommentsTile && insightData?.imageComments) {
+                backgroundContext.push(`Image topic: ${insightData.imageComments.topic || 'Featured Insight'}`);
+                if (insightData.imageComments.commentary) {
+                    backgroundContext.push(`Commentary: ${insightData.imageComments.commentary.substring(0, 200)}`);
+                }
+            }
+            if (insightData?.news && insightData.news.length > 0) {
+                backgroundContext.push(`News items: ${insightData.news.length} articles`);
+                insightData.news.slice(0, 3).forEach((item, idx) => {
+                    backgroundContext.push(`News ${idx + 1}: ${item.title}${item.date ? ` (${item.date})` : ''}${item.url ? ` [${item.url}]` : ''}`);
+                });
+            }
+            if (insightData?.xFeeds && insightData.xFeeds.length > 0) {
+                backgroundContext.push(`X Feeds: ${insightData.xFeeds.length} posts`);
+                insightData.xFeeds.slice(0, 3).forEach((feed, idx) => {
+                    const account = feed.account || feed.accountName || 'Unknown';
+                    backgroundContext.push(`X Post ${idx + 1}: ${account}${feed.date ? ` (${feed.date})` : ''}`);
+                });
+            }
+            if (insightData?.insight) {
+                backgroundContext.push(`Insight: ${insightData.insight.substring(0, 300)}`);
+            }
+            
+            // Add conversation history as background
+            const recentConversation = chatHistory.slice(-5).map(msg => 
+                `${msg.role === 'user' ? 'User' : 'Assistant'}: ${msg.content}`
+            ).join('\n');
+            if (recentConversation) {
+                backgroundContext.push(`Recent conversation: ${recentConversation}`);
+            }
+            
+            // Add navigation context
+            const navHistory = this.navigationHistory.slice(-5).map(entry => 
+                `${entry.view}${entry.tab ? ` > ${entry.tab}` : ''}${entry.subTab ? ` > ${entry.subTab}` : ''}`
+            ).join(' → ');
+            if (navHistory) {
+                backgroundContext.push(`Navigation history: ${navHistory}`);
+            }
+            
+            // Append background context
+            if (backgroundContext.length > 0) {
+                message += `\n\n[Background context for reference: ${backgroundContext.join('; ')}]`;
+            }
+            
+            // Handle voice interruption if needed (same as stock clicks)
+            if (this.agentVoiceOutputEnabled && this.isSpeaking && this.currentSpeakingStock) {
+                if (this.agentCommunicationSystem && this.agentCommunicationSystem.interruption) {
+                    await this.agentCommunicationSystem.interruption.interruptMidSentence();
+                } else {
+                    this.stopVoiceAudio();
+                    await new Promise(resolve => setTimeout(resolve, 500));
+                    this.stopVoiceAudio();
+                    await new Promise(resolve => setTimeout(resolve, 200));
+                }
+            }
+            
+            // Use enhanced endpoint via sendAgentMessageSilent (same as stock clicks)
+            await this.sendAgentMessageSilent(message, {
+                tileId: tile.id,
+                tileTitle: tile.title,
+                tileType: tile.insightType,
+                contentType: tileContentType
+            });
+            
         } catch (error) {
-            console.error('Error generating tile commentary:', error);
-            // Remove loading message on error
-            this.removeAgentMessage(loadingId);
-            // Show error to user
-            this.addAgentMessage('Sorry, I encountered an error generating commentary for this tile.', 'assistant');
+            console.error('[Tile Commentary] Error:', error);
+            this.addAgentMessage('Error generating tile commentary. Please try again.', 'system');
         }
     }
+    
 
     /**
      * Handle image click - detect what feature/region was clicked
@@ -18726,8 +21865,121 @@ Example response (copy this exact format):
 
     /**
      * Generate agent commentary for image click with detected feature
+     * Now uses enhanced endpoint via sendAgentMessageSilent
      */
     async generateImageClickCommentary(clickData) {
+        const { tileId, imageUrl, topic, coordinates, featureDetection, imageComments } = clickData;
+        
+        try {
+            // Validate required data
+            if (!coordinates || typeof coordinates.relativeX !== 'number' || typeof coordinates.relativeY !== 'number') {
+                console.error('[Image Click Commentary] Invalid coordinates:', coordinates);
+                this.addAgentMessage('Error: Invalid image click coordinates. Please try clicking the image again.', 'system');
+                return;
+            }
+            
+            // Ensure featureDetection has defaults
+            const safeFeatureDetection = featureDetection || {
+                detectedFeature: 'Unknown feature',
+                region: 'Unknown region',
+                confidence: 'Unknown',
+                reasoning: null
+            };
+            
+            const chatHistory = this.getAgentChatHistory();
+            const isFirstInteraction = chatHistory.length === 0;
+            
+            // Calculate region strings
+            const horizontalRegion = coordinates.relativeX < 0.33 ? 'LEFT' : coordinates.relativeX > 0.67 ? 'RIGHT' : 'CENTER';
+            const verticalRegion = coordinates.relativeY < 0.33 ? 'TOP' : coordinates.relativeY > 0.67 ? 'BOTTOM' : 'MIDDLE';
+            const quadrant = coordinates.relativeX < 0.5 && coordinates.relativeY < 0.5 ? 'TOP-LEFT' : 
+                           coordinates.relativeX >= 0.5 && coordinates.relativeY < 0.5 ? 'TOP-RIGHT' : 
+                           coordinates.relativeX < 0.5 && coordinates.relativeY >= 0.5 ? 'BOTTOM-LEFT' : 'BOTTOM-RIGHT';
+            
+            // Detect repeat clicks
+            const elementKey = `image:${tileId}:${safeFeatureDetection.detectedFeature || 'feature'}`;
+            const { isRepeatClick, message: baseMessage } = this.buildClickMessage(
+                elementKey,
+                'image',
+                `${safeFeatureDetection.detectedFeature || 'this feature'} in the image`,
+                isFirstInteraction
+            );
+            
+            let message = baseMessage;
+            
+            // Build background context
+            const backgroundContext = [];
+            backgroundContext.push(`Tile: Featured Insight (image-comments tile)`);
+            backgroundContext.push(`Image Topic: ${topic || 'Featured Insight'}`);
+            backgroundContext.push(`Detected Feature: ${safeFeatureDetection.detectedFeature || 'Unknown feature'}`);
+            backgroundContext.push(`Region: ${safeFeatureDetection.region || 'Unknown region'}`);
+            backgroundContext.push(`Confidence: ${safeFeatureDetection.confidence || 'Unknown'}`);
+            backgroundContext.push(`Click Position: ${(coordinates.relativeX * 100).toFixed(1)}% from left, ${(coordinates.relativeY * 100).toFixed(1)}% from top`);
+            backgroundContext.push(`Quadrant: ${quadrant}`);
+            backgroundContext.push(`Horizontal: ${horizontalRegion}, Vertical: ${verticalRegion}`);
+            if (coordinates.naturalX !== undefined && coordinates.naturalY !== undefined) {
+                backgroundContext.push(`Natural Coordinates: (${coordinates.naturalX}, ${coordinates.naturalY}) pixels`);
+            }
+            if (imageComments?.commentary) {
+                backgroundContext.push(`Image Commentary: ${imageComments.commentary.substring(0, 200)}`);
+            }
+            if (safeFeatureDetection.reasoning) {
+                backgroundContext.push(`Detection Reasoning: ${safeFeatureDetection.reasoning}`);
+            }
+            
+            // Add conversation history
+            const recentConversation = chatHistory.slice(-5).map(msg => 
+                `${msg.role === 'user' ? 'User' : 'Assistant'}: ${msg.content}`
+            ).join('\n');
+            if (recentConversation) {
+                backgroundContext.push(`Recent conversation: ${recentConversation}`);
+            }
+            
+            // Add navigation context
+            const navHistory = this.navigationHistory.slice(-5).map(entry => 
+                `${entry.view}${entry.tab ? ` > ${entry.tab}` : ''}${entry.subTab ? ` > ${entry.subTab}` : ''}`
+            ).join(' → ');
+            if (navHistory) {
+                backgroundContext.push(`Navigation history: ${navHistory}`);
+            }
+            
+            // Append background context
+            if (backgroundContext.length > 0) {
+                message += `\n\n[Background context for reference: ${backgroundContext.join('; ')}]`;
+            }
+            
+            // Handle voice interruption if needed
+            if (this.agentVoiceOutputEnabled && this.isSpeaking && this.currentSpeakingStock) {
+                if (this.agentCommunicationSystem && this.agentCommunicationSystem.interruption) {
+                    await this.agentCommunicationSystem.interruption.interruptMidSentence();
+                } else {
+                    this.stopVoiceAudio();
+                    await new Promise(resolve => setTimeout(resolve, 500));
+                    this.stopVoiceAudio();
+                    await new Promise(resolve => setTimeout(resolve, 200));
+                }
+            }
+            
+            // Use enhanced endpoint via sendAgentMessageSilent
+            await this.sendAgentMessageSilent(message, {
+                tileId: tileId,
+                imageUrl: imageUrl,
+                topic: topic,
+                feature: safeFeatureDetection.detectedFeature,
+                coordinates: coordinates
+            });
+            
+        } catch (error) {
+            console.error('Error generating image click commentary:', error);
+            this.addAgentMessage('Error generating image click commentary. Please try again.', 'system');
+        }
+    }
+    
+    /**
+     * OLD generateImageClickCommentary - DEPRECATED
+     * Kept for reference only
+     */
+    async generateImageClickCommentary_OLD(clickData) {
         const { tileId, imageUrl, topic, coordinates, featureDetection, imageComments } = clickData;
         
         // Show loading spinner
@@ -18846,8 +22098,16 @@ Format your response as plain text (2-3 sentences). Use the link format exactly 
             
             if (result.success && result.response) {
                 // Parse links and add message
-                const commentaryWithLinks = this.parseCommentaryLinks(result.response);
-                this.addAgentMessage(commentaryWithLinks, 'assistant');
+                let commentaryWithLinks = this.parseCommentaryLinks(result.response);
+                // Add entity links to image click commentary
+                commentaryWithLinks = this.addEntityLinks(commentaryWithLinks, {
+                    currentTopic: 'Image click analysis',
+                    recentMessages: this.getAgentChatHistory().slice(-3)
+                });
+                const imageCommentaryId = this.addAgentMessage(commentaryWithLinks, 'assistant');
+                setTimeout(() => {
+                    this.attachEntityLinkHandlers(imageCommentaryId);
+                }, 100);
             } else {
                 this.removeAgentMessage(loadingId);
                 this.addAgentMessage('Error generating image click commentary. Please try again.', 'system');
@@ -19025,26 +22285,49 @@ Format your response as plain text. Use the link format exactly as shown above.`
         messageElements.forEach(msgEl => {
             const content = msgEl.querySelector('.message-content p')?.textContent || '';
             if (content && !content.includes('Thinking...')) {
+                // Extract stimulus from data attribute
+                const stimulus = msgEl.getAttribute('data-stimulus') || null;
+                const stimulusData = msgEl.getAttribute('data-stimulus-data') ? 
+                    JSON.parse(msgEl.getAttribute('data-stimulus-data')) : null;
+                
                 if (msgEl.classList.contains('agent-message-user')) {
-                    messages.push({ role: 'user', content: content });
+                    messages.push({ 
+                        role: 'user', 
+                        content: content,
+                        stimulus: stimulus, // 'click', 'type', 'voice', or null
+                        stimulusData: stimulusData // Additional data about the stimulus
+                    });
                 } else if (msgEl.classList.contains('agent-message-assistant')) {
-                    messages.push({ role: 'assistant', content: content });
+                    messages.push({ 
+                        role: 'assistant', 
+                        content: content,
+                        stimulus: null // Assistant messages don't have stimulus
+                    });
                 }
             }
         });
         
-        // Return last 10 messages for context
-        return messages.slice(-10);
+        // Return last 20 messages for context (to match server-side history limit)
+        console.log(`[Chat History] Found ${messages.length} messages in DOM, returning last 20`);
+        return messages.slice(-20);
     }
 
-    addAgentMessage(content, sender = 'user') {
+    addAgentMessage(content, sender = 'user', stimulus = null, stimulusData = null) {
         const messagesArea = document.getElementById('agentChatMessages');
         if (!messagesArea) return null;
 
         const messageId = `msg-${Date.now()}-${Math.random()}`;
         const messageDiv = document.createElement('div');
         
-        // Style system messages differently (context change commentary)
+        // Store stimulus information in data attributes for report generation
+        if (stimulus) {
+            messageDiv.setAttribute('data-stimulus', stimulus);
+            if (stimulusData) {
+                messageDiv.setAttribute('data-stimulus-data', JSON.stringify(stimulusData));
+            }
+        }
+        
+        // Style system messages differently (context change commentary and Learn more links)
         if (sender === 'system') {
             messageDiv.className = 'agent-message agent-message-system';
             messageDiv.style.cssText = `
@@ -19057,18 +22340,58 @@ Format your response as plain text. Use the link format exactly as shown above.`
                 color: var(--text-secondary);
                 font-style: italic;
             `;
+            // System messages don't have profile icons
+            messageDiv.innerHTML = `
+                <div class="message-content">
+                    <p>${content.replace(/\n/g, '<br>')}</p>
+                </div>
+            `;
         } else {
             messageDiv.className = `agent-message agent-message-${sender}`;
+            
+            // Add profile icon based on sender
+            const profileIcon = sender === 'assistant' 
+                ? '<i data-lucide="bot" class="message-profile-icon"></i>' 
+                : '<i data-lucide="user" class="message-profile-icon"></i>';
+            
+            // Content may already contain HTML from parseCommentaryLinks or Learn more links
+            messageDiv.innerHTML = `
+                <div class="message-wrapper">
+                    ${profileIcon}
+                    <div class="message-content">
+                        <p>${content.replace(/\n/g, '<br>')}</p>
+                    </div>
+                </div>
+            `;
         }
         
         messageDiv.id = messageId;
-        // Content may already contain HTML from parseCommentaryLinks
-        messageDiv.innerHTML = `
-            <div class="message-content">
-                <p>${content.replace(/\n/g, '<br>')}</p>
-            </div>
-        `;
         messagesArea.appendChild(messageDiv);
+        
+        // Store messages in chat history array for report generation (with stimulus)
+        if (!this.agentChatHistory) {
+            this.agentChatHistory = [];
+        }
+        const historyEntry = {
+            role: sender,
+            content: content,
+            timestamp: new Date().toISOString()
+        };
+        // Add stimulus information for user messages
+        if (sender === 'user' && stimulus) {
+            historyEntry.stimulus = stimulus;
+            historyEntry.stimulusData = stimulusData || {};
+        }
+        this.agentChatHistory.push(historyEntry);
+        // Keep only last 50 messages in memory
+        if (this.agentChatHistory.length > 50) {
+            this.agentChatHistory = this.agentChatHistory.slice(-50);
+        }
+        
+        // Initialize Lucide icons for profile icons
+        if (window.lucide && sender !== 'system') {
+            window.lucide.createIcons(messageDiv);
+        }
         
         // Attach click handlers to internal navigation links
         messageDiv.querySelectorAll('.agent-commentary-link[data-view]').forEach(link => {
@@ -19121,6 +22444,129 @@ Format your response as plain text. Use the link format exactly as shown above.`
     }
 
     /**
+     * Inject prompt with clickable options for more info on paused stocks
+     */
+    async injectStockOptionsPrompt(currentStockInfo) {
+        if (!currentStockInfo || this.pausedStocks.length === 0) {
+            return;
+        }
+        
+        // Build list of all stocks (paused + current)
+        const allStocks = [...this.pausedStocks];
+        if (currentStockInfo.ticker) {
+            allStocks.push({
+                ticker: currentStockInfo.ticker,
+                companyName: currentStockInfo.companyName
+            });
+        }
+        
+        // Remove duplicates
+        const uniqueStocks = [];
+        const seenTickers = new Set();
+        allStocks.forEach(stock => {
+            if (stock.ticker && !seenTickers.has(stock.ticker)) {
+                seenTickers.add(stock.ticker);
+                uniqueStocks.push(stock);
+            }
+        });
+        
+        if (uniqueStocks.length === 0) {
+            return;
+        }
+        
+        // Build prompt text
+        const stockNames = uniqueStocks.map(s => s.ticker || s.companyName).join(', ');
+        const promptText = `Would you like to hear more about ${stockNames}?`;
+        
+        // Speak the prompt first (with pause)
+        if (this.agentVoiceOutputEnabled && this.grokVoiceService) {
+            console.log('🔊 Speaking options prompt:', promptText);
+            try {
+                // Add a brief pause before speaking
+                await new Promise(resolve => setTimeout(resolve, 500));
+                await this.speakWithGrokVoice(promptText);
+                // Wait for speech to complete before showing buttons
+                await new Promise(resolve => setTimeout(resolve, 1000));
+            } catch (error) {
+                console.error('❌ Error speaking options prompt:', error);
+            }
+        }
+        
+        // Build HTML with clickable buttons
+        const buttonsHtml = uniqueStocks.map(stock => {
+            const displayName = stock.ticker || stock.companyName || 'Unknown';
+            return `<button class="stock-option-btn" data-ticker="${stock.ticker || ''}" data-company="${stock.companyName || ''}" style="
+                background: var(--primary-color);
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                margin: 4px 8px 4px 0;
+                border-radius: 4px;
+                cursor: pointer;
+                font-size: 13px;
+                font-weight: 500;
+                transition: background 0.2s;
+            " onmouseover="this.style.background='var(--primary-color-dark)'" onmouseout="this.style.background='var(--primary-color)'">More on ${displayName}</button>`;
+        }).join('');
+        
+        const promptHtml = `
+            <div class="stock-options-prompt" style="
+                margin-top: 12px;
+                padding-top: 12px;
+                border-top: 1px solid var(--border-color);
+            ">
+                <p style="margin-bottom: 8px; color: var(--text-secondary); font-size: 13px;">${promptText}</p>
+                <div class="stock-options-buttons" style="display: flex; flex-wrap: wrap; align-items: center;">
+                    ${buttonsHtml}
+                </div>
+            </div>
+        `;
+        
+        // Add to last assistant message
+        const messagesArea = document.getElementById('agentChatMessages');
+        if (messagesArea) {
+            const lastMessage = messagesArea.querySelector('.agent-message-assistant:last-child');
+            if (lastMessage) {
+                const messageContent = lastMessage.querySelector('.message-content');
+                if (messageContent) {
+                    messageContent.innerHTML += promptHtml;
+                    
+                    // Attach click handlers
+                    lastMessage.querySelectorAll('.stock-option-btn').forEach(btn => {
+                        btn.addEventListener('click', () => {
+                            const ticker = btn.getAttribute('data-ticker');
+                            const company = btn.getAttribute('data-company');
+                            this.requestMoreStockInfo(ticker, company);
+                        });
+                    });
+                }
+            }
+        }
+    }
+    
+    /**
+     * Request more info on a stock
+     */
+    async requestMoreStockInfo(ticker, companyName) {
+        if (!ticker && !companyName) {
+            return;
+        }
+        
+        console.log(`[Stock Options] Requesting more info on ${ticker || companyName}`);
+        
+        // Build message
+        const message = `I'd like to hear more about ${ticker || companyName}. Please provide additional analysis or deeper insights.`;
+        
+        // Clear paused stocks (user is requesting more, not switching)
+        this.pausedStocks = [];
+        this.currentSpeakingStock = null;
+        
+        // Send request
+        const stockInfo = { ticker, companyName, timestamp: Date.now() };
+        await this.sendAgentMessageSilent(message, stockInfo);
+    }
+
+    /**
      * Navigate to a specific view and optionally a sub-tab
      */
     navigateToView(viewName, subTab = null) {
@@ -19156,26 +22602,61 @@ Format your response as plain text. Use the link format exactly as shown above.`
         if (!window.app) {
             window.app = this;
         }
-        // Detect text selection in center panel
+        // Detect text selection in center panel and tiles
+        // Use a single event listener with better duplicate prevention
+        let lastSelectionText = '';
+        let lastSelectionTime = 0;
+        
         document.addEventListener('mouseup', () => {
             const selection = window.getSelection();
             if (selection && selection.toString().trim().length > 0) {
-                // Check if selection is in a relevant area (dashboard, charts, insights)
+                const selectedText = selection.toString().trim();
+                const now = Date.now();
+                
+                // Prevent duplicate events - same text selected within 500ms is considered duplicate
+                if (selectedText === lastSelectionText && (now - lastSelectionTime) < 500) {
+                    return; // Duplicate event, ignore
+                }
+                
+                lastSelectionText = selectedText;
+                lastSelectionTime = now;
+                
+                // Check if selection is in a relevant area (dashboard, charts, insights, or tiles)
                 const activeView = this.currentView;
-                const relevantViews = ['dashboard', 'charts', 'insights', 'earth', 'mars'];
+                const relevantViews = ['dashboard', 'charts', 'insights', 'earth', 'mars', 'mach33-terminal'];
                 
                 if (relevantViews.includes(activeView)) {
-                    const selectedText = selection.toString().trim();
                     const range = selection.getRangeAt(0);
                     const container = range.commonAncestorContainer;
+                    const context = this.getTextSelectionContext(container);
                     
-                    // Only comment on meaningful selections (more than 3 words or contains numbers/metrics)
-                    if (selectedText.split(/\s+/).length >= 3 || /\$|%|B|T|M|K|\d+/.test(selectedText)) {
+                    // Always comment on tile text selections (any length)
+                    if (context && context.isTile) {
                         this.handleElementSelection({
                             type: 'text',
                             text: selectedText,
-                            context: this.getTextSelectionContext(container)
+                            context: context
                         });
+                        // Clear selection after processing to prevent duplicate events
+                        setTimeout(() => {
+                            if (window.getSelection) {
+                                window.getSelection().removeAllRanges();
+                            }
+                        }, 100);
+                    }
+                    // For non-tile selections, only comment on meaningful selections (more than 3 words or contains numbers/metrics)
+                    else if (selectedText.split(/\s+/).length >= 3 || /\$|%|B|T|M|K|\d+/.test(selectedText)) {
+                        this.handleElementSelection({
+                            type: 'text',
+                            text: selectedText,
+                            context: context
+                        });
+                        // Clear selection after processing to prevent duplicate events
+                        setTimeout(() => {
+                            if (window.getSelection) {
+                                window.getSelection().removeAllRanges();
+                            }
+                        }, 100);
                     }
                 }
             }
@@ -19186,9 +22667,30 @@ Format your response as plain text. Use the link format exactly as shown above.`
      * Get context for text selection
      */
     getTextSelectionContext(container) {
-        // Find the nearest section or chart container
+        // Find the nearest section, chart container, or TILE
         let element = container.nodeType === Node.TEXT_NODE ? container.parentElement : container;
         while (element && element !== document.body) {
+            // Check if this is a tile
+            if (element.classList.contains('tile') || element.closest('.tile')) {
+                const tileElement = element.classList.contains('tile') ? element : element.closest('.tile');
+                const tileId = tileElement.getAttribute('data-tile-id') || tileElement.id || null;
+                const tileTitle = tileElement.querySelector('.tile-title')?.textContent || 
+                                 tileElement.querySelector('[class*="title"]')?.textContent || 
+                                 null;
+                
+                // Get full tile content for context
+                const tileContent = tileElement.textContent || '';
+                
+                return {
+                    isTile: true,
+                    tileId: tileId,
+                    tileTitle: tileTitle,
+                    tileContent: tileContent.substring(0, 2000), // Limit to 2000 chars
+                    elementId: tileElement.id || null,
+                    elementTag: tileElement.tagName.toLowerCase()
+                };
+            }
+            
             if (element.classList.contains('section') || 
                 element.classList.contains('chart-container') ||
                 element.classList.contains('metric-card') ||
@@ -19230,9 +22732,21 @@ Format your response as plain text. Use the link format exactly as shown above.`
                          computedStyle.display !== '' &&
                          !agentWindow.classList.contains('hidden');
         
+        // For tile text selections, always open the agent window automatically
+        const isTileTextSelection = selectionInfo.type === 'text' && 
+                                   selectionInfo.context && 
+                                   selectionInfo.context.isTile;
+        
         if (!isVisible) {
-            console.log('Agent window not visible');
-            return;
+            if (isTileTextSelection) {
+                // Auto-open agent window for tile text selections
+                agentWindow.style.display = 'flex';
+                agentWindow.classList.remove('hidden');
+                console.log('Agent window auto-opened for tile text selection');
+            } else {
+                console.log('Agent window not visible');
+                return;
+            }
         }
 
         console.log('Processing element selection...');
@@ -19243,39 +22757,66 @@ Format your response as plain text. Use the link format exactly as shown above.`
         }
 
         this.elementSelectionDebounceTimer = setTimeout(async () => {
-            // Check if this is a duplicate selection
-            const selectionKey = selectionInfo.type === 'chart' 
-                ? `${selectionInfo.chartId}-${selectionInfo.index}`
-                : selectionInfo.text.substring(0, 50);
+            // Prevent concurrent processing
+            if (this.isProcessingSelection) {
+                console.log('[Element Selection] Already processing a selection, skipping duplicate');
+                return;
+            }
             
-            if (this.lastSelectedElement === selectionKey) {
-                return; // Same element selected, skip
+            // Build a more unique selection key that includes context
+            let selectionKey = '';
+            if (selectionInfo.type === 'chart') {
+                selectionKey = `${selectionInfo.chartId}-${selectionInfo.index}`;
+            } else if (selectionInfo.type === 'text') {
+                // For text selections, include tile context if available to make it unique
+                const textHash = selectionInfo.text.substring(0, 100).replace(/\s+/g, '_');
+                if (selectionInfo.context && selectionInfo.context.isTile) {
+                    selectionKey = `tile-text:${selectionInfo.context.tileId || 'unknown'}:${textHash}`;
+                } else {
+                    selectionKey = `text:${textHash}`;
+                }
+            } else {
+                selectionKey = `element:${Date.now()}`;
+            }
+            
+            // Check if this is the same selection as the last one (within 2 seconds)
+            const timeSinceLastSelection = this.lastSelectionTime ? Date.now() - this.lastSelectionTime : Infinity;
+            if (this.lastSelectedElement === selectionKey && timeSinceLastSelection < 2000) {
+                console.log('[Element Selection] Duplicate selection detected, skipping:', selectionKey);
+                return; // Same element selected recently, skip
             }
 
             this.lastSelectedElement = selectionKey;
+            this.lastSelectionTime = Date.now();
+            this.isProcessingSelection = true;
             
-            // Add to selection history
-            this.elementSelectionHistory.push({
-                timestamp: new Date().toISOString(),
-                ...selectionInfo
-            });
-            if (this.elementSelectionHistory.length > 20) {
-                this.elementSelectionHistory.shift();
-            }
-
-            // Determine if selection warrants commentary
-            const shouldComment = this.shouldCommentOnSelection(selectionInfo);
-            
-            if (shouldComment) {
-                // Show thinking animation
-                const thinkingId = this.addAgentThinkingMessage();
-                
-                try {
-                    await this.generateElementSelectionCommentary(selectionInfo, thinkingId);
-                } catch (error) {
-                    console.error('Error generating element selection commentary:', error);
-                    this.removeAgentMessage(thinkingId);
+            try {
+                // Add to selection history
+                this.elementSelectionHistory.push({
+                    timestamp: new Date().toISOString(),
+                    ...selectionInfo
+                });
+                if (this.elementSelectionHistory.length > 20) {
+                    this.elementSelectionHistory.shift();
                 }
+
+                // Determine if selection warrants commentary
+                const shouldComment = this.shouldCommentOnSelection(selectionInfo);
+                
+                if (shouldComment) {
+                    // Show thinking animation
+                    const thinkingId = this.addAgentThinkingMessage();
+                    
+                    try {
+                        await this.generateElementSelectionCommentary(selectionInfo, thinkingId);
+                    } catch (error) {
+                        console.error('Error generating element selection commentary:', error);
+                        this.removeAgentMessage(thinkingId);
+                    }
+                }
+            } finally {
+                // Always clear processing flag
+                this.isProcessingSelection = false;
             }
         }, 500); // Debounce 500ms
     }
@@ -19286,6 +22827,11 @@ Format your response as plain text. Use the link format exactly as shown above.`
     shouldCommentOnSelection(selectionInfo) {
         // Always comment on chart element selections
         if (selectionInfo.type === 'chart') {
+            return true;
+        }
+
+        // Always comment on tile text selections (any length)
+        if (selectionInfo.type === 'text' && selectionInfo.context && selectionInfo.context.isTile) {
             return true;
         }
 
@@ -19307,8 +22853,177 @@ Format your response as plain text. Use the link format exactly as shown above.`
 
     /**
      * Generate commentary on element selection
+     * Now uses enhanced endpoint via sendAgentMessageSilent
      */
     async generateElementSelectionCommentary(selectionInfo, thinkingMessageId) {
+        if (!this.agentCommentaryEnabled) return;
+        
+        // Ensure agent window is open
+        const agentWindow = document.getElementById('aiAgentWindow');
+        if (agentWindow) {
+            const isHidden = agentWindow.style.display === 'none' || 
+                           !agentWindow.style.display || 
+                           agentWindow.classList.contains('hidden');
+            if (isHidden) {
+                agentWindow.style.display = 'flex';
+                agentWindow.classList.remove('hidden');
+            }
+        }
+        
+        // Remove thinking message if provided
+        if (thinkingMessageId) {
+            this.removeAgentMessage(thinkingMessageId);
+        }
+        
+        try {
+            const chatHistory = this.getAgentChatHistory();
+            const isFirstInteraction = chatHistory.length === 0;
+            
+            // Detect repeat clicks
+            let elementKey = '';
+            let baseMessageText = '';
+            
+            if (selectionInfo.type === 'chart') {
+                // Check if this is an image-comments tile
+                let tileContentType = null;
+                if (selectionInfo.tileId) {
+                    if (this.cachedTerminalInsights && this.cachedTerminalInsights[this.currentModelId]) {
+                        const tileInsight = this.cachedTerminalInsights[this.currentModelId][selectionInfo.tileId];
+                        if (tileInsight?.imageComments) {
+                            tileContentType = TILE_CONTENT_TYPES.IMAGE_COMMENTS;
+                        }
+                    }
+                }
+                
+                if (tileContentType === TILE_CONTENT_TYPES.IMAGE_COMMENTS) {
+                    // Image-comments tile
+                    elementKey = `element:tile:${selectionInfo.tileId}`;
+                    baseMessageText = selectionInfo.chartName || 'this tile';
+                } else {
+                    // Chart datapoint selection
+                    elementKey = `element:chart:${selectionInfo.chartId || 'unknown'}:${selectionInfo.index || 'unknown'}`;
+                    baseMessageText = `${selectionInfo.label || 'this point'} on ${selectionInfo.chartName || 'the chart'}`;
+                }
+            } else if (selectionInfo.type === 'text') {
+                // Text selection - check if it's in a tile
+                if (selectionInfo.context && selectionInfo.context.isTile) {
+                    // Tile text selection - explicitly acknowledge the highlighted text
+                    const textKey = selectionInfo.text.substring(0, 30).replace(/\s+/g, '_');
+                    elementKey = `element:tile-text:${selectionInfo.context.tileId || 'unknown'}:${textKey}`;
+                    // Make it clear this is about highlighted text
+                    baseMessageText = `the text I highlighted: "${selectionInfo.text.substring(0, 80)}${selectionInfo.text.length > 80 ? '...' : ''}" in ${selectionInfo.context.tileTitle || 'this tile'}`;
+                } else {
+                    // Regular text selection - use first 30 chars as key
+                    const textKey = selectionInfo.text.substring(0, 30).replace(/\s+/g, '_');
+                    elementKey = `element:text:${textKey}`;
+                    baseMessageText = `the text I highlighted: "${selectionInfo.text.substring(0, 50)}${selectionInfo.text.length > 50 ? '...' : ''}"`;
+                }
+            } else {
+                // Generic element
+                elementKey = `element:generic:${Date.now()}`;
+                baseMessageText = 'this element';
+            }
+            
+            // Build message with repeat click detection
+            const { isRepeatClick, message: baseMessage } = this.buildClickMessage(
+                elementKey,
+                selectionInfo.type || 'element',
+                baseMessageText,
+                isFirstInteraction
+            );
+            
+            let message = baseMessage;
+            
+            // Build background context
+            const backgroundContext = [];
+            
+            if (selectionInfo.type === 'chart') {
+                backgroundContext.push(`Chart: ${selectionInfo.chartName || 'Unknown'}`);
+                backgroundContext.push(`Element: ${selectionInfo.label || 'Unknown'}`);
+                backgroundContext.push(`Value: ${selectionInfo.value || 'N/A'}`);
+                if (selectionInfo.chartId) backgroundContext.push(`Chart ID: ${selectionInfo.chartId}`);
+                if (selectionInfo.tileId) backgroundContext.push(`Tile ID: ${selectionInfo.tileId}`);
+                
+                // Add datapoint context if available
+                if (selectionInfo.datapointContext) {
+                    const ctx = selectionInfo.datapointContext;
+                    backgroundContext.push(`Trend: ${ctx.trend}`);
+                    backgroundContext.push(`Position: ${ctx.position.index + 1} of ${ctx.position.total}`);
+                    if (ctx.previousValue !== null) backgroundContext.push(`Previous: ${ctx.previousLabel}: ${ctx.previousValue}`);
+                    if (ctx.nextValue !== null) backgroundContext.push(`Next: ${ctx.nextLabel}: ${ctx.nextValue}`);
+                    backgroundContext.push(`Min: ${ctx.comparison.min}, Max: ${ctx.comparison.max.toFixed(2)}, Avg: ${ctx.comparison.avg.toFixed(2)}`);
+                    backgroundContext.push(`Percentile: ${ctx.comparison.percentile.toFixed(1)}%`);
+                }
+            } else if (selectionInfo.type === 'text') {
+                // Tile text selection - provide rich context
+                if (selectionInfo.context && selectionInfo.context.isTile) {
+                    backgroundContext.push(`Tile Title: ${selectionInfo.context.tileTitle || 'Unknown'}`);
+                    backgroundContext.push(`Tile ID: ${selectionInfo.context.tileId || 'Unknown'}`);
+                    backgroundContext.push(`HIGHLIGHTED TEXT: "${selectionInfo.text}"`);
+                    backgroundContext.push(`Full Tile Content: ${selectionInfo.context.tileContent || 'N/A'}`);
+                    backgroundContext.push(`IMPORTANT: The user has highlighted specific text within this tile. Focus your response on the highlighted text, explaining what it means in the context of the larger tile content.`);
+                } else {
+                    // Regular text selection
+                    backgroundContext.push(`Selected Text: "${selectionInfo.text}"`);
+                    if (selectionInfo.context) {
+                        backgroundContext.push(`Context: ${JSON.stringify(selectionInfo.context)}`);
+                    }
+                }
+            }
+            
+            // Add conversation history
+            const recentConversation = chatHistory.slice(-5).map(msg => 
+                `${msg.role === 'user' ? 'User' : 'Assistant'}: ${msg.content}`
+            ).join('\n');
+            if (recentConversation) {
+                backgroundContext.push(`Recent conversation: ${recentConversation}`);
+            }
+            
+            // Add navigation context
+            const navHistory = this.navigationHistory.slice(-5).map(entry => 
+                `${entry.view}${entry.tab ? ` > ${entry.tab}` : ''}${entry.subTab ? ` > ${entry.subTab}` : ''}`
+            ).join(' → ');
+            if (navHistory) {
+                backgroundContext.push(`Navigation history: ${navHistory}`);
+            }
+            
+            // Append background context
+            if (backgroundContext.length > 0) {
+                message += `\n\n[Background context for reference: ${backgroundContext.join('; ')}]`;
+            }
+            
+            // Handle voice interruption if needed
+            if (this.agentVoiceOutputEnabled && this.isSpeaking && this.currentSpeakingStock) {
+                if (this.agentCommunicationSystem && this.agentCommunicationSystem.interruption) {
+                    await this.agentCommunicationSystem.interruption.interruptMidSentence();
+                } else {
+                    this.stopVoiceAudio();
+                    await new Promise(resolve => setTimeout(resolve, 500));
+                    this.stopVoiceAudio();
+                    await new Promise(resolve => setTimeout(resolve, 200));
+                }
+            }
+            
+            // Use enhanced endpoint via sendAgentMessageSilent
+            await this.sendAgentMessageSilent(message, {
+                selectionType: selectionInfo.type,
+                chartName: selectionInfo.chartName,
+                elementLabel: selectionInfo.label,
+                elementValue: selectionInfo.value,
+                tileId: selectionInfo.tileId
+            });
+            
+        } catch (error) {
+            console.error('Error generating element selection commentary:', error);
+            this.addAgentMessage('Error generating commentary. Please try again.', 'system');
+        }
+    }
+    
+    /**
+     * OLD generateElementSelectionCommentary - DEPRECATED
+     * Kept for reference only
+     */
+    async generateElementSelectionCommentary_OLD(selectionInfo, thinkingMessageId) {
         try {
             const currentTabInfo = this.getCurrentTabInfo();
             const inputs = this.getInputs();
@@ -19557,6 +23272,305 @@ Format your response as plain text (2-4 sentences). Use the link format exactly 
     }
 
     /**
+     * Generate a conversation report from the current chat history
+     */
+    async generateConversationReport() {
+        // Use in-memory chat history if available (has stimulus data), otherwise fallback to DOM parsing
+        let chatHistory = this.agentChatHistory || this.getAgentChatHistory();
+        
+        if (chatHistory.length === 0) {
+            this.addAgentMessage('No conversation history available to generate a report. Start chatting with Ada to generate a report.', 'system');
+            return;
+        }
+        
+        // Disable button during generation
+        const reportBtn = document.getElementById('agentReportBtn');
+        if (reportBtn) {
+            reportBtn.disabled = true;
+            reportBtn.style.opacity = '0.4';
+            reportBtn.style.cursor = 'not-allowed';
+        }
+        
+        // Show loading message
+        const loadingId = this.addAgentLoadingMessage();
+        const loadingEl = document.getElementById(loadingId);
+        if (loadingEl) {
+            const contentEl = loadingEl.querySelector('.message-content p');
+            if (contentEl) {
+                contentEl.innerHTML = '<i data-lucide="loader" class="spinning"></i> 📊 Generating conversation report... Please wait.';
+                if (window.lucide) window.lucide.createIcons();
+            }
+        }
+        
+        try {
+            // Format conversation history for the report request with stimulus information
+            const conversationText = chatHistory.map(msg => {
+                let line = `${msg.role === 'user' ? 'User' : 'Ada'}: ${msg.content}`;
+                // Add stimulus information for user messages
+                if (msg.role === 'user' && msg.stimulus) {
+                    line += ` [Stimulus: ${msg.stimulus}`;
+                    if (msg.stimulusData) {
+                        if (msg.stimulus === 'click' && msg.stimulusData.label) {
+                            line += ` - Clicked: ${msg.stimulusData.label}`;
+                        } else if (msg.stimulus === 'voice' && msg.stimulusData.transcript) {
+                            line += ` - Transcript: ${msg.stimulusData.transcript.substring(0, 50)}`;
+                        }
+                    }
+                    line += ']';
+                }
+                return line;
+            }).join('\n\n');
+            
+            // Get additional context
+            const sessionStart = this.sessionStartTime || new Date().toISOString();
+            const topicsDiscussed = this.extractTopics(chatHistory);
+            
+            // Count stimuli by type
+            const stimulusCounts = {
+                click: chatHistory.filter(m => m.stimulus === 'click').length,
+                type: chatHistory.filter(m => m.stimulus === 'type').length,
+                voice: chatHistory.filter(m => m.stimulus === 'voice').length
+            };
+            
+            const context = {
+                sessionStart: sessionStart,
+                messageCount: chatHistory.length,
+                topicsDiscussed: topicsDiscussed,
+                currentView: this.currentView,
+                currentModel: this.currentModelName || 'None',
+                stimulusCounts: stimulusCounts // Include stimulus statistics
+            };
+            
+            // Call backend endpoint to generate report
+            const response = await fetch('/api/agent/conversation-report', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    conversation: conversationText,
+                    context: context,
+                    history: chatHistory, // Full structured history with stimulus
+                    stimulus: true // Flag to indicate stimulus data is included
+                })
+            });
+            
+            const result = await response.json();
+            this.removeAgentMessage(loadingId);
+            
+            if (result.success) {
+                // Display report in popup
+                this.displayConversationReport(result.report, result.pdfUrl, result.metadata);
+            } else {
+                this.addAgentMessage('Failed to generate report: ' + (result.error || 'Unknown error'), 'system');
+            }
+        } catch (error) {
+            console.error('Error generating conversation report:', error);
+            this.removeAgentMessage(loadingId);
+            this.addAgentMessage('Error generating report. Please check your connection and try again.', 'system');
+        } finally {
+            // Re-enable button
+            if (reportBtn) {
+                reportBtn.disabled = false;
+                reportBtn.style.opacity = '0.6';
+                reportBtn.style.cursor = 'pointer';
+            }
+        }
+    }
+
+    /**
+     * Display the conversation report in a popup window
+     */
+    displayConversationReport(reportText, pdfUrl, metadata) {
+        // Create popup overlay
+        const overlay = document.createElement('div');
+        overlay.className = 'report-popup-overlay';
+        overlay.id = 'reportPopupOverlay';
+        
+        // Create popup content
+        const popup = document.createElement('div');
+        popup.className = 'report-popup';
+        
+        const now = new Date();
+        const formattedDate = now.toLocaleString('en-US', {
+            month: 'short',
+            day: 'numeric',
+            year: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit'
+        });
+        
+        popup.innerHTML = `
+            <div class="report-popup-header">
+                <h3>📊 Conversation Report</h3>
+                <button class="report-popup-close" id="reportPopupClose" title="Close">
+                    <i data-lucide="x" style="width: 16px; height: 16px;"></i>
+                </button>
+            </div>
+            <div class="report-popup-meta">
+                <span>Generated: ${formattedDate}</span>
+                <span>Messages: ${metadata?.messageCount || 0}</span>
+                ${metadata?.topics?.length > 0 ? `<span>Topics: ${metadata.topics.length}</span>` : ''}
+            </div>
+            <div class="report-popup-content">
+                ${pdfUrl ? 
+                    `<iframe id="reportPdfViewer" src="${pdfUrl}" style="width: 100%; height: 100%; border: none;"></iframe>` :
+                    `<div class="report-text-content" style="padding: 20px; max-height: 70vh; overflow-y: auto; white-space: pre-wrap; font-family: 'Courier New', monospace; font-size: 12px; line-height: 1.6; background: #f5f5f5; border-radius: 4px;">${reportText.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>`
+                }
+            </div>
+            <div class="report-popup-actions">
+                ${pdfUrl ? 
+                    `<button class="btn btn-primary" id="reportSavePdf">
+                        <i data-lucide="download" style="width: 14px; height: 14px;"></i> Save PDF
+                    </button>
+                    <button class="btn btn-secondary" id="reportEmailPdf">
+                        <i data-lucide="mail" style="width: 14px; height: 14px;"></i> Email Report
+                    </button>` :
+                    `<button class="btn btn-primary" id="reportCopyText">
+                        <i data-lucide="copy" style="width: 14px; height: 14px;"></i> Copy Report
+                    </button>
+                    <button class="btn btn-secondary" id="reportDownloadText">
+                        <i data-lucide="download" style="width: 14px; height: 14px;"></i> Download Text
+                    </button>`
+                }
+                <button class="btn" id="reportPopupCloseBtn">Close</button>
+            </div>
+        `;
+        
+        overlay.appendChild(popup);
+        document.body.appendChild(overlay);
+        
+        // Initialize icons
+        if (window.lucide) window.lucide.createIcons();
+        
+        // Event handlers
+        const closePopup = () => {
+            overlay.remove();
+        };
+        
+        document.getElementById('reportPopupClose')?.addEventListener('click', closePopup);
+        document.getElementById('reportPopupCloseBtn')?.addEventListener('click', closePopup);
+        overlay.addEventListener('click', (e) => {
+            if (e.target === overlay) closePopup();
+        });
+        
+        // ESC key to close
+        const escHandler = (e) => {
+            if (e.key === 'Escape' && document.getElementById('reportPopupOverlay')) {
+                closePopup();
+                document.removeEventListener('keydown', escHandler);
+            }
+        };
+        document.addEventListener('keydown', escHandler);
+        
+        // Save PDF button (if PDF available)
+        document.getElementById('reportSavePdf')?.addEventListener('click', () => {
+            this.downloadReportPdf(pdfUrl, metadata);
+        });
+        
+        // Email PDF button (if PDF available)
+        document.getElementById('reportEmailPdf')?.addEventListener('click', () => {
+            this.emailReportPdf(pdfUrl, metadata);
+        });
+        
+        // Copy text button (if text report)
+        document.getElementById('reportCopyText')?.addEventListener('click', () => {
+            navigator.clipboard.writeText(reportText).then(() => {
+                this.addAgentMessage('Report copied to clipboard!', 'system');
+            }).catch(err => {
+                console.error('Failed to copy:', err);
+                this.addAgentMessage('Failed to copy report. Please select and copy manually.', 'system');
+            });
+        });
+        
+        // Download text button (if text report)
+        document.getElementById('reportDownloadText')?.addEventListener('click', () => {
+            const filename = `Ada_Conversation_Report_${new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5)}.txt`;
+            const blob = new Blob([reportText], { type: 'text/plain' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = filename;
+            link.style.display = 'none';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
+            this.addAgentMessage(`Report saved as "${filename}"`, 'system');
+        });
+    }
+
+    /**
+     * Download the PDF report
+     */
+    downloadReportPdf(pdfUrl, metadata) {
+        const filename = `Ada_Conversation_Report_${new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5)}.pdf`;
+        
+        // Create a temporary link and trigger download
+        const link = document.createElement('a');
+        link.href = pdfUrl;
+        link.download = filename;
+        link.style.display = 'none';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        
+        // Show success notification
+        this.addAgentMessage(`Report saved to Downloads as "${filename}"`, 'system');
+    }
+
+    /**
+     * Email the PDF report
+     */
+    emailReportPdf(pdfUrl, metadata) {
+        const subject = encodeURIComponent(`Conversation Report - ${new Date().toLocaleDateString()}`);
+        const body = encodeURIComponent(`Please find attached the conversation report from my session with Ada.\n\nGenerated: ${new Date().toLocaleString()}\nMessages: ${metadata?.messageCount || 0}`);
+        
+        // Use mailto link (browser will handle attachment if supported)
+        // Note: Most browsers don't support attachments via mailto, so we'll download and let user attach manually
+        const mailtoLink = `mailto:?subject=${subject}&body=${body}`;
+        
+        // First download the PDF
+        this.downloadReportPdf(pdfUrl, metadata);
+        
+        // Then open email client
+        window.open(mailtoLink);
+        
+        // Show helpful message
+        setTimeout(() => {
+            this.addAgentMessage('PDF downloaded. Please attach it to your email manually (most browsers don\'t support automatic attachments).', 'system');
+        }, 500);
+    }
+
+    /**
+     * Extract topics from conversation history
+     */
+    extractTopics(chatHistory) {
+        const topics = new Set();
+        const topicKeywords = {
+            'Tesla': ['tesla', 'tsla'],
+            'SpaceX': ['spacex', 'space x'],
+            'Enterprise Value': ['enterprise value', 'ev', 'valuation'],
+            'Mars Operations': ['mars', 'mars operations', 'mars colony'],
+            'Earth Operations': ['earth', 'earth operations'],
+            'Financial Metrics': ['revenue', 'cost', 'margin', 'profit', 'financial'],
+            'Starlink': ['starlink', 'satellite'],
+            'Starship': ['starship', 'rocket'],
+            'Competitors': ['competitor', 'competition', 'rival'],
+            'Market Analysis': ['market', 'tam', 'market size']
+        };
+        
+        chatHistory.forEach(msg => {
+            const content = msg.content.toLowerCase();
+            Object.entries(topicKeywords).forEach(([topic, keywords]) => {
+                if (keywords.some(keyword => content.includes(keyword))) {
+                    topics.add(topic);
+                }
+            });
+        });
+        
+        return Array.from(topics);
+    }
+
+    /**
      * Add a thinking animation message for context change detection
      * Very subtle - just a spinning icon, no framing or boxes
      */
@@ -19606,6 +23620,82 @@ Format your response as plain text (2-4 sentences). Use the link format exactly 
         const message = document.getElementById(messageId);
         if (message) {
             message.remove();
+        }
+    }
+
+    /**
+     * Initialize new agent communication system
+     */
+    async initializeAgentCommunicationSystem() {
+        try {
+            console.log('🚀 Initializing Agent Communication System...');
+            
+            // Create InterruptionManager-compatible wrapper
+            // Since we're in browser, we'll create the class inline
+            class ClientInterruptionManager {
+                constructor(voiceService) {
+                    this.voiceService = voiceService;
+                }
+                
+                async interruptMidSentence() {
+                    console.log('⏸️ InterruptionManager: Interrupting mid-sentence');
+                    if (this.voiceService && this.voiceService.stopVoiceAudio) {
+                        this.voiceService.stopVoiceAudio();
+                        // Wait for audio to fully stop
+                        await new Promise(resolve => setTimeout(resolve, 500));
+                        // Double-check
+                        this.voiceService.stopVoiceAudio();
+                        await new Promise(resolve => setTimeout(resolve, 200));
+                    }
+                    return true;
+                }
+                
+                async pauseCurrent() {
+                    return await this.interruptMidSentence();
+                }
+                
+                async handleTransition(relationship, transitionPhrase) {
+                    console.log('🔄 InterruptionManager: Handling transition:', transitionPhrase);
+                    // Add pause before transition
+                    await new Promise(resolve => setTimeout(resolve, 500));
+                    // Transition phrase will be included in the response text
+                    return true;
+                }
+            }
+            
+            // Create interruption manager with this app instance as voiceService
+            this.interruptionManager = new ClientInterruptionManager(this);
+            
+            // Create agent communication system wrapper
+            this.agentCommunicationSystem = {
+                interruption: this.interruptionManager
+            };
+            
+            console.log('✅ Agent Communication System initialized with InterruptionManager');
+        } catch (error) {
+            console.warn('⚠️ Agent Communication System initialization failed:', error);
+            console.warn('⚠️ Falling back to manual interruption handling');
+            
+            // Fallback: Create simple wrapper
+            this.interruptionManager = {
+                interruptMidSentence: async () => {
+                    console.log('⏸️ Fallback InterruptionManager: Interrupting mid-sentence');
+                    this.stopVoiceAudio();
+                    await new Promise(resolve => setTimeout(resolve, 500));
+                    this.stopVoiceAudio();
+                    await new Promise(resolve => setTimeout(resolve, 200));
+                    return true;
+                },
+                handleTransition: async (relationship, transitionPhrase) => {
+                    console.log('🔄 Fallback InterruptionManager: Handling transition:', transitionPhrase);
+                    await new Promise(resolve => setTimeout(resolve, 500));
+                    return true;
+                }
+            };
+            
+            this.agentCommunicationSystem = {
+                interruption: this.interruptionManager
+            };
         }
     }
 }

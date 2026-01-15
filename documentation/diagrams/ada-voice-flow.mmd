@@ -1,0 +1,51 @@
+sequenceDiagram
+    participant User
+    participant UI as Frontend UI
+    participant AppJS as app.js
+    participant SocketIO as Socket.io Client
+    participant Server as Socket.io Server
+    participant Proxy as GrokVoiceProxy
+    participant Grok as Grok Voice API
+    
+    Note over User,Grok: Voice Output Flow (TTS Mode)
+    
+    User->>UI: Types message or speaks
+    UI->>AppJS: sendAgentMessage(message)
+    AppJS->>Server: POST /api/agent/chat-enhanced
+    Server->>Server: Relationship Detection<br/>(if enabled)
+    Server->>Grok: Claude API Call<br/>(Text Generation)
+    Grok-->>Server: Text Response
+    Server-->>AppJS: {response: "Ada's response"}
+    
+    AppJS->>AppJS: Check: agentVoiceOutputEnabled?
+    alt Voice Output Enabled
+        AppJS->>AppJS: speakAgentResponse(text)
+        AppJS->>SocketIO: speakText(cleanText)
+        SocketIO->>Server: emit('grok-voice:text', {text})
+        Server->>Proxy: sendToGrok(conversation.item.create)
+        Proxy->>Grok: conversation.item.create<br/>{role: 'user', text: "..."}
+        Note over Proxy,Grok: Wait 500ms
+        Proxy->>Grok: response.create<br/>{modalities: ['audio', 'text']}
+        Grok->>Proxy: response.output_audio.delta<br/>(Audio chunks - PCM base64)
+        Proxy->>Server: Forward audio chunks
+        Server->>SocketIO: emit('grok-voice:audio', {audio})
+        SocketIO->>SocketIO: Convert PCM → Float32
+        SocketIO->>UI: Play audio via Web Audio API
+        UI->>User: 🔊 Ada speaks response
+    else Voice Output Disabled
+        AppJS->>UI: Display text only
+    end
+    
+    Note over User,Grok: Session Configuration Flow
+    
+    SocketIO->>Server: emit('grok-voice:connect')
+    Server->>Proxy: connectToGrok()
+    Proxy->>Grok: WebSocket Connect
+    Grok-->>Proxy: WebSocket Open
+    Proxy->>Grok: session.update<br/>{instructions: "You are Ada...", voice: "eve"}
+    Grok-->>Proxy: session.updated
+    Proxy->>Server: emit('session-ready')
+    Server->>SocketIO: emit('grok-voice:connected')
+    SocketIO->>SocketIO: isConnected = true
+
+

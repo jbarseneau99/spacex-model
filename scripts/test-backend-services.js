@@ -149,10 +149,10 @@ async function testGrokVoiceConnect() {
       });
 
       // Send connect event
-      socket.emit('grok-voice:connect', {
-        sessionId: `test-session-${Date.now()}`,
-        voice: 'ara'
-      });
+        socket.emit('grok-voice:connect', {
+            sessionId: `test-session-${Date.now()}`,
+            voice: 'eve' // Ada - Mach33 Assistant (British accent)
+        });
     });
 
     socket.on('connect_error', (error) => {
@@ -189,7 +189,7 @@ async function testGrokVoiceText() {
       // First connect to Grok Voice
       socket.emit('grok-voice:connect', {
         sessionId: `test-text-session-${Date.now()}`,
-        voice: 'ara'
+        voice: 'eve' // Ada - Mach33 Assistant (British accent)
       });
     });
 

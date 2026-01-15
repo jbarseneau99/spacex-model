@@ -1,0 +1,68 @@
+<!-- Mach33 Terminal View -->
+<div id="mach33-terminal" class="view">
+    <!-- Dashboard Container -->
+    <div class="section" style="flex: 1; display: flex; flex-direction: column; margin-bottom: 0; min-height: 0;">
+        <!-- Controls Row - Inside terminal panel at top -->
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--spacing-sm); padding-bottom: var(--spacing-xs); border-bottom: 1px solid var(--border-color); gap: 12px;">
+            <!-- Left: Title with icon -->
+            <div style="display: flex; align-items: center; gap: 8px; flex-shrink: 0;">
+                <i data-lucide="terminal" style="width: 18px; height: 18px; color: var(--text-primary);"></i>
+                <span style="font-size: 16px; font-weight: 600; color: var(--text-primary);">Mach33 Terminal</span>
+            </div>
+            <!-- Middle: Model name search box -->
+            <div style="flex: 1; display: flex; justify-content: center; max-width: 400px; margin: 0 auto;">
+                <div style="position: relative; width: 100%;">
+                    <i data-lucide="search" style="position: absolute; left: 6px; top: 50%; transform: translateY(-50%); width: 12px; height: 12px; color: var(--text-secondary); opacity: 0.5; pointer-events: none;"></i>
+                    <input type="text" id="terminalModelSearch" placeholder="Search model..." value="" readonly style="
+                        width: 100%;
+                        padding: 4px 6px 4px 22px;
+                        border: 1px solid transparent;
+                        border-radius: 3px;
+                        background: rgba(0, 0, 0, 0.02);
+                        color: var(--text-secondary);
+                        font-size: 11px;
+                        font-family: inherit;
+                        outline: none;
+                        transition: all 0.2s;
+                    " onfocus="this.style.borderColor='rgba(0, 102, 204, 0.2)'; this.style.background='rgba(0, 0, 0, 0.04)'" onblur="this.style.borderColor='transparent'; this.style.background='rgba(0, 0, 0, 0.02)'">
+                </div>
+            </div>
+            <!-- Right: Date/Time and Controls -->
+            <div style="display: flex; align-items: center; gap: 8px; flex-shrink: 0;">
+                <div id="terminalDateTime" style="font-size: 11px; color: var(--text-secondary); font-family: 'Courier New', monospace; white-space: nowrap;"></div>
+                <button class="icon-button" id="openTerminalWindowBtn" title="Open Terminal in New Window" style="padding: 2px; opacity: 0.6; transition: opacity 0.2s; width: 20px; height: 20px; display: flex; align-items: center; justify-content: center;">
+                    <i data-lucide="external-link" id="openTerminalWindowIcon" style="width: 12px; height: 12px;"></i>
+                </button>
+                <label class="toggle-switch" title="Bloomberg Dense Mode" style="display: flex; align-items: center; gap: 4px; cursor: pointer; opacity: 0.7; font-size: 9px; color: var(--text-secondary); padding: 2px 4px;">
+                    <input type="checkbox" id="bloombergDenseToggleTerminal" style="display: none;">
+                    <span class="toggle-slider" style="width: 28px; height: 14px;"></span>
+                    <span style="font-size: 9px;">Dense</span>
+                </label>
+                <button class="icon-button" id="refreshTerminalBtn" title="Refresh Terminal" style="padding: 2px; opacity: 0.6; transition: opacity 0.2s; width: 20px; height: 20px; display: flex; align-items: center; justify-content: center;">
+                    <i data-lucide="refresh-cw" id="refreshTerminalIcon" style="width: 12px; height: 12px; transition: transform 0.3s;"></i>
+                </button>
+            </div>
+        </div>
+        <!-- 4x4 Grid Container -->
+        <div id="dashboardGrid" class="dashboard-grid" style="
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            grid-template-rows: repeat(4, 1fr);
+            gap: var(--spacing-sm);
+            width: 100%;
+            max-width: 1400px;
+            margin: 0 auto;
+            flex: 1;
+            min-height: 600px;
+        ">
+            <!-- Tiles will be dynamically inserted here -->
+            <div style="grid-column: 1 / -1; display: flex; align-items: center; justify-content: center; color: var(--text-secondary); padding: var(--spacing-xl);">
+                <div style="text-align: center;">
+                    <i data-lucide="loader" class="spinning" style="width: 32px; height: 32px; margin: 0 auto 16px; display: block;"></i>
+                    <p>Generating dashboard layout...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+

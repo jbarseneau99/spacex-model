@@ -1,0 +1,295 @@
+/**
+ * ADA Floating Panels Styles
+ * Styles for floating tile panels displayed during ADA's verbal responses
+ */
+
+.ada-floating-panels-container {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none; /* Allow clicks to pass through container */
+    z-index: 10000;
+}
+
+.ada-floating-panel {
+    pointer-events: auto; /* Enable clicks on panel itself */
+    position: fixed;
+    /* Liquid Glass Effect - Balanced translucency */
+    background: rgba(18, 18, 20, 0.75);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 12px;
+    box-shadow: 
+        0 8px 32px rgba(0, 0, 0, 0.5),
+        inset 0 1px 0 rgba(255, 255, 255, 0.1),
+        0 0 0 1px rgba(255, 255, 255, 0.05);
+    opacity: 0;
+    transform: translateY(-10px) scale(0.95);
+    transition: opacity 0.4s cubic-bezier(0.4, 0, 0.2, 1), 
+                transform 0.4s cubic-bezier(0.4, 0, 0.2, 1),
+                backdrop-filter 0.4s ease;
+    /* 1x1 tile size - approximately 25% of viewport width (accounting for gaps) */
+    width: calc(25vw - 20px);
+    min-width: 300px;
+    max-width: 400px;
+    height: calc(25vh - 20px);
+    min-height: 300px;
+    max-height: 400px;
+    overflow: hidden;
+    z-index: 10001;
+    padding: 0;
+}
+
+/* Enhanced liquid glass effect on hover */
+.ada-floating-panel:hover {
+    background: rgba(22, 22, 24, 0.85);
+    border-color: rgba(255, 255, 255, 0.2);
+    box-shadow: 
+        0 12px 40px rgba(0, 0, 0, 0.6),
+        inset 0 1px 0 rgba(255, 255, 255, 0.15),
+        0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+
+.ada-floating-panel.ada-panel-visible {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+}
+
+.ada-floating-panel.ada-panel-dismissing {
+    opacity: 0;
+    transform: translateY(-10px) scale(0.95);
+    backdrop-filter: blur(10px) saturate(100%);
+    -webkit-backdrop-filter: blur(10px) saturate(100%);
+    transition: opacity 2s ease-out, 
+                transform 2s ease-out,
+                backdrop-filter 2s ease-out;
+}
+
+/* Header buttons container */
+.ada-floating-panel-header-buttons {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    display: flex;
+    gap: 8px;
+    z-index: 10002;
+}
+
+/* Pin button with liquid glass effect */
+.ada-floating-panel-pin {
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.1);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    opacity: 0.8;
+    transition: opacity 0.2s, background 0.2s, transform 0.2s;
+    padding: 0;
+}
+
+.ada-floating-panel-pin:hover {
+    opacity: 1;
+    background: rgba(255, 255, 255, 0.2);
+    transform: scale(1.05);
+    border-color: rgba(255, 255, 255, 0.25);
+}
+
+.ada-floating-panel-pin.pinned {
+    background: rgba(245, 158, 11, 0.25);
+    border-color: rgba(245, 158, 11, 0.4);
+}
+
+.ada-floating-panel-pin.pinned:hover {
+    background: rgba(245, 158, 11, 0.35);
+}
+
+.ada-floating-panel-pin i {
+    width: 18px;
+    height: 18px;
+    color: rgba(255, 255, 255, 0.95);
+}
+
+/* Close button with liquid glass effect */
+.ada-floating-panel-close {
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.1);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    opacity: 0.8;
+    transition: opacity 0.2s, background 0.2s, transform 0.2s;
+    padding: 0;
+}
+
+.ada-floating-panel-close:hover {
+    opacity: 1;
+    background: rgba(255, 255, 255, 0.2);
+    transform: scale(1.05);
+    border-color: rgba(255, 255, 255, 0.25);
+}
+
+.ada-floating-panel-close i {
+    width: 18px;
+    height: 18px;
+    color: rgba(255, 255, 255, 0.95);
+}
+
+/* Unpin button on dashboard tile */
+.dashboard-tile-unpin {
+    width: 24px;
+    height: 24px;
+    border-radius: 6px;
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    opacity: 0.7;
+    transition: opacity 0.2s, background 0.2s;
+    padding: 0;
+    z-index: 10;
+}
+
+.dashboard-tile-unpin:hover {
+    opacity: 1;
+    background: rgba(0, 0, 0, 0.5);
+}
+
+.dashboard-tile-unpin i {
+    width: 14px;
+    height: 14px;
+    color: rgba(255, 255, 255, 0.9);
+}
+
+/* Ensure tiles inside panels render correctly */
+.ada-floating-panel .dashboard-tile {
+    border: none !important;
+    box-shadow: none !important;
+    cursor: default;
+    height: 100%;
+    width: 100%;
+    background: transparent !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    padding: 12px;
+    box-sizing: border-box;
+}
+
+.ada-floating-panel .dashboard-tile:hover {
+    transform: none !important;
+    box-shadow: none !important;
+}
+
+/* Ensure tile content renders properly */
+.ada-floating-panel .dashboard-tile .tile-content,
+.ada-floating-panel .dashboard-tile .tile-body,
+.ada-floating-panel .dashboard-tile .tile-header {
+    background: transparent !important;
+}
+
+/* Enhance text visibility */
+.ada-floating-panel .tile-title,
+.ada-floating-panel .tile-value,
+.ada-floating-panel .tile-subtitle,
+.ada-floating-panel .tile-insight {
+    color: rgba(255, 255, 255, 0.95);
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+}
+
+.ada-floating-panel .tile-title {
+    color: rgba(255, 255, 255, 0.9);
+    font-weight: 600;
+    font-size: 16px;
+    margin-bottom: 8px;
+}
+
+.ada-floating-panel .tile-value {
+    color: rgba(255, 255, 255, 1);
+    font-weight: 700;
+    font-size: 24px;
+    margin-bottom: 4px;
+}
+
+.ada-floating-panel .tile-subtitle {
+    color: rgba(255, 255, 255, 0.8);
+    font-size: 12px;
+    margin-bottom: 12px;
+}
+
+.ada-floating-panel .tile-insight {
+    color: rgba(255, 255, 255, 0.9);
+    white-space: pre-line;
+    line-height: 1.7;
+    font-size: 13px;
+    padding: 0;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    letter-spacing: 0.01em;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+    display: block;
+}
+
+/* Make panel grabbable/draggable */
+.ada-floating-panel {
+    cursor: move;
+    user-select: none;
+}
+
+.ada-floating-panel.dragging {
+    cursor: grabbing;
+    opacity: 0.95;
+}
+
+.ada-floating-panel .dashboard-tile {
+    cursor: default;
+    user-select: text;
+}
+
+.ada-floating-panel .dashboard-tile * {
+    user-select: text;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .ada-floating-panel {
+        width: calc(90vw - 40px) !important;
+        height: calc(40vh - 40px) !important;
+        min-width: 280px;
+        min-height: 250px;
+        max-width: calc(100vw - 40px);
+        max-height: calc(100vh - 40px);
+    }
+}
+
+/* Ensure panel doesn't get too small on very small screens */
+@media (max-width: 480px) {
+    .ada-floating-panel {
+        width: calc(95vw - 40px) !important;
+        height: calc(50vh - 40px) !important;
+        min-width: 250px;
+        min-height: 200px;
+    }
+}
+
+/* Ensure panels work in both free mode and fixed mode */
+.ada-floating-panel {
+    position: fixed !important;
+}

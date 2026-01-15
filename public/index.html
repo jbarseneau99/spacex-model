@@ -4,7 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SpaceX Valuation Platform | 33fg.com</title>
+    <link rel="icon" type="image/png" href="/33fg_logo.png">
     <link rel="stylesheet" href="/css/main.css">
+    <link rel="stylesheet" href="/css/ada-floating-panels.css">
     <script src="https://unpkg.com/lucide@latest"></script>
 </head>
 <body>
@@ -1715,70 +1717,8 @@
 
             </div>
 
-            <!-- Mach33 Terminal View -->
-            <div id="mach33-terminal" class="view">
-                <!-- Dashboard Container -->
-                <div class="section" style="flex: 1; display: flex; flex-direction: column; margin-bottom: var(--spacing-md); min-height: 0; padding: var(--spacing-sm) var(--spacing-lg) var(--spacing-lg) var(--spacing-lg);">
-                    <!-- Controls Row - Inside terminal panel at top -->
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--spacing-sm); padding-bottom: var(--spacing-xs); border-bottom: 1px solid var(--border-color); gap: 12px;">
-                        <!-- Left: Title with icon -->
-                        <div style="display: flex; align-items: center; gap: 8px; flex-shrink: 0;">
-                            <i data-lucide="terminal" style="width: 18px; height: 18px; color: var(--text-primary);"></i>
-                            <span style="font-size: 16px; font-weight: 600; color: var(--text-primary);">Mach33 Terminal</span>
-                        </div>
-                        <!-- Middle: Model name search box -->
-                        <div style="flex: 1; display: flex; justify-content: center; max-width: 400px; margin: 0 auto;">
-                            <div style="position: relative; width: 100%;">
-                                <i data-lucide="search" style="position: absolute; left: 6px; top: 50%; transform: translateY(-50%); width: 12px; height: 12px; color: var(--text-secondary); opacity: 0.5; pointer-events: none;"></i>
-                                <input type="text" id="terminalModelSearch" placeholder="Search model..." value="" readonly style="
-                                    width: 100%;
-                                    padding: 4px 6px 4px 22px;
-                                    border: 1px solid transparent;
-                                    border-radius: 3px;
-                                    background: rgba(0, 0, 0, 0.02);
-                                    color: var(--text-secondary);
-                                    font-size: 11px;
-                                    font-family: inherit;
-                                    outline: none;
-                                    transition: all 0.2s;
-                                " onfocus="this.style.borderColor='rgba(0, 102, 204, 0.2)'; this.style.background='rgba(0, 0, 0, 0.04)'" onblur="this.style.borderColor='transparent'; this.style.background='rgba(0, 0, 0, 0.02)'">
-                            </div>
-                        </div>
-                        <!-- Right: Date/Time and Controls -->
-                        <div style="display: flex; align-items: center; gap: 8px; flex-shrink: 0;">
-                            <div id="terminalDateTime" style="font-size: 11px; color: var(--text-secondary); font-family: 'Courier New', monospace; white-space: nowrap;"></div>
-                            <label class="toggle-switch" title="Bloomberg Dense Mode" style="display: flex; align-items: center; gap: 4px; cursor: pointer; opacity: 0.7; font-size: 9px; color: var(--text-secondary); padding: 2px 4px;">
-                                <input type="checkbox" id="bloombergDenseToggleTerminal" style="display: none;">
-                                <span class="toggle-slider" style="width: 28px; height: 14px;"></span>
-                                <span style="font-size: 9px;">Dense</span>
-                            </label>
-                            <button class="icon-button" id="refreshTerminalBtn" title="Refresh Terminal" style="padding: 2px; opacity: 0.6; transition: opacity 0.2s; width: 20px; height: 20px; display: flex; align-items: center; justify-content: center;">
-                                <i data-lucide="refresh-cw" id="refreshTerminalIcon" style="width: 12px; height: 12px; transition: transform 0.3s;"></i>
-                            </button>
-                        </div>
-                    </div>
-                    <!-- 4x4 Grid Container -->
-                    <div id="dashboardGrid" class="dashboard-grid" style="
-                        display: grid;
-                        grid-template-columns: repeat(4, 1fr);
-                        grid-template-rows: repeat(4, 1fr);
-                        gap: var(--spacing-sm);
-                        width: 100%;
-                        max-width: 1400px;
-                        margin: 0 auto;
-                        flex: 1;
-                        min-height: 600px;
-                    ">
-                        <!-- Tiles will be dynamically inserted here -->
-                        <div style="grid-column: 1 / -1; display: flex; align-items: center; justify-content: center; color: var(--text-secondary); padding: var(--spacing-xl);">
-                            <div style="text-align: center;">
-                                <i data-lucide="loader" class="spinning" style="width: 32px; height: 32px; margin: 0 auto 16px; display: block;"></i>
-                                <p>Generating dashboard layout...</p>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
+            <!-- Mach33 Terminal View - Loaded dynamically by mach33-terminal.js -->
+            <!-- Terminal will be injected here when view is activated -->
 
             <!-- Charts View -->
             <div id="charts" class="view">
@@ -3352,11 +3292,12 @@
             <!-- Settings Tabs -->
             <div class="help-tabs">
                 <button class="help-tab active" data-tab="ai">AI Model</button>
+                <button class="help-tab" data-tab="ada">Ada</button>
                 <button class="help-tab" data-tab="mach33lib">Mach33Lib</button>
                 <button class="help-tab" data-tab="financial-api">Financial Data API</button>
                 <button class="help-tab" data-tab="general">General</button>
             </div>
-            <div class="modal-body" style="max-height: calc(80vh - 140px); overflow-y: auto;">
+            <div class="modal-body" style="max-height: calc(85vh - 120px); overflow-y: auto;">
                 <!-- AI Model Tab -->
                 <div id="settingsTab-ai" class="help-tab-content active">
                     <div class="help-section">
@@ -3428,6 +3369,113 @@
                         <button class="btn btn-primary" onclick="app.saveAIModelSettings()" style="margin-top: var(--spacing-lg);">
                             <i data-lucide="save"></i> Save Settings
                         </button>
+                    </div>
+                </div>
+                
+                <!-- Ada Tab -->
+                <div id="settingsTab-ada" class="help-tab-content">
+                    <div class="help-section">
+                        <h3>Ada - Mach33 Assistant</h3>
+                        <p style="font-size: 12px; margin-bottom: var(--spacing-md);">Configure Ada's voice and persona parameters.</p>
+                        
+                        <!-- Voice Configuration -->
+                        <div class="form-group" style="margin-top: var(--spacing-md);">
+                            <label for="adaVoiceSelect" style="display: block; margin-bottom: 6px; font-weight: 600; font-size: 13px;">
+                                <i data-lucide="volume-2" style="width: 14px; height: 14px;"></i> Voice
+                            </label>
+                            <select id="adaVoiceSelect" class="select-input" style="width: 100%; max-width: 400px; font-size: 13px; padding: 6px 8px;">
+                                <option value="eve" selected>Eve (British accent) - Default</option>
+                                <option value="ara">Ara (Female, warm, friendly) - Faster pace</option>
+                                <option value="rex">Rex (Male, confident, clear) - Moderate pace</option>
+                                <option value="sal">Sal (Neutral, smooth, balanced) - Moderate pace</option>
+                                <option value="leo">Leo (Male, authoritative, strong) - Slower pace</option>
+                            </select>
+                            <p style="margin-top: 6px; font-size: 12px; color: var(--text-secondary);">
+                                <strong>Current:</strong> <span id="currentAdaVoiceDisplay">Eve (British accent)</span>
+                            </p>
+                            <p style="margin-top: 4px; font-size: 11px; color: var(--text-secondary); font-style: italic;">
+                                Tip: Different voices have different natural speaking speeds. Try "Ara" for a faster pace.
+                            </p>
+                        </div>
+
+                        <!-- Persona Parameters -->
+                        <div style="margin-top: var(--spacing-md);">
+                            <h4 style="font-size: 13px; margin-bottom: var(--spacing-xs);">
+                                <i data-lucide="sliders" style="width: 14px; height: 14px;"></i> Persona Parameters
+                            </h4>
+                            
+                            <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: var(--spacing-sm); margin-top: var(--spacing-xs);">
+                                <!-- Speech Speed - DISABLED: Causes pitch issues -->
+                                <div class="form-group" style="opacity: 0.5;">
+                                    <label for="adaSpeechSpeed" style="display: block; margin-bottom: 4px; font-size: 12px; font-weight: 500;">
+                                        Speech Speed (Not Available)
+                                    </label>
+                                    <input type="range" id="adaSpeechSpeed" min="0.7" max="1.5" step="0.05" value="1.0" style="width: 100%;" disabled>
+                                    <div style="display: flex; justify-content: space-between; font-size: 11px; color: var(--text-secondary); margin-top: 4px;">
+                                        <span>Slow (0.7x)</span>
+                                        <span id="adaSpeechSpeedValue">1.0x</span>
+                                        <span>Fast (1.5x)</span>
+                                    </div>
+                                    <p style="margin-top: 4px; font-size: 10px; color: var(--text-secondary); font-style: italic;">
+                                        Speed adjustment temporarily disabled - causes pitch distortion. Try different voices for natural speed variation.
+                                    </p>
+                                </div>
+
+                                <!-- Response Style -->
+                                <div class="form-group">
+                                    <label for="adaResponseStyle" style="display: block; margin-bottom: 4px; font-size: 12px; font-weight: 500;">
+                                        Response Style
+                                    </label>
+                                    <select id="adaResponseStyle" class="select-input" style="width: 100%; font-size: 13px; padding: 6px 8px;">
+                                        <option value="conversational" selected>Conversational</option>
+                                        <option value="professional">Professional</option>
+                                        <option value="casual">Casual</option>
+                                        <option value="analytical">Analytical</option>
+                                        <option value="enthusiastic">Enthusiastic</option>
+                                    </select>
+                                </div>
+
+                                <!-- Formality Level -->
+                                <div class="form-group">
+                                    <label for="adaFormality" style="display: block; margin-bottom: 4px; font-size: 12px; font-weight: 500;">
+                                        Formality Level
+                                    </label>
+                                    <input type="range" id="adaFormality" min="1" max="5" step="1" value="3" style="width: 100%;">
+                                    <div style="display: flex; justify-content: space-between; font-size: 11px; color: var(--text-secondary); margin-top: 4px;">
+                                        <span>Casual</span>
+                                        <span id="adaFormalityValue">Moderate</span>
+                                        <span>Formal</span>
+                                    </div>
+                                </div>
+
+                                <!-- Detail Level -->
+                                <div class="form-group">
+                                    <label for="adaDetailLevel" style="display: block; margin-bottom: 4px; font-size: 12px; font-weight: 500;">
+                                        Detail Level
+                                    </label>
+                                    <input type="range" id="adaDetailLevel" min="1" max="5" step="1" value="3" style="width: 100%;">
+                                    <div style="display: flex; justify-content: space-between; font-size: 11px; color: var(--text-secondary); margin-top: 4px;">
+                                        <span>Brief</span>
+                                        <span id="adaDetailLevelValue">Moderate</span>
+                                        <span>Detailed</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Conversation Parameters Info -->
+                        <div style="margin-top: var(--spacing-md); padding: var(--spacing-sm); background: rgba(0, 102, 204, 0.05); border-radius: var(--radius); font-size: 11px; color: var(--text-secondary);">
+                            <strong>Note:</strong> Speech speed affects audio playback rate. Other parameters influence Ada's response style and are configured via system prompts in Agent Settings.
+                        </div>
+                        
+                        <div style="margin-top: var(--spacing-md); display: flex; gap: var(--spacing-sm); justify-content: flex-end;">
+                            <button class="btn btn-secondary" onclick="app.resetAdaSettings()" style="padding: 8px 16px; font-size: 13px;">
+                                <i data-lucide="refresh-cw" style="width: 14px; height: 14px;"></i> Reset to Defaults
+                            </button>
+                            <button class="btn btn-primary" onclick="app.saveAdaSettings()" style="padding: 8px 16px; font-size: 13px;">
+                                <i data-lucide="save" style="width: 14px; height: 14px;"></i> Save Settings
+                            </button>
+                        </div>
                     </div>
                 </div>
                 
@@ -4109,6 +4157,7 @@
 
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
+    <script src="https://cdn.socket.io/4.8.3/socket.io.min.js"></script>
     <script>
         // Register zoom plugin after Chart.js loads
         if (typeof Chart !== 'undefined' && typeof zoomPlugin !== 'undefined') {
@@ -4116,8 +4165,20 @@
         }
     </script>
     <script src="/js/grok-voice-service.js"></script>
+    <script src="/js/grok-voice-socketio-service.js"></script>
+    <script src="/js/ada-floating-panels.js"></script>
+    <!-- Ada Input System - Modular Architecture -->
+    <script src="/js/ada/context/ContextBuilder.js"></script>
+    <script src="/js/ada/voice/VoiceInputHandler.js"></script>
+    <script src="/js/ada/voice/VoiceOutputHandler.js"></script>
+    <script src="/js/ada/sensors/ClickSensor.js"></script>
+    <script src="/js/ada/sensors/TypeSensor.js"></script>
+    <script src="/js/ada/sensors/VoiceSensor.js"></script>
+    <script src="/js/ada/handlers/UnifiedInputHandler.js"></script>
+    <script src="/js/ada/AdaInputSystem.js"></script>
     <!-- Enhanced Agent System (additive, feature-flagged, disabled by default) -->
     <script src="/js/agent-enhanced/loader.js"></script>
+    <script src="/js/agent/discourse/DiscourseGraphBuilder.js"></script>
     <script src="/js/app.js"></script>
     <script>
         // Initialize Lucide icons
@@ -4161,52 +4222,63 @@
 
     <!-- Floating Desktop Agent Window -->
     <div id="aiAgentWindow" class="floating-agent-window" style="display: none;">
-        <!-- Agent Header -->
+        <!-- Agent Header - Terminal Style -->
         <div class="agent-header" id="agentHeader">
+            <!-- Left: Icon + Title -->
             <div class="agent-header-left">
-                <i data-lucide="bot" style="width: 20px; height: 20px; color: var(--primary-color);"></i>
-                <div style="display: flex; flex-direction: column; gap: 2px;">
-                    <span class="agent-title">Desktop Agent</span>
-                    <span id="agentContextBadge" class="agent-context-badge" style="font-size: 10px; color: var(--text-secondary); font-weight: 400;">
-                        Dashboard
-                    </span>
+                <i data-lucide="bot" style="width: 18px; height: 18px; color: var(--text-primary);"></i>
+                <span class="agent-title" style="font-size: 16px; font-weight: 600; color: var(--text-primary);">Ada - Space Analyst</span>
+            </div>
+            <!-- Middle: Context Badge -->
+            <div style="flex: 1; display: flex; justify-content: center; max-width: 300px; margin: 0 auto;">
+                <div id="agentContextBadge" class="agent-context-badge" style="font-size: 11px; color: var(--text-secondary); font-family: 'Courier New', monospace; white-space: nowrap; text-align: center;">
+                    Dashboard
                 </div>
             </div>
+            <!-- Right: Controls -->
             <div class="agent-header-right">
-                <button class="icon-button agent-header-btn" id="agentVoiceInputToggleBtn" title="Voice Input: OFF (Click to enable microphone)">
-                    <i data-lucide="mic-off" id="agentVoiceInputToggleIcon"></i>
+                <!-- Input Controls Group -->
+                <div style="display: flex; gap: 4px; align-items: center; padding-right: 8px; border-right: 1px solid var(--border-color);">
+                    <button class="icon-button agent-header-btn" id="agentClickToggleBtn" title="Disable Clicks: OFF (Click to disable click-to-chat)" style="padding: 2px; opacity: 0.6; transition: opacity 0.2s; width: 20px; height: 20px;">
+                        <i data-lucide="mouse-pointer" id="agentClickToggleIcon" style="width: 12px; height: 12px;"></i>
+                    </button>
+                    <button class="icon-button agent-header-btn" id="agentVoiceInputToggleBtn" title="Mute User: OFF (Click to disable microphone)" style="padding: 2px; opacity: 0.6; transition: opacity 0.2s; width: 20px; height: 20px;">
+                        <i data-lucide="mic-off" id="agentVoiceInputToggleIcon" style="width: 12px; height: 12px;"></i>
+                    </button>
+                </div>
+                <!-- Output Controls Group -->
+                <div style="display: flex; gap: 4px; align-items: center; padding-left: 8px;">
+                    <button class="icon-button agent-header-btn" id="agentVoiceToggleBtn" title="Mute Ada: OFF (Click to disable Ada's voice)" style="padding: 2px; opacity: 0.6; transition: opacity 0.2s; width: 20px; height: 20px;">
+                        <i data-lucide="volume-x" id="agentVoiceToggleIcon" style="width: 12px; height: 12px;"></i>
+                    </button>
+                </div>
+                <button class="icon-button agent-header-btn" id="agentCommentaryToggleBtn" title="Toggle Context Commentary" style="padding: 2px; opacity: 0.6; transition: opacity 0.2s; width: 20px; height: 20px;">
+                    <i data-lucide="message-square" style="width: 12px; height: 12px;"></i>
                 </button>
-                <button class="icon-button agent-header-btn" id="agentVoiceToggleBtn" title="Voice Output: OFF (Click to enable audio)">
-                    <i data-lucide="volume-x" id="agentVoiceToggleIcon"></i>
+                <button class="icon-button agent-header-btn" id="agentReportBtn" title="Generate Conversation Report" style="padding: 2px; opacity: 0.6; transition: opacity 0.2s; width: 20px; height: 20px;">
+                    <i data-lucide="file-text" style="width: 12px; height: 12px;"></i>
                 </button>
-                <button class="icon-button agent-header-btn" id="agentCommentaryToggleBtn" title="Toggle Context Commentary">
-                    <i data-lucide="message-square"></i>
+                <button class="icon-button agent-header-btn" id="agentSettingsBtn" title="Agent Settings" style="padding: 2px; opacity: 0.6; transition: opacity 0.2s; width: 20px; height: 20px;">
+                    <i data-lucide="settings" style="width: 12px; height: 12px;"></i>
                 </button>
-                <button class="icon-button agent-header-btn" id="agentSettingsBtn" title="Agent Settings">
-                    <i data-lucide="settings"></i>
+                <button class="icon-button agent-header-btn" id="agentCollapseBtn" title="Collapse" style="padding: 2px; opacity: 0.6; transition: opacity 0.2s; width: 20px; height: 20px;">
+                    <i data-lucide="chevron-down" style="width: 12px; height: 12px;"></i>
                 </button>
-                <button class="icon-button agent-header-btn" id="agentCollapseBtn" title="Collapse">
-                    <i data-lucide="chevron-down"></i>
-                </button>
-                <button class="icon-button agent-header-btn" id="agentCloseBtn" title="Close">
-                    <i data-lucide="x"></i>
+                <button class="icon-button agent-header-btn" id="agentCloseBtn" title="Close" style="padding: 2px; opacity: 0.6; transition: opacity 0.2s; width: 20px; height: 20px;">
+                    <i data-lucide="x" style="width: 12px; height: 12px;"></i>
                 </button>
             </div>
         </div>
 
         <!-- Agent Content (collapsible) -->
         <div class="agent-content" id="agentContent">
-            <!-- Chat Messages Area -->
+            <!-- Chat Messages Area (can be collapsed) -->
             <div class="agent-chat-messages" id="agentChatMessages">
-                <div class="agent-message agent-message-system">
-                    <div class="message-content">
-                        <p>Hello! I'm your Desktop Agent. I can help you analyze SpaceX valuation data, answer questions, and provide insights. How can I assist you today?</p>
-                    </div>
-                </div>
+                <!-- Messages will be dynamically added here -->
             </div>
 
-            <!-- Chat Input Area -->
-            <div class="agent-chat-input-container">
+            <!-- Chat Input Area (ALWAYS VISIBLE - never collapsed) -->
+            <div class="agent-chat-input-container" style="display: flex;">
                 <textarea 
                     id="agentChatInput" 
                     class="agent-chat-input" 
@@ -4276,6 +4348,20 @@
 
                 <!-- Model Configuration Tab -->
                 <div id="agentSettingsTab-model-config" class="agent-settings-tab-content" style="display: none;">
+                    <!-- Feature Flags -->
+                    <div class="section">
+                        <h3>Feature Flags</h3>
+                        <div style="margin-bottom: var(--spacing-md);">
+                            <label style="display: flex; align-items: center; gap: var(--spacing-sm); cursor: pointer;">
+                                <input type="checkbox" id="useRelationshipDetectionToggle" style="width: 18px; height: 18px; cursor: pointer;" onchange="app.setUseRelationshipDetection(this.checked)">
+                                <span>Enable Relationship Detection</span>
+                            </label>
+                            <p class="info-text" style="margin-top: var(--spacing-xs); margin-left: 26px; font-size: 0.9em; color: var(--text-secondary);">
+                                When enabled, Ada analyzes conversation history to detect relationships between messages and provide context-aware responses.
+                            </p>
+                        </div>
+                    </div>
+                    
                     <!-- AI Model Selection -->
                     <div class="section">
                         <h3>AI Model Selection</h3>

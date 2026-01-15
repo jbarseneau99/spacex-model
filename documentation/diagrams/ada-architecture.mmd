@@ -1,0 +1,88 @@
+graph TB
+    subgraph "Frontend - Browser"
+        UI[User Interface]
+        VoiceRec[Voice Recognition<br/>Web Speech API]
+        VoiceToggle[Voice Output Toggle]
+        Settings[Agent Settings Modal]
+    end
+    
+    subgraph "Frontend Services"
+        AppJS[app.js<br/>Main Application]
+        SocketIOService[GrokVoiceSocketIOService<br/>Socket.io Client]
+        AudioCtx[AudioContext<br/>24kHz PCM]
+    end
+    
+    subgraph "Backend - Node.js Server"
+        SocketIOServer[Socket.io Server<br/>/api/analyst/socket.io]
+        GrokProxy[GrokVoiceWebSocketProxy<br/>Singleton]
+        ChatAPI[/api/agent/chat<br/>Text Chat]
+        ChatEnhanced[/api/agent/chat-enhanced<br/>With Relationship Detection]
+    end
+    
+    subgraph "Agent Intelligence Layer"
+        RelationshipDet[RelationshipDetector<br/>9 Categories]
+        ResponseBuilder[ResponseBuilder<br/>Context-Aware Responses]
+        AgentComm[AgentCommunicationSystem<br/>Orchestrator]
+        PermanentMem[PermanentMemory<br/>Redis + MongoDB]
+        EmbeddingSvc[EmbeddingService<br/>OpenAI Embeddings]
+    end
+    
+    subgraph "External APIs"
+        GrokVoice[Grok Voice API<br/>wss://api.x.ai/v1/realtime]
+        Claude[Anthropic Claude API<br/>Text Generation]
+        OpenAI[OpenAI API<br/>Embeddings + GPT]
+    end
+    
+    %% User Interactions
+    UI -->|User Types Message| AppJS
+    UI -->|Clicks Voice Toggle| VoiceToggle
+    VoiceToggle -->|Sets Flag| AppJS
+    VoiceRec -->|Speech → Text| AppJS
+    Settings -->|Configures Flags| AppJS
+    
+    %% Frontend Flow
+    AppJS -->|sendAgentMessage| ChatEnhanced
+    AppJS -->|speakText| SocketIOService
+    SocketIOService -->|grok-voice:text| SocketIOServer
+    SocketIOService -->|Receives Audio| AudioCtx
+    AudioCtx -->|Plays Sound| UI
+    
+    %% Backend Flow
+    SocketIOServer -->|Forwards Messages| GrokProxy
+    GrokProxy -->|Raw WebSocket| GrokVoice
+    GrokVoice -->|Audio Chunks| GrokProxy
+    GrokProxy -->|Forwards Audio| SocketIOServer
+    SocketIOServer -->|grok-voice:audio| SocketIOService
+    
+    %% Chat Flow
+    ChatEnhanced -->|useRelationshipDetection=true| AgentComm
+    AgentComm -->|Detects Relationship| RelationshipDet
+    RelationshipDet -->|Uses Embeddings| EmbeddingSvc
+    EmbeddingSvc -->|API Call| OpenAI
+    AgentComm -->|Builds Response| ResponseBuilder
+    ResponseBuilder -->|Loads History| PermanentMem
+    PermanentMem -->|Stores/Retrieves| Redis[(Redis)]
+    PermanentMem -->|Persists| MongoDB[(MongoDB)]
+    AgentComm -->|Generates Text| Claude
+    ChatEnhanced -->|Returns Response| AppJS
+    
+    %% Session Configuration
+    SocketIOServer -->|grok-voice:connect| GrokProxy
+    GrokProxy -->|session.update| GrokVoice
+    GrokVoice -->|session.updated| GrokProxy
+    GrokProxy -->|grok-voice:connected| SocketIOServer
+    
+    %% Styling
+    classDef frontend fill:#e1f5ff,stroke:#01579b,stroke-width:2px
+    classDef backend fill:#fff3e0,stroke:#e65100,stroke-width:2px
+    classDef agent fill:#f3e5f5,stroke:#4a148c,stroke-width:2px
+    classDef api fill:#e8f5e9,stroke:#1b5e20,stroke-width:2px
+    classDef storage fill:#fce4ec,stroke:#880e4f,stroke-width:2px
+    
+    class UI,VoiceRec,VoiceToggle,Settings,AppJS,SocketIOService,AudioCtx frontend
+    class SocketIOServer,GrokProxy,ChatAPI,ChatEnhanced backend
+    class RelationshipDet,ResponseBuilder,AgentComm,PermanentMem,EmbeddingSvc agent
+    class GrokVoice,Claude,OpenAI api
+    class Redis,MongoDB storage
+
+

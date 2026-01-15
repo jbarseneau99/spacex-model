@@ -1,6 +1,16 @@
 /**
  * Grok Voice Service - Bidirectional Voice Conversation with Grok Voice API
  * Implements WebSocket-based real-time voice streaming
+ * 
+ * ⚠️ DEPRECATED: This file is deprecated. Use grok-voice-socketio-service.js instead.
+ * 
+ * IMPORTANT VERBATIM READING NOTE (for reference):
+ * - Keep session.update instructions MINIMAL (just identity + voice)
+ * - Do NOT include complex verbatim instructions
+ * - Do NOT send session.update before each text message (causes unwanted responses)
+ * - Verbatim reading is achieved via prefix "Read this aloud exactly as written:" in text
+ * - See server.js socket.on('grok-voice:text') for current verbatim implementation
+ * - See documentation/VERBATIM_READING_SOLUTION.md for details
  */
 
 class GrokVoiceService {
@@ -228,6 +238,15 @@ class GrokVoiceService {
     /**
      * Send session configuration to Grok
      * Returns a promise that resolves when session.updated is received
+     * 
+     * IMPORTANT VERBATIM READING NOTE:
+     * - This file (grok-voice-service.js) is DEPRECATED - use grok-voice-socketio-service.js instead
+     * - For verbatim reading: Keep instructions MINIMAL (just identity + voice)
+     * - Do NOT include complex verbatim instructions here
+     * - Do NOT send session.update before each text message (causes unwanted responses)
+     * - Verbatim reading is achieved via prefix "Read this aloud exactly as written:" in text
+     * - See server.js socket.on('grok-voice:text') for current verbatim implementation
+     * - See documentation/VERBATIM_READING_SOLUTION.md for details
      */
     sendSessionConfig() {
         return new Promise((resolve, reject) => {
@@ -239,11 +258,12 @@ class GrokVoiceService {
             
             // Official format from xAI docs
             // Voice names should be lowercase: 'ara', 'rex', 'sal', 'eve', 'leo'
+            // Ada uses 'eve' voice (British accent) - she is the Mach33 Assistant
             const config = {
                 type: 'session.update',
                 session: {
-                    instructions: 'You are a helpful voice assistant named Ara. Respond naturally and conversationally.',
-                    voice: 'ara', // lowercase: ara, rex, sal, eve, or leo
+                    instructions: 'You are Ada, the Mach33 Assistant. You are a helpful voice assistant with a British accent. You are speaking with Aaron Burnett.',
+                    voice: 'eve', // Ada uses Eve voice (British accent)
                     turn_detection: {
                         type: 'server_vad' // Server-side voice activity detection
                     },
@@ -264,7 +284,7 @@ class GrokVoiceService {
                 }
             };
             
-            console.log('📤 Sending session config with voice: ara');
+            console.log('📤 Sending session config with voice: eve (Ada - Mach33 Assistant)');
             console.log('📤 Full config:', JSON.stringify(config, null, 2));
             
             // Set up one-time listener for session.updated
@@ -273,7 +293,7 @@ class GrokVoiceService {
             const timeout = setTimeout(() => {
                 console.warn('⚠️ Session update timeout - session.updated not received within 5 seconds');
                 console.warn('⚠️ This may be normal - Grok may not always send session.updated');
-                console.warn('⚠️ Proceeding anyway since we sent voice: "ara" in config');
+                console.warn('⚠️ Proceeding anyway since we sent voice: "eve" (Ada) in config');
                 this.pendingSessionConfig = null;
                 // Resolve instead of reject - we'll trust that the config was accepted
                 resolve();
@@ -407,6 +427,7 @@ class GrokVoiceService {
                 type: 'response.create',
                 response: {
                     modalities: ['audio', 'text'] // Request both audio and text response
+                    // NO instructions field - Grok reads instructions as text! Only use session.update for instructions
                 }
             };
             
@@ -488,7 +509,7 @@ class GrokVoiceService {
                             this.sessionId = message.session_id;
                             console.log('✅ Session created:', this.sessionId);
                             console.log('📋 Full session.created message:', JSON.stringify(message, null, 2));
-                            // Re-send session config to ensure Ara voice is set
+                            // Re-send session config to ensure Ada (Eve voice) is set
                             setTimeout(() => {
                                 this.sendSessionConfig();
                             }, 100);
@@ -510,11 +531,11 @@ class GrokVoiceService {
                             if (message.session) {
                                 const voice = message.session.voice || 'unknown';
                                 console.log('✅ Voice confirmed in session:', voice);
-                                if (voice && voice.toLowerCase() !== 'ara') {
-                                    console.warn('⚠️ WARNING: Voice in response is not Ara! Current voice:', voice);
-                                    console.warn('⚠️ However, we sent voice: "ara" in config, so Ara should be active');
+                                if (voice && voice.toLowerCase() !== 'eve') {
+                                    console.warn('⚠️ WARNING: Voice in response is not Eve (Ada)! Current voice:', voice);
+                                    console.warn('⚠️ However, we sent voice: "eve" in config, so Ada should be active');
                                 } else {
-                                    console.log('✅ Ara voice confirmed active!');
+                                    console.log('✅ Ada (Eve voice) confirmed active!');
                                 }
                             } else {
                                 // No session data in response - this is normal, Grok doesn't always echo back
